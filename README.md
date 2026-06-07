@@ -1,0 +1,87 @@
+# Prompt-to-PCB Generator MVP
+
+A React-based prototype that turns electronics prompts into an AI-generated structured circuit model, validates it, generates a SPICE deck, runs Ngspice for waveform data, and exports a KiCad-compatible netlist.
+
+## Run
+
+```bash
+npm install
+npm run dev
+```
+
+`npm run dev` starts both the React frontend and the local API server.
+
+Frontend:
+
+```text
+http://127.0.0.1:5173
+```
+
+API:
+
+```text
+http://127.0.0.1:8787
+```
+
+## Ollama setup
+
+Copy `.env.example` to `.env.local` and adjust the model if needed:
+
+```env
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2:latest
+OLLAMA_API_KEY=
+```
+
+Local Ollama usually does not require an API key. The key exists for hosted Ollama-compatible APIs and is intentionally read only by the Node API server, never by browser code. Real `.env` files are ignored by git.
+
+Start Ollama separately before generating AI circuits:
+
+```bash
+ollama serve
+ollama pull llama3.2
+```
+
+If Ollama is not reachable or returns invalid JSON, generation fails with a visible error. The app does not substitute a local hardcoded circuit.
+
+## Ngspice simulation
+
+The AI generates the circuit model, but waveform simulation is handled by the local program through Ngspice.
+
+Install Ngspice and make sure `ngspice` is available on PATH. After generating a circuit, open the Simulation tab and click `Run simulation`.
+
+The backend writes the current SPICE deck to a temporary folder, runs:
+
+```bash
+ngspice -b simulation.cir
+```
+
+Then it parses the waveform output and returns chart-ready data to the frontend. If Ngspice is missing or the generated SPICE deck cannot be simulated, the UI shows the simulator error without replacing the AI-generated circuit.
+
+## AI circuit model
+
+The API asks Ollama for a JSON circuit object with:
+
+- `title`
+- `type`
+- `supplyVoltage`
+- `nodes`
+- `components`
+- `notes`
+
+Each component includes `ref`, `kind`, `value`, `nodes`, and `footprint`. The app validates this model and uses it to generate SPICE and KiCad netlist exports.
+
+## Exported files
+
+- `generated.cir`: Ngspice-ready SPICE deck
+- `generated.net`: KiCad XML netlist
+- `circuit.json`: structured intermediate circuit model
+- `README-export.json`: export manifest and instructions
+
+The MVP now supports waveform simulation from the generated SPICE deck, but KiCad remains the place to inspect footprints, edit the schematic, place parts, route the board, and run design-rule checks.
+
+## Test
+
+```bash
+npm test
+```
