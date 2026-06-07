@@ -61,6 +61,313 @@ const regulatorOutputNode = (nodes = []) => {
   return namedOutput || nodes.at(-1) || 'VOUT';
 };
 
+const symbolTypeByKind = {
+  voltage_source: 'voltage_source',
+  signal_source: 'voltage_source',
+  resistor: 'resistor',
+  load: 'resistor',
+  capacitor: 'capacitor',
+  inductor: 'inductor',
+  diode: 'diode',
+  led: 'led',
+  bjt_npn: 'bjt_npn',
+  bjt_pnp: 'bjt_pnp',
+  mosfet_n: 'generic',
+  mosfet_p: 'generic',
+  opamp: 'generic',
+  regulator: 'generic',
+};
+
+const isOutputNode = (node) => /(^|_)(v?out|out|load|filtered)(_|$)/i.test(node);
+const isSourceKind = (kind) => kind === 'voltage_source' || kind === 'signal_source';
+
+const orderNonGroundNets = (circuit) => {
+  const all = [...new Set(circuit.components.flatMap((part) => part.nodes.map(String)))].filter((node) => node !== '0');
+  const sourceNodes = circuit.components
+    .filter((part) => isSourceKind(part.kind))
+    .flatMap((part) => part.nodes)
+    .filter((node) => node !== '0');
+  return [
+    ...new Set([
+      ...sourceNodes,
+      ...all.filter((node) => !sourceNodes.includes(node) && !isOutputNode(node)),
+      ...all.filter((node) => !sourceNodes.includes(node) && isOutputNode(node)),
+    ]),
+  ];
+};
+
+const textWidth = (text) => Math.max(58, Math.min(120, String(text).length * 8 + 24));
+
+const pinPoint = (component, pinIndex, node, netPosition) => {
+  if (component.symbolType === 'bjt_npn' || component.symbolType === 'bjt_pnp') {
+    const collectorY = component.y - component.height / 2 + 18;
+    const emitterY = component.y + component.height / 2 - 18;
+    if (pinIndex === 1) return { x: component.x + component.width / 2, y: collectorY };
+    if (pinIndex === 2) return { x: component.x - component.width / 2, y: component.y };
+    if (pinIndex === 3) return { x: component.x + component.width / 2, y: emitterY };
+  }
+
+  if (component.pinCount <= 2) {
+    if (component.orientation === 'vertical') {
+      const isGround = node === '0';
+      return {
+        x: component.x,
+        y: isGround ? component.y + component.height / 2 : component.y - component.height / 2,
+      };
+    }
+
+    const netX = netPosition?.x ?? component.x;
+    return {
+      x: netX < component.x ? component.x - component.width / 2 : component.x + component.width / 2,
+      y: component.y,
+    };
+  }
+
+  const side = pinIndex % 2 === 1 ? -1 : 1;
+  const row = Math.floor((pinIndex - 1) / 2);
+  const rows = Math.ceil(component.pinCount / 2);
+  return {
+    x: component.x + side * (component.width / 2),
+    y: component.y - ((rows - 1) * 14) / 2 + row * 28,
+  };
+};
+
+export const buildCircuitDiagram = (circuit) => {
+  const signalY = 120;
+  const groundY = 390;
+  const netOrder = orderNonGroundNets(circuit);
+  const width = Math.max(760, 220 + Math.max(1, netOrder.length - 1) * 260);
+  const netPositions = new Map(
+    netOrder.map((name, index) => [
+      name,
+      {
+        x: 140 + index * Math.max(190, Math.min(260, (width - 280) / Math.max(1, netOrder.length - 1))),
+        y: signalY,
+      },
+    ]),
+  );
+  const shuntCounts = new Map();
+  const genericCounts = new Map();
+
+  const components = circuit.components.map((part, index) => {
+    const nodes = part.nodes.map(String);
+    const nonGroundNodes = nodes.filter((node) => node !== '0');
+    const hasGround = nodes.includes('0');
+    const isTwoPin = nodes.length <= 2;
+    let orientation = 'horizontal';
+    let x = 160 + (index % 3) * 210;
+    let y = signalY + 120 + Math.floor(index / 3) * 118;
+    let widthForPart = 108;
+    let heightForPart = 58;
+
+    if (isTwoPin && isSourceKind(part.kind) && hasGround && nonGroundNodes.length) {
+      orientation = 'vertical';
+      x = netPositions.get(nonGroundNodes[0])?.x ?? 140;
+      y = (signalY + groundY) / 2;
+      heightForPart = 112;
+    } else if (isTwoPin && hasGround && nonGroundNodes.length) {
+      orientation = 'vertical';
+      const node = nonGroundNodes[0];
+      const offset = shuntCounts.get(node) ?? 0;
+      shuntCounts.set(node, offset + 1);
+      x = (netPositions.get(node)?.x ?? 420) + offset * 118;
+      y = (signalY + groundY) / 2;
+      heightForPart = 112;
+    } else if (isTwoPin && nonGroundNodes.length === 2) {
+      const first = netPositions.get(nodes[0]) ?? { x: 180, y: signalY };
+      const second = netPositions.get(nodes[1]) ?? { x: 480, y: signalY };
+      x = (first.x + second.x) / 2;
+      y = signalY;
+      widthForPart = Math.max(108, Math.abs(second.x - first.x) - 70);
+    } else {
+      const anchor = nonGroundNodes[0] || nodes[0] || `N${index + 1}`;
+      const offset = genericCounts.get(anchor) ?? 0;
+      genericCounts.set(anchor, offset + 1);
+      x = (netPositions.get(anchor)?.x ?? 280) + offset * 128;
+      y = signalY + 155 + offset * 92;
+      widthForPart = 128;
+      heightForPart = 72;
+    }
+
+    const symbolType = symbolTypeByKind[part.kind] || 'generic';
+    if (symbolType === 'bjt_npn' || symbolType === 'bjt_pnp') {
+      widthForPart = 118;
+      heightForPart = 100;
+    }
+
+    const component = {
+      ref: part.ref,
+      kind: part.kind,
+      value: part.value,
+      nodes,
+      symbolType,
+      orientation,
+      x,
+      y,
+      width: widthForPart,
+      height: heightForPart,
+      pinCount: Math.max(nodes.length, 2),
+      order: index,
+    };
+
+    return {
+      ...component,
+      pins: nodes.map((node, pinIndex) => ({
+        node,
+        pinIndex: pinIndex + 1,
+        ...pinPoint(component, pinIndex + 1, node, netPositions.get(node)),
+      })),
+    };
+  });
+
+  const netNames = [...new Set(circuit.components.flatMap((part) => part.nodes))];
+  const height = Math.max(500, ...components.map((component) => component.y + component.height / 2 + 80));
+  const nets = netNames.map((name, index) => {
+    const connections = components.flatMap((component) =>
+      component.pins
+        .filter((pin) => pin.node === name)
+        .map((pin) => ({ ref: component.ref, pin: pin.pinIndex, x: pin.x, y: pin.y })),
+    );
+    const averageX = connections.reduce((sum, item) => sum + item.x, 0) / Math.max(connections.length, 1);
+    const isGround = name === '0';
+    const position = isGround ? { x: Math.max(95, Math.min(width - 95, averageX)), y: groundY } : netPositions.get(name) ?? { x: averageX, y: signalY };
+    const labelWidth = textWidth(name);
+    const labelX = Math.max(10, Math.min(width - labelWidth - 10, position.x - labelWidth / 2));
+    const labelY = isGround ? position.y + 24 : position.y - 42 - (index % 2) * 24;
+
+    return { name, x: position.x, y: position.y, labelX, labelY, labelWidth, connections };
+  });
+
+  const netByName = new Map(nets.map((net) => [net.name, net]));
+  const wires = components.flatMap((component) =>
+    component.pins.map((pin) => {
+      const net = netByName.get(pin.node);
+      return {
+        ref: component.ref,
+        pin: pin.pinIndex,
+        node: pin.node,
+        points: [
+          { x: pin.x, y: pin.y },
+          { x: pin.x, y: net.y },
+          { x: net.x, y: net.y },
+        ],
+      };
+    }),
+  );
+
+  return { title: circuit.title, width, height, components, nets, wires };
+};
+
+const escapeXml = (value) =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+const svgPolyline = (points) => points.map((point) => `${point.x},${point.y}`).join(' ');
+
+const diagramTerminalPoint = (diagram, terminal) => {
+  const component = diagram.components.find((item) => item.ref === terminal.ref);
+  const pin = component?.pins.find((item) => item.pinIndex === terminal.pin);
+  return pin || { x: 0, y: 0 };
+};
+
+const diagramWirePoints = (diagram, wire) => {
+  if (wire.manual) {
+    const from = diagramTerminalPoint(diagram, wire.from);
+    const to = diagramTerminalPoint(diagram, wire.to);
+    if (wire.offset) {
+      return [
+        from,
+        { x: (from.x + to.x) / 2 + wire.offset.x, y: (from.y + to.y) / 2 + wire.offset.y },
+        to,
+      ];
+    }
+    return [from, to];
+  }
+
+  const component = diagram.components.find((item) => item.ref === wire.ref);
+  const pin = component?.pins.find((item) => item.pinIndex === wire.pin);
+  const net = diagram.nets.find((item) => item.name === wire.node);
+  if (!pin || !net) return wire.points;
+  const offset = wire.offset || { x: 0, y: 0 };
+  return [
+    { x: pin.x, y: pin.y },
+    { x: pin.x + offset.x, y: net.y + offset.y },
+    { x: net.x, y: net.y },
+  ];
+};
+
+const renderSymbolSvg = (component) => {
+  const { x, y, width, height, symbolType, orientation } = component;
+  const left = x - width / 2;
+  const right = x + width / 2;
+  const top = y - height / 2;
+  const bottom = y + height / 2;
+  if (orientation === 'vertical') {
+    if (symbolType === 'resistor') {
+      return `<polyline class="diagram-symbol" points="${x},${top} ${x},${top + 18} ${x - 18},${top + 28} ${x + 18},${top + 44} ${x - 18},${top + 60} ${x + 18},${top + 76} ${x},${bottom - 18} ${x},${bottom}" />`;
+    }
+    if (symbolType === 'capacitor') {
+      return `<line class="diagram-symbol" x1="${x}" y1="${top}" x2="${x}" y2="${y - 14}" /><line class="diagram-symbol" x1="${x - 24}" y1="${y - 14}" x2="${x + 24}" y2="${y - 14}" /><line class="diagram-symbol" x1="${x - 24}" y1="${y + 14}" x2="${x + 24}" y2="${y + 14}" /><line class="diagram-symbol" x1="${x}" y1="${y + 14}" x2="${x}" y2="${bottom}" />`;
+    }
+    if (symbolType === 'diode' || symbolType === 'led') {
+      const ledMarks = symbolType === 'led' ? `<line class="diagram-symbol thin" x1="${x + 18}" y1="${y - 22}" x2="${x + 34}" y2="${y - 38}" /><line class="diagram-symbol thin" x1="${x + 30}" y1="${y - 16}" x2="${x + 46}" y2="${y - 32}" />` : '';
+      return `<line class="diagram-symbol" x1="${x}" y1="${top}" x2="${x}" y2="${y - 20}" /><polygon class="diagram-fill" points="${x - 18},${y - 20} ${x + 18},${y - 20} ${x},${y + 12}" /><line class="diagram-symbol" x1="${x - 20}" y1="${y + 14}" x2="${x + 20}" y2="${y + 14}" /><line class="diagram-symbol" x1="${x}" y1="${y + 14}" x2="${x}" y2="${bottom}" />${ledMarks}`;
+    }
+    if (symbolType === 'voltage_source') {
+      return `<line class="diagram-symbol" x1="${x}" y1="${top}" x2="${x}" y2="${y - 24}" /><circle class="diagram-symbol" cx="${x}" cy="${y}" r="24" /><line class="diagram-symbol" x1="${x}" y1="${y + 24}" x2="${x}" y2="${bottom}" /><text class="diagram-small" x="${x}" y="${y - 8}" text-anchor="middle">+</text><text class="diagram-small" x="${x}" y="${y + 16}" text-anchor="middle">-</text>`;
+    }
+  }
+  if (symbolType === 'resistor') {
+    const bodyWidth = Math.min(96, Math.max(70, width - 36));
+    const bodyLeft = x - bodyWidth / 2;
+    const bodyRight = x + bodyWidth / 2;
+    const leadInset = bodyWidth / 6;
+    return `<line class="diagram-symbol" x1="${left}" y1="${y}" x2="${bodyLeft}" y2="${y}" /><polyline class="diagram-symbol" points="${bodyLeft},${y} ${bodyLeft + leadInset},${top + 16} ${bodyLeft + leadInset * 2},${bottom - 16} ${bodyLeft + leadInset * 3},${top + 16} ${bodyLeft + leadInset * 4},${bottom - 16} ${bodyLeft + leadInset * 5},${y} ${bodyRight},${y}" /><line class="diagram-symbol" x1="${bodyRight}" y1="${y}" x2="${right}" y2="${y}" />`;
+  }
+  if (symbolType === 'capacitor') {
+    return `<line class="diagram-symbol" x1="${left}" y1="${y}" x2="${x - 14}" y2="${y}" /><line class="diagram-symbol" x1="${x - 14}" y1="${top + 9}" x2="${x - 14}" y2="${bottom - 9}" /><line class="diagram-symbol" x1="${x + 14}" y1="${top + 9}" x2="${x + 14}" y2="${bottom - 9}" /><line class="diagram-symbol" x1="${x + 14}" y1="${y}" x2="${right}" y2="${y}" />`;
+  }
+  if (symbolType === 'inductor') {
+    return `<path class="diagram-symbol" d="M ${left} ${y} H ${left + 14} C ${left + 18} ${top + 8}, ${left + 34} ${top + 8}, ${left + 38} ${y} C ${left + 42} ${top + 8}, ${left + 58} ${top + 8}, ${left + 62} ${y} C ${left + 66} ${top + 8}, ${left + 82} ${top + 8}, ${left + 86} ${y} H ${right}" />`;
+  }
+  if (symbolType === 'diode' || symbolType === 'led') {
+    const ledMarks = symbolType === 'led' ? `<line class="diagram-symbol thin" x1="${x + 18}" y1="${top + 6}" x2="${x + 34}" y2="${top - 10}" /><line class="diagram-symbol thin" x1="${x + 30}" y1="${top + 12}" x2="${x + 46}" y2="${top - 4}" />` : '';
+    return `<line class="diagram-symbol" x1="${left}" y1="${y}" x2="${x - 20}" y2="${y}" /><polygon class="diagram-fill" points="${x - 20},${top + 10} ${x - 20},${bottom - 10} ${x + 12},${y}" /><line class="diagram-symbol" x1="${x + 14}" y1="${top + 8}" x2="${x + 14}" y2="${bottom - 8}" /><line class="diagram-symbol" x1="${x + 14}" y1="${y}" x2="${right}" y2="${y}" />${ledMarks}`;
+  }
+  if (symbolType === 'voltage_source') {
+    return `<line class="diagram-symbol" x1="${left}" y1="${y}" x2="${x - 24}" y2="${y}" /><circle class="diagram-symbol" cx="${x}" cy="${y}" r="24" /><line class="diagram-symbol" x1="${x + 24}" y1="${y}" x2="${right}" y2="${y}" /><text class="diagram-small" x="${x}" y="${y - 4}" text-anchor="middle">+</text><text class="diagram-small" x="${x}" y="${y + 16}" text-anchor="middle">-</text>`;
+  }
+  if (symbolType === 'bjt_npn' || symbolType === 'bjt_pnp') {
+    const collector = component.pins.find((pin) => pin.pinIndex === 1) || { x: right, y: top + 18 };
+    const base = component.pins.find((pin) => pin.pinIndex === 2) || { x: left, y };
+    const emitter = component.pins.find((pin) => pin.pinIndex === 3) || { x: right, y: bottom - 18 };
+    const radius = Math.min(width, height) / 2 - 12;
+    const baseX = x - 16;
+    const collectorJoin = { x: x + 10, y: y - 22 };
+    const emitterJoin = { x: x + 10, y: y + 22 };
+    const arrow = symbolType === 'bjt_npn'
+      ? `${emitter.x - 21},${emitter.y - 8} ${emitter.x - 5},${emitter.y} ${emitter.x - 21},${emitter.y + 8}`
+      : `${emitter.x - 5},${emitter.y - 8} ${emitter.x - 21},${emitter.y} ${emitter.x - 5},${emitter.y + 8}`;
+    return `<circle class="diagram-symbol" cx="${x}" cy="${y}" r="${radius}" /><line class="diagram-symbol" x1="${base.x}" y1="${base.y}" x2="${baseX}" y2="${base.y}" /><line class="diagram-symbol" x1="${baseX}" y1="${y - 28}" x2="${baseX}" y2="${y + 28}" /><line class="diagram-symbol" x1="${baseX}" y1="${y - 18}" x2="${collectorJoin.x}" y2="${collectorJoin.y}" /><line class="diagram-symbol" x1="${collectorJoin.x}" y1="${collectorJoin.y}" x2="${collector.x}" y2="${collector.y}" /><line class="diagram-symbol" x1="${baseX}" y1="${y + 18}" x2="${emitterJoin.x}" y2="${emitterJoin.y}" /><line class="diagram-symbol" x1="${emitterJoin.x}" y1="${emitterJoin.y}" x2="${emitter.x}" y2="${emitter.y}" /><polygon points="${arrow}" fill="#17201a" /><text class="diagram-small" x="${collector.x - 10}" y="${collector.y - 8}" text-anchor="middle">C</text><text class="diagram-small" x="${base.x + 10}" y="${base.y - 8}" text-anchor="middle">B</text><text class="diagram-small" x="${emitter.x - 10}" y="${emitter.y + 18}" text-anchor="middle">E</text>`;
+  }
+  return `<rect class="diagram-symbol" x="${left}" y="${top}" width="${width}" height="${height}" rx="6" /><text class="diagram-small" x="${x}" y="${y + 5}" text-anchor="middle">${escapeXml(component.kind.replaceAll('_', ' '))}</text>`;
+};
+
+export const toDiagramSvg = (diagram) => `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${diagram.width} ${diagram.height}" role="img">
+  <title>${escapeXml(diagram.title)}</title>
+  <style>
+    .diagram-bg{fill:#fafaf7}.diagram-wire,.diagram-symbol{fill:none;stroke:#17201a;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.diagram-wire{stroke:#617066;stroke-width:1.5}.diagram-fill{fill:#fff;stroke:#17201a;stroke-width:2}.diagram-node{fill:#23533a}.diagram-net{fill:#eef0ea;stroke:#b8beb5}.diagram-text{fill:#17201a;font:700 14px Inter,Arial,sans-serif}.diagram-small{fill:#425147;font:12px Inter,Arial,sans-serif}.thin{stroke-width:1.5}
+  </style>
+  <rect class="diagram-bg" width="${diagram.width}" height="${diagram.height}" rx="8" />
+  ${diagram.wires.map((wire) => `<polyline class="diagram-wire" points="${svgPolyline(diagramWirePoints(diagram, wire))}" />`).join('\n  ')}
+  ${diagram.nets.map((net) => `<g><circle class="diagram-node" cx="${net.x}" cy="${net.y}" r="4" /><rect class="diagram-net" x="${net.labelX}" y="${net.labelY}" width="${net.labelWidth}" height="26" rx="13" /><text class="diagram-small" x="${net.labelX + net.labelWidth / 2}" y="${net.labelY + 17}" text-anchor="middle">${escapeXml(net.name)}</text></g>`).join('\n  ')}
+  ${diagram.components.map((component) => `<g>${renderSymbolSvg(component)}<text class="diagram-text" x="${component.x}" y="${component.y - component.height / 2 - 12}" text-anchor="middle">${escapeXml(component.ref)}</text><text class="diagram-small" x="${component.x}" y="${component.y + component.height / 2 + 20}" text-anchor="middle">${escapeXml(component.value)}</text>${component.pins.map((pin) => `<text class="diagram-small" x="${pin.x}" y="${pin.y - 8}" text-anchor="middle">${pin.pinIndex}</text>`).join('')}</g>`).join('\n  ')}
+</svg>`;
+
 export const toSpice = (circuit) => {
   const lines = [`* ${circuit.title}`, '* Generated by Prompt-to-PCB Generator'];
   for (const part of circuit.components) {

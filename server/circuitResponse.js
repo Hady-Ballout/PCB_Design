@@ -1,5 +1,7 @@
 import {
+  buildCircuitDiagram,
   simulateCircuit,
+  toDiagramSvg,
   toKiCadNetlist,
   toSpice,
   validateCircuit,
@@ -42,10 +44,13 @@ export function normalizeAiCircuit(aiCircuit, prompt) {
 }
 
 export function buildCircuitResponse(circuit, intent, source) {
+  const diagram = buildCircuitDiagram(circuit);
   return {
     intent,
     circuit,
     validation: validateCircuit(circuit),
+    diagram,
+    diagramSvg: toDiagramSvg(diagram),
     spice: toSpice(circuit),
     kicadNetlist: toKiCadNetlist(circuit),
     simulation: simulateCircuit(circuit),

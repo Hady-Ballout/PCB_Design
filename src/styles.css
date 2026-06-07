@@ -43,6 +43,16 @@ button.primary {
   border-color: #23533a;
 }
 
+.text-button {
+  background: transparent;
+  border: 0;
+  color: #23533a;
+  font-weight: 700;
+  min-height: auto;
+  padding: 0;
+  text-decoration: underline;
+}
+
 .app-shell {
   min-height: 100vh;
   padding: 24px;
@@ -320,6 +330,54 @@ pre {
   font-weight: 700;
 }
 
+.simulation-ok .text-button {
+  margin-left: 6px;
+}
+
+.waveform-page-shell {
+  background: #f5f3ee;
+}
+
+.waveform-page {
+  display: grid;
+  gap: 18px;
+  margin: 0 auto;
+  max-width: 1280px;
+}
+
+.waveform-page-header,
+.waveform-page-summary {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.waveform-page-header {
+  background: #ffffff;
+  border: 1px solid #d8d9d2;
+  border-radius: 8px;
+  padding: 22px;
+}
+
+.waveform-page-panel {
+  min-height: calc(100vh - 160px);
+}
+
+.waveform-page-summary p,
+.empty-waveform-page p {
+  color: #617066;
+  margin-bottom: 0;
+}
+
+.waveform-page .waveform-card {
+  margin-top: 18px;
+}
+
+.waveform-page .waveform-card svg {
+  min-height: 460px;
+}
+
 .waveform-card {
   border: 1px solid #d8d9d2;
   border-radius: 8px;
@@ -433,6 +491,146 @@ pre {
   font-weight: 700;
 }
 
+.diagram-card {
+  border: 1px solid #d8d9d2;
+  border-radius: 8px;
+  margin-top: 18px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.diagram-editbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.diagram-editbar button {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.active-tool {
+  background: #e3f3e7;
+  border-color: #23533a;
+  color: #1d6332;
+}
+
+.diagram-card svg {
+  display: block;
+  min-width: 760px;
+  touch-action: none;
+  width: 100%;
+}
+
+.diagram-card svg.dragging {
+  cursor: grabbing;
+}
+
+.diagram-bg {
+  fill: #fafaf7;
+}
+
+.diagram-wire,
+.diagram-symbol {
+  fill: none;
+  stroke: #17201a;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.diagram-wire {
+  stroke: #617066;
+  stroke-width: 1.5;
+}
+
+.diagram-wire {
+  cursor: grab;
+  pointer-events: stroke;
+}
+
+.diagram-wire:hover,
+.diagram-wire.selected {
+  stroke: #23533a;
+  stroke-width: 4;
+}
+
+.diagram-fill {
+  fill: #ffffff;
+  stroke: #17201a;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.diagram-node {
+  fill: #23533a;
+}
+
+.diagram-net {
+  fill: #eef0ea;
+  stroke: #b8beb5;
+}
+
+.diagram-text {
+  fill: #17201a;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.diagram-small {
+  fill: #425147;
+  font-size: 12px;
+}
+
+.diagram-symbol.thin,
+.thin {
+  stroke-width: 1.5;
+}
+
+.editable-component,
+.editable-net {
+  cursor: grab;
+}
+
+.editable-component:hover .diagram-symbol,
+.editable-component.selected .diagram-symbol,
+.editable-net:hover .diagram-net {
+  stroke: #23533a;
+  stroke-width: 3;
+}
+
+.editable-net.selected .diagram-net {
+  stroke: #23533a;
+  stroke-width: 3;
+}
+
+.editable-component:active,
+.editable-net:active {
+  cursor: grabbing;
+}
+
+.diagram-terminal {
+  cursor: crosshair;
+}
+
+.terminal-dot {
+  fill: #ffffff;
+  opacity: 0;
+  stroke: #23533a;
+  stroke-width: 2;
+}
+
+.editable-component:hover .terminal-dot,
+.terminal-dot.selected {
+  opacity: 1;
+}
+
+.terminal-dot.selected {
+  fill: #23533a;
+}
+
 .code-panel {
   min-width: 0;
 }
@@ -481,6 +679,8 @@ pre {
 
   .result-header,
   .sim-header,
+  .waveform-page-header,
+  .waveform-page-summary,
   .editor-header {
     display: grid;
   }

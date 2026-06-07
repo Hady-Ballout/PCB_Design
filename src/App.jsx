@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { toDiagramSvg } from './lib/pcbGenerator.js';
 
 const downloadText = (filename, text, mime = 'text/plain') => {
   const blob = new Blob([text], { type: mime });
@@ -225,17 +226,486 @@ function WaveformChart({ waveform }) {
   );
 }
 
+const diagramPath = (points) => points.map((point) => `${point.x},${point.y}`).join(' ');
+
+const cloneDiagram = (diagram) => (diagram ? structuredClone(diagram) : null);
+const wireId = (wire) => wire.id || `${wire.ref}-${wire.pin}-${wire.node}`;
+const symbolDefaults = {
+  resistor: { kind: 'resistor', symbolType: 'resistor', width: 130, height: 58, orientation: 'horizontal', value: '1k', prefix: 'R', nodes: 2 },
+  capacitor: { kind: 'capacitor', symbolType: 'capacitor', width: 98, height: 112, orientation: 'vertical', value: '100nF', prefix: 'C', nodes: 2 },
+  led: { kind: 'led', symbolType: 'led', width: 98, height: 112, orientation: 'vertical', value: 'red', prefix: 'DLED', nodes: 2 },
+  source: { kind: 'voltage_source', symbolType: 'voltage_source', width: 98, height: 112, orientation: 'vertical', value: '5V', prefix: 'V', nodes: 2 },
+  bjt: { kind: 'bjt_npn', symbolType: 'bjt_npn', width: 118, height: 100, orientation: 'horizontal', value: '2N2222', prefix: 'Q', nodes: 3 },
+  opamp: { kind: 'opamp', symbolType: 'generic', width: 128, height: 72, orientation: 'horizontal', value: 'LM358', prefix: 'XU', nodes: 5 },
+};
+
+const svgPointer = (event, diagram) => {
+  const svg = event.currentTarget.ownerSVGElement || event.currentTarget;
+  const rect = svg.getBoundingClientRect();
+  return {
+    x: ((event.clientX - rect.left) / rect.width) * diagram.width,
+    y: ((event.clientY - rect.top) / rect.height) * diagram.height,
+  };
+};
+
+const movedComponent = (component, dx, dy) => ({
+  ...component,
+  x: component.x + dx,
+  y: component.y + dy,
+  pins: component.pins.map((pin) => ({ ...pin, x: pin.x + dx, y: pin.y + dy })),
+});
+
+const movedNet = (net, dx, dy) => ({
+  ...net,
+  x: net.x + dx,
+  y: net.y + dy,
+  labelX: net.labelX + dx,
+  labelY: net.labelY + dy,
+  connections: net.connections.map((connection) => ({ ...connection, x: connection.x + dx, y: connection.y + dy })),
+});
+
+const componentPinPoint = (component, pinIndex) => {
+  if (component.symbolType === 'bjt_npn' || component.symbolType === 'bjt_pnp') {
+    const collectorY = component.y - component.height / 2 + 18;
+    const emitterY = component.y + component.height / 2 - 18;
+    if (pinIndex === 1) return { x: component.x + component.width / 2, y: collectorY };
+    if (pinIndex === 2) return { x: component.x - component.width / 2, y: component.y };
+    if (pinIndex === 3) return { x: component.x + component.width / 2, y: emitterY };
+  }
+
+  if (component.pinCount <= 2) {
+    if (component.orientation === 'vertical') {
+      return {
+        x: component.x,
+        y: pinIndex === 1 ? component.y - component.height / 2 : component.y + component.height / 2,
+      };
+    }
+    return {
+      x: pinIndex === 1 ? component.x - component.width / 2 : component.x + component.width / 2,
+      y: component.y,
+    };
+  }
+
+  const side = pinIndex % 2 === 1 ? -1 : 1;
+  const row = Math.floor((pinIndex - 1) / 2);
+  const rows = Math.ceil(component.pinCount / 2);
+  return {
+    x: component.x + side * (component.width / 2),
+    y: component.y - ((rows - 1) * 14) / 2 + row * 28,
+  };
+};
+
+const makePins = (component, nodes) =>
+  nodes.map((node, index) => ({
+    node,
+    pinIndex: index + 1,
+    ...componentPinPoint(component, index + 1),
+  }));
+
+const addedComponent = (diagram, type) => {
+  const defaults = symbolDefaults[type];
+  const sameKindCount = diagram.components.filter((component) => component.kind === defaults.kind).length + 1;
+  const column = diagram.components.length % 3;
+  const row = Math.floor(diagram.components.length / 3);
+  const nodes = Array.from({ length: defaults.nodes }, (_, index) => `${defaults.prefix}${sameKindCount}_${index + 1}`);
+  const component = {
+    ref: `${defaults.prefix}${sameKindCount}`,
+    kind: defaults.kind,
+    value: defaults.value,
+    nodes,
+    symbolType: defaults.symbolType,
+    orientation: defaults.orientation,
+    x: 150 + column * 210,
+    y: 180 + row * 125,
+    width: defaults.width,
+    height: defaults.height,
+    pinCount: defaults.nodes,
+    order: diagram.components.length,
+  };
+  return { ...component, pins: makePins(component, nodes) };
+};
+
+const terminalPoint = (diagram, terminal) => {
+  const component = diagram.components.find((item) => item.ref === terminal.ref);
+  const pin = component?.pins.find((item) => item.pinIndex === terminal.pin);
+  return pin || { x: 0, y: 0 };
+};
+
+const wirePoints = (diagram, wire) => {
+  if (wire.manual) {
+    const from = terminalPoint(diagram, wire.from);
+    const to = terminalPoint(diagram, wire.to);
+    if (wire.offset) {
+      return [
+        from,
+        { x: (from.x + to.x) / 2 + wire.offset.x, y: (from.y + to.y) / 2 + wire.offset.y },
+        to,
+      ];
+    }
+    return [from, to];
+  }
+
+  const component = diagram.components.find((item) => item.ref === wire.ref);
+  const pin = component?.pins.find((item) => item.pinIndex === wire.pin);
+  const net = diagram.nets.find((item) => item.name === wire.node);
+  if (!pin || !net) return wire.points;
+  const offset = wire.offset || { x: 0, y: 0 };
+  return [
+    { x: pin.x, y: pin.y },
+    { x: pin.x + offset.x, y: net.y + offset.y },
+    { x: net.x, y: net.y },
+  ];
+};
+
+function DiagramSymbol({ component }) {
+  const { x, y, width, height, symbolType, orientation } = component;
+  const left = x - width / 2;
+  const right = x + width / 2;
+  const top = y - height / 2;
+  const bottom = y + height / 2;
+
+  if (orientation === 'vertical') {
+    if (symbolType === 'resistor') {
+      return (
+        <polyline
+          className="diagram-symbol"
+          points={`${x},${top} ${x},${top + 18} ${x - 18},${top + 28} ${x + 18},${top + 44} ${x - 18},${top + 60} ${x + 18},${top + 76} ${x},${bottom - 18} ${x},${bottom}`}
+        />
+      );
+    }
+
+    if (symbolType === 'capacitor') {
+      return (
+        <>
+          <line className="diagram-symbol" x1={x} y1={top} x2={x} y2={y - 14} />
+          <line className="diagram-symbol" x1={x - 24} y1={y - 14} x2={x + 24} y2={y - 14} />
+          <line className="diagram-symbol" x1={x - 24} y1={y + 14} x2={x + 24} y2={y + 14} />
+          <line className="diagram-symbol" x1={x} y1={y + 14} x2={x} y2={bottom} />
+        </>
+      );
+    }
+
+    if (symbolType === 'diode' || symbolType === 'led') {
+      return (
+        <>
+          <line className="diagram-symbol" x1={x} y1={top} x2={x} y2={y - 20} />
+          <polygon className="diagram-fill" points={`${x - 18},${y - 20} ${x + 18},${y - 20} ${x},${y + 12}`} />
+          <line className="diagram-symbol" x1={x - 20} y1={y + 14} x2={x + 20} y2={y + 14} />
+          <line className="diagram-symbol" x1={x} y1={y + 14} x2={x} y2={bottom} />
+          {symbolType === 'led' && (
+            <>
+              <line className="diagram-symbol thin" x1={x + 18} y1={y - 22} x2={x + 34} y2={y - 38} />
+              <line className="diagram-symbol thin" x1={x + 30} y1={y - 16} x2={x + 46} y2={y - 32} />
+            </>
+          )}
+        </>
+      );
+    }
+
+    if (symbolType === 'voltage_source') {
+      return (
+        <>
+          <line className="diagram-symbol" x1={x} y1={top} x2={x} y2={y - 24} />
+          <circle className="diagram-symbol" cx={x} cy={y} r="24" />
+          <line className="diagram-symbol" x1={x} y1={y + 24} x2={x} y2={bottom} />
+          <text className="diagram-small" x={x} y={y - 8} textAnchor="middle">+</text>
+          <text className="diagram-small" x={x} y={y + 16} textAnchor="middle">-</text>
+        </>
+      );
+    }
+  }
+
+  if (symbolType === 'resistor') {
+    const bodyWidth = Math.min(96, Math.max(70, width - 36));
+    const bodyLeft = x - bodyWidth / 2;
+    const bodyRight = x + bodyWidth / 2;
+    const leadInset = bodyWidth / 6;
+    return (
+      <>
+        <line className="diagram-symbol" x1={left} y1={y} x2={bodyLeft} y2={y} />
+        <polyline
+          className="diagram-symbol"
+          points={`${bodyLeft},${y} ${bodyLeft + leadInset},${top + 16} ${bodyLeft + leadInset * 2},${bottom - 16} ${bodyLeft + leadInset * 3},${top + 16} ${bodyLeft + leadInset * 4},${bottom - 16} ${bodyLeft + leadInset * 5},${y} ${bodyRight},${y}`}
+        />
+        <line className="diagram-symbol" x1={bodyRight} y1={y} x2={right} y2={y} />
+      </>
+    );
+  }
+
+  if (symbolType === 'capacitor') {
+    return (
+      <>
+        <line className="diagram-symbol" x1={left} y1={y} x2={x - 14} y2={y} />
+        <line className="diagram-symbol" x1={x - 14} y1={top + 9} x2={x - 14} y2={bottom - 9} />
+        <line className="diagram-symbol" x1={x + 14} y1={top + 9} x2={x + 14} y2={bottom - 9} />
+        <line className="diagram-symbol" x1={x + 14} y1={y} x2={right} y2={y} />
+      </>
+    );
+  }
+
+  if (symbolType === 'inductor') {
+    return (
+      <path
+        className="diagram-symbol"
+        d={`M ${left} ${y} H ${left + 14} C ${left + 18} ${top + 8}, ${left + 34} ${top + 8}, ${left + 38} ${y} C ${left + 42} ${top + 8}, ${left + 58} ${top + 8}, ${left + 62} ${y} C ${left + 66} ${top + 8}, ${left + 82} ${top + 8}, ${left + 86} ${y} H ${right}`}
+      />
+    );
+  }
+
+  if (symbolType === 'diode' || symbolType === 'led') {
+    return (
+      <>
+        <line className="diagram-symbol" x1={left} y1={y} x2={x - 20} y2={y} />
+        <polygon className="diagram-fill" points={`${x - 20},${top + 10} ${x - 20},${bottom - 10} ${x + 12},${y}`} />
+        <line className="diagram-symbol" x1={x + 14} y1={top + 8} x2={x + 14} y2={bottom - 8} />
+        <line className="diagram-symbol" x1={x + 14} y1={y} x2={right} y2={y} />
+        {symbolType === 'led' && (
+          <>
+            <line className="diagram-symbol thin" x1={x + 18} y1={top + 6} x2={x + 34} y2={top - 10} />
+            <line className="diagram-symbol thin" x1={x + 30} y1={top + 12} x2={x + 46} y2={top - 4} />
+          </>
+        )}
+      </>
+    );
+  }
+
+  if (symbolType === 'voltage_source') {
+    return (
+      <>
+        <line className="diagram-symbol" x1={left} y1={y} x2={x - 24} y2={y} />
+        <circle className="diagram-symbol" cx={x} cy={y} r="24" />
+        <line className="diagram-symbol" x1={x + 24} y1={y} x2={right} y2={y} />
+        <text className="diagram-small" x={x} y={y - 4} textAnchor="middle">+</text>
+        <text className="diagram-small" x={x} y={y + 16} textAnchor="middle">-</text>
+      </>
+    );
+  }
+
+  if (symbolType === 'bjt_npn' || symbolType === 'bjt_pnp') {
+    const collector = component.pins.find((pin) => pin.pinIndex === 1) || { x: right, y: top + 18 };
+    const base = component.pins.find((pin) => pin.pinIndex === 2) || { x: left, y };
+    const emitter = component.pins.find((pin) => pin.pinIndex === 3) || { x: right, y: bottom - 18 };
+    const radius = Math.min(width, height) / 2 - 12;
+    const baseX = x - 16;
+    const collectorJoin = { x: x + 10, y: y - 22 };
+    const emitterJoin = { x: x + 10, y: y + 22 };
+    const arrowPoints = symbolType === 'bjt_npn'
+      ? `${emitter.x - 21},${emitter.y - 8} ${emitter.x - 5},${emitter.y} ${emitter.x - 21},${emitter.y + 8}`
+      : `${emitter.x - 5},${emitter.y - 8} ${emitter.x - 21},${emitter.y} ${emitter.x - 5},${emitter.y + 8}`;
+
+    return (
+      <>
+        <circle className="diagram-symbol" cx={x} cy={y} r={radius} />
+        <line className="diagram-symbol" x1={base.x} y1={base.y} x2={baseX} y2={base.y} />
+        <line className="diagram-symbol" x1={baseX} y1={y - 28} x2={baseX} y2={y + 28} />
+        <line className="diagram-symbol" x1={baseX} y1={y - 18} x2={collectorJoin.x} y2={collectorJoin.y} />
+        <line className="diagram-symbol" x1={collectorJoin.x} y1={collectorJoin.y} x2={collector.x} y2={collector.y} />
+        <line className="diagram-symbol" x1={baseX} y1={y + 18} x2={emitterJoin.x} y2={emitterJoin.y} />
+        <line className="diagram-symbol" x1={emitterJoin.x} y1={emitterJoin.y} x2={emitter.x} y2={emitter.y} />
+        <polygon points={arrowPoints} fill="#17201a" />
+        <text className="diagram-small" x={collector.x - 10} y={collector.y - 8} textAnchor="middle">C</text>
+        <text className="diagram-small" x={base.x + 10} y={base.y - 8} textAnchor="middle">B</text>
+        <text className="diagram-small" x={emitter.x - 10} y={emitter.y + 18} textAnchor="middle">E</text>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <rect className="diagram-symbol" x={left} y={top} width={width} height={height} rx="6" />
+      <text className="diagram-small" x={x} y={y + 5} textAnchor="middle">{component.kind.replaceAll('_', ' ')}</text>
+    </>
+  );
+}
+
+function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTerminal, onPendingTerminal }) {
+  const [drag, setDrag] = useState(null);
+  if (!diagram) return null;
+
+  const beginComponentDrag = (event, component) => {
+    event.stopPropagation();
+    onSelect({ type: 'component', ref: component.ref });
+    if (tool === 'wire') return;
+    setDrag({ type: 'component', ref: component.ref, start: svgPointer(event, diagram), original: component });
+  };
+
+  const beginNetDrag = (event, net) => {
+    event.stopPropagation();
+    onSelect({ type: 'net', name: net.name });
+    if (tool === 'wire') return;
+    setDrag({ type: 'net', name: net.name, start: svgPointer(event, diagram), original: net });
+  };
+
+  const beginWireDrag = (event, wire) => {
+    event.stopPropagation();
+    onSelect({ type: 'wire', id: wireId(wire) });
+    if (tool === 'wire') return;
+    setDrag({ type: 'wire', id: wireId(wire), start: svgPointer(event, diagram), original: wire });
+  };
+
+  const handleTerminalClick = (event, component, pin) => {
+    event.stopPropagation();
+    const terminal = { ref: component.ref, pin: pin.pinIndex };
+    if (tool !== 'wire') {
+      onSelect({ type: 'component', ref: component.ref });
+      return;
+    }
+    if (!pendingTerminal) {
+      onPendingTerminal(terminal);
+      return;
+    }
+    if (pendingTerminal.ref === terminal.ref && pendingTerminal.pin === terminal.pin) {
+      onPendingTerminal(null);
+      return;
+    }
+    onChange((current) => ({
+      ...current,
+      wires: [
+        ...current.wires,
+        {
+          id: `wire-${Date.now()}`,
+          manual: true,
+          from: pendingTerminal,
+          to: terminal,
+        },
+      ],
+    }));
+    onPendingTerminal(null);
+  };
+
+  const moveDrag = (event) => {
+    if (!drag) return;
+    const point = svgPointer(event, diagram);
+    const dx = point.x - drag.start.x;
+    const dy = point.y - drag.start.y;
+    onChange((current) => {
+      if (!current) return current;
+      if (drag.type === 'component') {
+        return {
+          ...current,
+          components: current.components.map((component) =>
+            component.ref === drag.ref ? movedComponent(drag.original, dx, dy) : component,
+          ),
+        };
+      }
+
+      return {
+        ...current,
+        ...(drag.type === 'net'
+          ? { nets: current.nets.map((net) => (net.name === drag.name ? movedNet(drag.original, dx, dy) : net)) }
+          : {
+              wires: current.wires.map((wire) =>
+                wireId(wire) === drag.id
+                  ? {
+                      ...wire,
+                      offset: {
+                        x: (drag.original.offset?.x || 0) + dx,
+                        y: (drag.original.offset?.y || 0) + dy,
+                      },
+                    }
+                  : wire,
+              ),
+            }),
+      };
+    });
+  };
+
+  return (
+    <div className="diagram-card">
+      <svg
+        viewBox={`0 0 ${diagram.width} ${diagram.height}`}
+        role="img"
+        aria-label={`${diagram.title} editable circuit diagram`}
+        className={drag ? 'dragging' : ''}
+        onPointerMove={moveDrag}
+        onPointerUp={() => setDrag(null)}
+        onPointerLeave={() => setDrag(null)}
+      >
+        <rect className="diagram-bg" width={diagram.width} height={diagram.height} rx="8" />
+        {diagram.wires.map((wire) => (
+          <polyline
+            key={wireId(wire)}
+            className={selected?.type === 'wire' && selected.id === wireId(wire) ? 'diagram-wire selected' : 'diagram-wire'}
+            points={diagramPath(wirePoints(diagram, wire))}
+            onPointerDown={(event) => beginWireDrag(event, wire)}
+          />
+        ))}
+        {diagram.nets.map((net) => (
+          <g
+            key={net.name}
+            className={selected?.type === 'net' && selected.name === net.name ? 'editable-net selected' : 'editable-net'}
+            onPointerDown={(event) => beginNetDrag(event, net)}
+          >
+            <circle className="diagram-node" cx={net.x} cy={net.y} r="4" />
+            <rect className="diagram-net" x={net.labelX} y={net.labelY} width={net.labelWidth} height="26" rx="13" />
+            <text className="diagram-small" x={net.labelX + net.labelWidth / 2} y={net.labelY + 17} textAnchor="middle">{net.name}</text>
+          </g>
+        ))}
+        {diagram.components.map((component) => (
+          <g
+            key={component.ref}
+            className={selected?.type === 'component' && selected.ref === component.ref ? 'editable-component selected' : 'editable-component'}
+            onPointerDown={(event) => beginComponentDrag(event, component)}
+          >
+            <DiagramSymbol component={component} />
+            <text className="diagram-text" x={component.x} y={component.y - component.height / 2 - 12} textAnchor="middle">
+              {component.ref}
+            </text>
+            <text className="diagram-small" x={component.x} y={component.y + component.height / 2 + 20} textAnchor="middle">
+              {component.value}
+            </text>
+            {component.pins.map((pin) => (
+              <g key={`${component.ref}-${pin.pinIndex}`} className="diagram-terminal" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => handleTerminalClick(event, component, pin)}>
+                <circle
+                  className={pendingTerminal?.ref === component.ref && pendingTerminal?.pin === pin.pinIndex ? 'terminal-dot selected' : 'terminal-dot'}
+                  cx={pin.x}
+                  cy={pin.y}
+                  r="6"
+                />
+                <text className="diagram-small" x={pin.x} y={pin.y - 8} textAnchor="middle">
+                  {pin.pinIndex}
+                </text>
+              </g>
+            ))}
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
 function App() {
   const [prompt, setPrompt] = useState('');
   const [result, setResult] = useState(null);
   const [editableSpice, setEditableSpice] = useState('');
   const [editableKicadNetlist, setEditableKicadNetlist] = useState('');
+  const [editedDiagram, setEditedDiagram] = useState(null);
+  const [diagramTool, setDiagramTool] = useState('select');
+  const [diagramSelection, setDiagramSelection] = useState(null);
+  const [pendingTerminal, setPendingTerminal] = useState(null);
   const [simulationRun, setSimulationRun] = useState(null);
   const [activeTab, setActiveTab] = useState('summary');
+  const [page, setPage] = useState(() => (window.location.hash === '#waveform' ? 'waveform' : 'workspace'));
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
   const [error, setError] = useState('');
   const [simulationError, setSimulationError] = useState('');
+
+  useEffect(() => {
+    const syncPageFromHash = () => {
+      setPage(window.location.hash === '#waveform' ? 'waveform' : 'workspace');
+    };
+
+    window.addEventListener('hashchange', syncPageFromHash);
+    return () => window.removeEventListener('hashchange', syncPageFromHash);
+  }, []);
+
+  useEffect(() => {
+    setEditedDiagram(cloneDiagram(result?.diagram));
+    setDiagramSelection(null);
+    setPendingTerminal(null);
+    setDiagramTool('select');
+  }, [result?.diagram]);
 
   const manifest = useMemo(
     () =>
@@ -244,7 +714,7 @@ function App() {
           name: result?.circuit.title,
           sourcePrompt: result?.intent.rawPrompt,
           generatedAt: new Date().toISOString(),
-          files: ['generated.cir', 'generated.net', 'circuit.json'],
+          files: ['generated.cir', 'generated.net', 'generated.svg', 'circuit.json'],
           kicad: 'Import generated.net into KiCad schematic/PCB tools, then assign or adjust footprints before routing.',
           ngspice: result?.simulation.command,
         },
@@ -275,6 +745,8 @@ function App() {
       setEditableKicadNetlist(data.kicadNetlist || '');
       setSimulationRun(null);
       setSimulationError('');
+      window.location.hash = '';
+      setPage('workspace');
     } catch (requestError) {
       setError(requestError.message);
     } finally {
@@ -299,6 +771,8 @@ function App() {
       if (!response.ok || !data.ok) {
         throw new Error(data.errors?.join(' ') || data.error || `Simulation failed with HTTP ${response.status}.`);
       }
+      window.location.hash = 'waveform';
+      setPage('waveform');
     } catch (requestError) {
       setSimulationError(requestError.message);
     } finally {
@@ -310,9 +784,97 @@ function App() {
     if (!result) return;
     downloadText('generated.cir', editableSpice);
     downloadText('generated.net', editableKicadNetlist, 'application/xml');
+    downloadText('generated.svg', toDiagramSvg(editedDiagram || result.diagram), 'image/svg+xml');
     downloadText('circuit.json', JSON.stringify(result.circuit, null, 2), 'application/json');
     downloadText('README-export.json', manifest, 'application/json');
   };
+
+  const addDiagramComponent = (type) => {
+    setEditedDiagram((current) => {
+      const base = current || result?.diagram;
+      if (!base) return current;
+      const next = cloneDiagram(base);
+      const component = addedComponent(next, type);
+      next.components.push(component);
+      setDiagramSelection({ type: 'component', ref: component.ref });
+      setPendingTerminal(null);
+      setDiagramTool('select');
+      return next;
+    });
+  };
+
+  const deleteDiagramSelection = () => {
+    if (!diagramSelection) return;
+    setEditedDiagram((current) => {
+      const base = current || result?.diagram;
+      if (!base) return current;
+      const next = cloneDiagram(base);
+      if (diagramSelection.type === 'component') {
+        next.components = next.components.filter((component) => component.ref !== diagramSelection.ref);
+        next.wires = next.wires.filter((wire) => {
+          if (wire.manual) return wire.from.ref !== diagramSelection.ref && wire.to.ref !== diagramSelection.ref;
+          return wire.ref !== diagramSelection.ref;
+        });
+      }
+      if (diagramSelection.type === 'wire') {
+        next.wires = next.wires.filter((wire) => wireId(wire) !== diagramSelection.id);
+      }
+      if (diagramSelection.type === 'net') {
+        next.nets = next.nets.filter((net) => net.name !== diagramSelection.name);
+        next.wires = next.wires.filter((wire) => wire.node !== diagramSelection.name);
+      }
+      return next;
+    });
+    setDiagramSelection(null);
+    setPendingTerminal(null);
+  };
+
+  const showWorkspace = () => {
+    window.location.hash = '';
+    setPage('workspace');
+  };
+
+  if (page === 'waveform') {
+    return (
+      <main className="app-shell waveform-page-shell">
+        <section className="waveform-page">
+          <header className="waveform-page-header">
+            <div>
+              <p className="eyebrow">Ngspice waveform</p>
+              <h1>{result?.circuit?.title || 'Simulation waveform'}</h1>
+            </div>
+            <button onClick={showWorkspace}>Back to generator</button>
+          </header>
+
+          {!simulationRun?.waveform?.series?.length ? (
+            <section className="panel-block empty-waveform-page">
+              <h2>No waveform data yet</h2>
+              <p>Run a successful simulation from the Simulation tab to open the waveform here.</p>
+            </section>
+          ) : (
+            <section className="panel-block waveform-page-panel">
+              <div className="waveform-page-summary">
+                <div>
+                  <h2>{result?.simulation?.engine || 'Simulation complete'}</h2>
+                  <p>{simulationRun.waveform.series.length} plotted signal{simulationRun.waveform.series.length === 1 ? '' : 's'} from the current SPICE deck.</p>
+                </div>
+                <button onClick={() => downloadText('ngspice-log.txt', simulationRun.rawOutput || '')} disabled={!simulationRun.rawOutput}>
+                  Download log
+                </button>
+              </div>
+              <WaveformChart waveform={simulationRun.waveform} />
+              {simulationRun.rawOutput && (
+                <details className="sim-log">
+                  <summary>Ngspice log</summary>
+                  <pre>{simulationRun.rawOutput}</pre>
+                </details>
+              )}
+            </section>
+          )}
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="app-shell">
@@ -366,7 +928,7 @@ function App() {
               </div>
 
               <nav className="tabs" aria-label="Result views">
-                {['summary', 'simulation', 'spice', 'kicad'].map((tab) => (
+                {['summary', 'diagram', 'simulation', 'spice', 'kicad'].map((tab) => (
                   <button
                     key={tab}
                     className={activeTab === tab ? 'active' : ''}
@@ -408,6 +970,43 @@ function App() {
                 </div>
               )}
 
+              {activeTab === 'diagram' && (
+                <section className="panel-block">
+                  <div className="editor-header">
+                    <div>
+                      <h3>Circuit diagram</h3>
+                      <p>Add, delete, wire, or drag diagram items. Use Wire mode, then click two component terminals.</p>
+                    </div>
+                    <div className="button-row">
+                      <button onClick={() => setEditedDiagram(cloneDiagram(result.diagram))}>Reset layout</button>
+                      <button onClick={() => downloadText('generated.svg', toDiagramSvg(editedDiagram || result.diagram), 'image/svg+xml')} disabled={!editedDiagram && !result.diagram}>
+                        Download SVG
+                      </button>
+                    </div>
+                  </div>
+                  <div className="diagram-editbar">
+                    <button className={diagramTool === 'select' ? 'active-tool' : ''} onClick={() => { setDiagramTool('select'); setPendingTerminal(null); }}>Select</button>
+                    <button className={diagramTool === 'wire' ? 'active-tool' : ''} onClick={() => { setDiagramTool('wire'); setPendingTerminal(null); }}>Wire</button>
+                    <button onClick={() => addDiagramComponent('resistor')}>Add resistor</button>
+                    <button onClick={() => addDiagramComponent('capacitor')}>Add capacitor</button>
+                    <button onClick={() => addDiagramComponent('source')}>Add source</button>
+                    <button onClick={() => addDiagramComponent('led')}>Add LED</button>
+                    <button onClick={() => addDiagramComponent('bjt')}>Add BJT</button>
+                    <button onClick={() => addDiagramComponent('opamp')}>Add op amp</button>
+                    <button onClick={deleteDiagramSelection} disabled={!diagramSelection}>Delete selected</button>
+                  </div>
+                  <CircuitDiagram
+                    diagram={editedDiagram || result.diagram}
+                    onChange={setEditedDiagram}
+                    tool={diagramTool}
+                    selected={diagramSelection}
+                    onSelect={setDiagramSelection}
+                    pendingTerminal={pendingTerminal}
+                    onPendingTerminal={setPendingTerminal}
+                  />
+                </section>
+              )}
+
               {activeTab === 'simulation' && (
                 <section className="panel-block">
                   <div className="sim-header">
@@ -420,7 +1019,11 @@ function App() {
                     </button>
                   </div>
                   {simulationError && <p className="inline-error simulation-message">{simulationError}</p>}
-                  {simulationRun?.ok && <p className="simulation-ok">Simulation completed successfully.</p>}
+                  {simulationRun?.ok && (
+                    <p className="simulation-ok">
+                      Simulation completed successfully. <button className="text-button" onClick={() => { window.location.hash = 'waveform'; setPage('waveform'); }}>Open waveform page</button>
+                    </p>
+                  )}
                   <div className="metrics">
                     {result.simulation.metrics.map((metric) => (
                       <article key={metric.label}>
@@ -429,7 +1032,6 @@ function App() {
                       </article>
                     ))}
                   </div>
-                  {simulationRun?.waveform?.series?.length > 0 && <WaveformChart waveform={simulationRun.waveform} />}
                   {simulationRun?.rawOutput && (
                     <details className="sim-log">
                       <summary>Ngspice log</summary>
