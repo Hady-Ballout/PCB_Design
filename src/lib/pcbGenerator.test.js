@@ -161,6 +161,72 @@ describe('prompt-to-pcb generator', () => {
     );
   });
 
+  it('renders op amps with schematic pin roles and preserves SPICE order', () => {
+    const circuit = {
+      title: 'Op amp buffer',
+      type: 'opamp',
+      supplyVoltage: 12,
+      components: [
+        { ref: 'XU1', kind: 'opamp', value: 'LM358', nodes: ['VINP', 'VINN', 'VOUT', 'VCC', '0'] },
+        { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VCC', '0'] },
+      ],
+      notes: [],
+    };
+    const diagram = buildCircuitDiagram(circuit);
+    const opamp = diagram.components.find((part) => part.ref === 'XU1');
+    const pins = new Map(opamp.pins.map((pin) => [pin.pinIndex, pin]));
+
+    expect(opamp).toMatchObject({ symbolType: 'opamp', width: 150, height: 110 });
+    expect(pins.get(1)).toMatchObject({ node: 'VINP' });
+    expect(pins.get(1).x).toBeLessThan(opamp.x);
+    expect(pins.get(1).y).toBeGreaterThan(opamp.y);
+    expect(pins.get(2)).toMatchObject({ node: 'VINN' });
+    expect(pins.get(2).x).toBeLessThan(opamp.x);
+    expect(pins.get(2).y).toBeLessThan(opamp.y);
+    expect(pins.get(3)).toMatchObject({ node: 'VOUT' });
+    expect(pins.get(3).x).toBeGreaterThan(opamp.x);
+    expect(pins.get(4)).toMatchObject({ node: 'VCC' });
+    expect(pins.get(4).y).toBeLessThan(opamp.y);
+    expect(pins.get(5)).toMatchObject({ node: '0' });
+    expect(pins.get(5).y).toBeGreaterThan(opamp.y);
+    expect(toSpice(circuit)).toContain('XU1 VINP VINN VOUT VCC 0 LM358');
+  });
+
+  it('exports op amp triangle labels in the diagram SVG', () => {
+    const svg = toDiagramSvg(buildCircuitDiagram({
+      title: 'Op amp SVG',
+      type: 'opamp',
+      supplyVoltage: 12,
+      components: [
+        { ref: 'XU1', kind: 'opamp', value: 'LM358', nodes: ['VINP', 'VINN', 'VOUT', 'VCC', '0'] },
+        { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VCC', '0'] },
+      ],
+      notes: [],
+    }));
+
+    expect(svg).toContain('<polygon class="diagram-fill"');
+    expect(svg).toContain('>+</text>');
+    expect(svg).toContain('>-</text>');
+    expect(svg).toContain('>V+</text>');
+    expect(svg).toContain('>V-</text>');
+  });
+
+  it('warns when an op amp is missing schematic role nodes', () => {
+    const validation = validateCircuit({
+      title: 'Incomplete op amp',
+      type: 'opamp',
+      supplyVoltage: 5,
+      components: [
+        { ref: 'XU1', kind: 'opamp', value: 'LM358', nodes: ['VINP', 'VINN', 'VOUT'] },
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      ],
+      notes: [],
+    });
+
+    expect(validation.ok).toBe(true);
+    expect(validation.warnings).toContain('XU1 op amp should include + input, - input, output, V+, and V- nodes.');
+  });
+
   it('keeps diagram net memberships consistent with the KiCad netlist', () => {
     const diagramMembership = netMembershipFromDiagram(buildCircuitDiagram(aiCircuit));
     const kicadMembership = netMembershipFromKiCad(toKiCadNetlist(aiCircuit));

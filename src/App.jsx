@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { toDiagramSvg } from './lib/pcbGenerator.js';
 
 const downloadText = (filename, text, mime = 'text/plain') => {
@@ -236,7 +236,7 @@ const symbolDefaults = {
   led: { kind: 'led', symbolType: 'led', width: 98, height: 112, orientation: 'vertical', value: 'red', prefix: 'DLED', nodes: 2 },
   source: { kind: 'voltage_source', symbolType: 'voltage_source', width: 98, height: 112, orientation: 'vertical', value: '5V', prefix: 'V', nodes: 2 },
   bjt: { kind: 'bjt_npn', symbolType: 'bjt_npn', width: 118, height: 100, orientation: 'horizontal', value: '2N2222', prefix: 'Q', nodes: 3 },
-  opamp: { kind: 'opamp', symbolType: 'generic', width: 128, height: 72, orientation: 'horizontal', value: 'LM358', prefix: 'XU', nodes: 5 },
+  opamp: { kind: 'opamp', symbolType: 'opamp', width: 150, height: 110, orientation: 'horizontal', value: 'LM358', prefix: 'XU', nodes: 5 },
 };
 
 const svgPointer = (event, diagram) => {
@@ -271,6 +271,18 @@ const componentPinPoint = (component, pinIndex) => {
     if (pinIndex === 1) return { x: component.x + component.width / 2, y: collectorY };
     if (pinIndex === 2) return { x: component.x - component.width / 2, y: component.y };
     if (pinIndex === 3) return { x: component.x + component.width / 2, y: emitterY };
+  }
+
+  if (component.symbolType === 'opamp') {
+    const left = component.x - component.width / 2;
+    const right = component.x + component.width / 2;
+    const top = component.y - component.height / 2;
+    const bottom = component.y + component.height / 2;
+    if (pinIndex === 1) return { x: left, y: component.y + component.height * 0.22 };
+    if (pinIndex === 2) return { x: left, y: component.y - component.height * 0.22 };
+    if (pinIndex === 3) return { x: right, y: component.y };
+    if (pinIndex === 4) return { x: component.x, y: top };
+    if (pinIndex === 5) return { x: component.x, y: bottom };
   }
 
   if (component.pinCount <= 2) {
@@ -510,6 +522,33 @@ function DiagramSymbol({ component }) {
     );
   }
 
+  if (symbolType === 'opamp') {
+    const nonInverting = component.pins.find((pin) => pin.pinIndex === 1) || { x: left, y: y + height * 0.22 };
+    const inverting = component.pins.find((pin) => pin.pinIndex === 2) || { x: left, y: y - height * 0.22 };
+    const output = component.pins.find((pin) => pin.pinIndex === 3) || { x: right, y };
+    const positiveSupply = component.pins.find((pin) => pin.pinIndex === 4) || { x, y: top };
+    const negativeSupply = component.pins.find((pin) => pin.pinIndex === 5) || { x, y: bottom };
+    const bodyLeft = left + 28;
+    const bodyRight = right - 18;
+    const bodyTop = top + 12;
+    const bodyBottom = bottom - 12;
+
+    return (
+      <>
+        <line className="diagram-symbol" x1={nonInverting.x} y1={nonInverting.y} x2={bodyLeft} y2={nonInverting.y} />
+        <line className="diagram-symbol" x1={inverting.x} y1={inverting.y} x2={bodyLeft} y2={inverting.y} />
+        <polygon className="diagram-fill" points={`${bodyLeft},${bodyTop} ${bodyLeft},${bodyBottom} ${bodyRight},${y}`} />
+        <line className="diagram-symbol" x1={bodyRight} y1={y} x2={output.x} y2={output.y} />
+        <line className="diagram-symbol" x1={positiveSupply.x} y1={positiveSupply.y} x2={positiveSupply.x} y2={bodyTop + 12} />
+        <line className="diagram-symbol" x1={negativeSupply.x} y1={negativeSupply.y} x2={negativeSupply.x} y2={bodyBottom - 12} />
+        <text className="diagram-small" x={bodyLeft + 18} y={nonInverting.y + 5} textAnchor="middle">+</text>
+        <text className="diagram-small" x={bodyLeft + 18} y={inverting.y + 5} textAnchor="middle">-</text>
+        <text className="diagram-small" x={positiveSupply.x + 18} y={positiveSupply.y + 14} textAnchor="middle">V+</text>
+        <text className="diagram-small" x={negativeSupply.x + 18} y={negativeSupply.y - 6} textAnchor="middle">V-</text>
+      </>
+    );
+  }
+
   return (
     <>
       <rect className="diagram-symbol" x={left} y={top} width={width} height={height} rx="6" />
@@ -520,30 +559,61 @@ function DiagramSymbol({ component }) {
 
 function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTerminal, onPendingTerminal }) {
   const [drag, setDrag] = useState(null);
+  const [wirePointer, setWirePointer] = useState(null);
+  const dragFrameRef = useRef(0);
+  const pendingDragRef = useRef(null);
+
+  useEffect(
+    () => () => {
+      if (dragFrameRef.current) cancelAnimationFrame(dragFrameRef.current);
+    },
+    [],
+  );
+
   if (!diagram) return null;
 
+  const capturePointer = (event) => {
+    event.preventDefault();
+    event.currentTarget.ownerSVGElement?.setPointerCapture?.(event.pointerId);
+  };
+
+  const releasePointer = (event) => {
+    try {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // The pointer may already be released when the browser ends a drag outside the SVG.
+    }
+  };
+
   const beginComponentDrag = (event, component) => {
+    event.preventDefault();
     event.stopPropagation();
     onSelect({ type: 'component', ref: component.ref });
     if (tool === 'wire') return;
+    capturePointer(event);
     setDrag({ type: 'component', ref: component.ref, start: svgPointer(event, diagram), original: component });
   };
 
   const beginNetDrag = (event, net) => {
+    event.preventDefault();
     event.stopPropagation();
     onSelect({ type: 'net', name: net.name });
     if (tool === 'wire') return;
+    capturePointer(event);
     setDrag({ type: 'net', name: net.name, start: svgPointer(event, diagram), original: net });
   };
 
   const beginWireDrag = (event, wire) => {
+    event.preventDefault();
     event.stopPropagation();
     onSelect({ type: 'wire', id: wireId(wire) });
     if (tool === 'wire') return;
+    capturePointer(event);
     setDrag({ type: 'wire', id: wireId(wire), start: svgPointer(event, diagram), original: wire });
   };
 
-  const handleTerminalClick = (event, component, pin) => {
+  const handleTerminalPointerDown = (event, component, pin) => {
+    event.preventDefault();
     event.stopPropagation();
     const terminal = { ref: component.ref, pin: pin.pinIndex };
     if (tool !== 'wire') {
@@ -558,49 +628,51 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
       onPendingTerminal(null);
       return;
     }
-    onChange((current) => ({
-      ...current,
-      wires: [
-        ...current.wires,
-        {
-          id: `wire-${Date.now()}`,
-          manual: true,
-          from: pendingTerminal,
-          to: terminal,
-        },
-      ],
-    }));
+    onChange((current) => {
+      const base = current || diagram;
+      return {
+        ...base,
+        wires: [
+          ...base.wires,
+          {
+            id: `wire-${Date.now()}`,
+            manual: true,
+            from: pendingTerminal,
+            to: terminal,
+          },
+        ],
+      };
+    });
     onPendingTerminal(null);
+    setWirePointer(null);
   };
 
-  const moveDrag = (event) => {
-    if (!drag) return;
-    const point = svgPointer(event, diagram);
-    const dx = point.x - drag.start.x;
-    const dy = point.y - drag.start.y;
+  const applyDragMove = (activeDrag, point) => {
+    const dx = point.x - activeDrag.start.x;
+    const dy = point.y - activeDrag.start.y;
     onChange((current) => {
       if (!current) return current;
-      if (drag.type === 'component') {
+      if (activeDrag.type === 'component') {
         return {
           ...current,
           components: current.components.map((component) =>
-            component.ref === drag.ref ? movedComponent(drag.original, dx, dy) : component,
+            component.ref === activeDrag.ref ? movedComponent(activeDrag.original, dx, dy) : component,
           ),
         };
       }
 
       return {
         ...current,
-        ...(drag.type === 'net'
-          ? { nets: current.nets.map((net) => (net.name === drag.name ? movedNet(drag.original, dx, dy) : net)) }
+        ...(activeDrag.type === 'net'
+          ? { nets: current.nets.map((net) => (net.name === activeDrag.name ? movedNet(activeDrag.original, dx, dy) : net)) }
           : {
               wires: current.wires.map((wire) =>
-                wireId(wire) === drag.id
+                wireId(wire) === activeDrag.id
                   ? {
                       ...wire,
                       offset: {
-                        x: (drag.original.offset?.x || 0) + dx,
-                        y: (drag.original.offset?.y || 0) + dy,
+                        x: (activeDrag.original.offset?.x || 0) + dx,
+                        y: (activeDrag.original.offset?.y || 0) + dy,
                       },
                     }
                   : wire,
@@ -610,18 +682,75 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
     });
   };
 
+  const scheduleDragMove = (activeDrag, point) => {
+    pendingDragRef.current = { activeDrag, point };
+    if (dragFrameRef.current) return;
+    dragFrameRef.current = requestAnimationFrame(() => {
+      const pending = pendingDragRef.current;
+      pendingDragRef.current = null;
+      dragFrameRef.current = 0;
+      if (pending) applyDragMove(pending.activeDrag, pending.point);
+    });
+  };
+
+  const handlePointerMove = (event) => {
+    const point = svgPointer(event, diagram);
+    if (drag) {
+      scheduleDragMove(drag, point);
+      return;
+    }
+    if (tool === 'wire' && pendingTerminal) setWirePointer(point);
+  };
+
+  const endDrag = (event) => {
+    if (!drag) return;
+    if (pendingDragRef.current) {
+      applyDragMove(pendingDragRef.current.activeDrag, pendingDragRef.current.point);
+      pendingDragRef.current = null;
+    }
+    if (dragFrameRef.current) {
+      cancelAnimationFrame(dragFrameRef.current);
+      dragFrameRef.current = 0;
+    }
+    releasePointer(event);
+    setDrag(null);
+  };
+
+  const cancelPendingWire = (event) => {
+    event.preventDefault();
+    if (tool === 'wire' && pendingTerminal) {
+      onPendingTerminal(null);
+      setWirePointer(null);
+    } else {
+      onSelect(null);
+    }
+  };
+
+  const pendingWireStart = pendingTerminal ? terminalPoint(diagram, pendingTerminal) : null;
+
   return (
     <div className="diagram-card">
       <svg
         viewBox={`0 0 ${diagram.width} ${diagram.height}`}
         role="img"
         aria-label={`${diagram.title} editable circuit diagram`}
-        className={drag ? 'dragging' : ''}
-        onPointerMove={moveDrag}
-        onPointerUp={() => setDrag(null)}
-        onPointerLeave={() => setDrag(null)}
+        className={[drag ? 'dragging' : '', tool === 'wire' ? 'wire-mode' : ''].filter(Boolean).join(' ')}
+        onPointerMove={handlePointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onPointerLeave={endDrag}
       >
-        <rect className="diagram-bg" width={diagram.width} height={diagram.height} rx="8" />
+        <defs>
+          <pattern id="diagram-grid-small" width="24" height="24" patternUnits="userSpaceOnUse">
+            <path d="M 24 0 H 0 V 24" className="diagram-grid-small" />
+          </pattern>
+          <pattern id="diagram-grid-large" width="120" height="120" patternUnits="userSpaceOnUse">
+            <rect width="120" height="120" fill="url(#diagram-grid-small)" />
+            <path d="M 120 0 H 0 V 120" className="diagram-grid-large" />
+          </pattern>
+        </defs>
+        <rect className="diagram-bg" width={diagram.width} height={diagram.height} rx="8" onPointerDown={cancelPendingWire} />
+        <rect width={diagram.width} height={diagram.height} fill="url(#diagram-grid-large)" pointerEvents="none" />
         {diagram.wires.map((wire) => (
           <polyline
             key={wireId(wire)}
@@ -630,6 +759,13 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
             onPointerDown={(event) => beginWireDrag(event, wire)}
           />
         ))}
+        {pendingWireStart && wirePointer && (
+          <polyline
+            className="diagram-wire pending"
+            points={diagramPath([pendingWireStart, wirePointer])}
+            pointerEvents="none"
+          />
+        )}
         {diagram.nets.map((net) => (
           <g
             key={net.name}
@@ -655,7 +791,8 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
               {component.value}
             </text>
             {component.pins.map((pin) => (
-              <g key={`${component.ref}-${pin.pinIndex}`} className="diagram-terminal" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => handleTerminalClick(event, component, pin)}>
+              <g key={`${component.ref}-${pin.pinIndex}`} className="diagram-terminal" onPointerDown={(event) => handleTerminalPointerDown(event, component, pin)}>
+                <circle className="terminal-hit" cx={pin.x} cy={pin.y} r="14" />
                 <circle
                   className={pendingTerminal?.ref === component.ref && pendingTerminal?.pin === pin.pinIndex ? 'terminal-dot selected' : 'terminal-dot'}
                   cx={pin.x}
@@ -685,7 +822,11 @@ function App() {
   const [pendingTerminal, setPendingTerminal] = useState(null);
   const [simulationRun, setSimulationRun] = useState(null);
   const [activeTab, setActiveTab] = useState('summary');
-  const [page, setPage] = useState(() => (window.location.hash === '#waveform' ? 'waveform' : 'workspace'));
+  const [page, setPage] = useState(() => {
+    if (window.location.hash === '#waveform') return 'waveform';
+    if (window.location.hash === '#diagram') return 'diagram';
+    return 'workspace';
+  });
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
   const [error, setError] = useState('');
@@ -693,7 +834,15 @@ function App() {
 
   useEffect(() => {
     const syncPageFromHash = () => {
-      setPage(window.location.hash === '#waveform' ? 'waveform' : 'workspace');
+      if (window.location.hash === '#waveform') {
+        setPage('waveform');
+        return;
+      }
+      if (window.location.hash === '#diagram') {
+        setPage('diagram');
+        return;
+      }
+      setPage('workspace');
     };
 
     window.addEventListener('hashchange', syncPageFromHash);
@@ -706,6 +855,10 @@ function App() {
     setPendingTerminal(null);
     setDiagramTool('select');
   }, [result?.diagram]);
+
+  useEffect(() => {
+    if (activeTab === 'diagram') setActiveTab('summary');
+  }, [activeTab]);
 
   const manifest = useMemo(
     () =>
@@ -834,6 +987,12 @@ function App() {
     setPage('workspace');
   };
 
+  const showDiagramPage = () => {
+    if (!result) return;
+    window.location.hash = 'diagram';
+    setPage('diagram');
+  };
+
   if (page === 'waveform') {
     return (
       <main className="app-shell waveform-page-shell">
@@ -870,6 +1029,61 @@ function App() {
                 </details>
               )}
             </section>
+          )}
+        </section>
+      </main>
+    );
+  }
+
+  if (page === 'diagram') {
+    return (
+      <main className="app-shell diagram-page-shell">
+        <section className="diagram-workspace-page">
+          <header className="diagram-page-header">
+            <div>
+              <p className="eyebrow">Schematic canvas</p>
+              <h1>{result?.circuit?.title || 'No circuit generated yet'}</h1>
+            </div>
+            <div className="button-row">
+              <button onClick={showWorkspace}>Back to generator</button>
+              <button onClick={() => setEditedDiagram(cloneDiagram(result?.diagram))} disabled={!result}>Reset layout</button>
+              <button onClick={() => downloadText('generated.svg', toDiagramSvg(editedDiagram || result.diagram), 'image/svg+xml')} disabled={!result}>
+                Download SVG
+              </button>
+            </div>
+          </header>
+
+          {!result ? (
+            <section className="panel-block empty-state">
+              <p className="eyebrow">Awaiting AI generation</p>
+              <h2>No circuit generated yet</h2>
+              <p>Generate a circuit first, then open the canvas.</p>
+            </section>
+          ) : (
+            <>
+              <div className="diagram-page-toolbar">
+                <div className="diagram-editbar" aria-label="Diagram tools">
+                  <button className={diagramTool === 'select' ? 'active-tool' : ''} onClick={() => { setDiagramTool('select'); setPendingTerminal(null); }}>Select</button>
+                  <button className={diagramTool === 'wire' ? 'active-tool' : ''} onClick={() => { setDiagramTool('wire'); setPendingTerminal(null); }}>Wire</button>
+                  <button onClick={() => addDiagramComponent('resistor')}>Add resistor</button>
+                  <button onClick={() => addDiagramComponent('capacitor')}>Add capacitor</button>
+                  <button onClick={() => addDiagramComponent('source')}>Add source</button>
+                  <button onClick={() => addDiagramComponent('led')}>Add LED</button>
+                  <button onClick={() => addDiagramComponent('bjt')}>Add BJT</button>
+                  <button onClick={() => addDiagramComponent('opamp')}>Add op amp</button>
+                  <button onClick={deleteDiagramSelection} disabled={!diagramSelection}>Delete selected</button>
+                </div>
+              </div>
+              <CircuitDiagram
+                diagram={editedDiagram || result.diagram}
+                onChange={setEditedDiagram}
+                tool={diagramTool}
+                selected={diagramSelection}
+                onSelect={setDiagramSelection}
+                pendingTerminal={pendingTerminal}
+                onPendingTerminal={setPendingTerminal}
+              />
+            </>
           )}
         </section>
       </main>
@@ -918,8 +1132,11 @@ function App() {
                   <p className="eyebrow">{result.circuit.type.replaceAll('_', ' ')}</p>
                   <h2>{result.circuit.title}</h2>
                 </div>
-                <div className={`status ${result.validation.ok ? 'ok' : 'error'}`}>
-                  {result.validation.ok ? 'Validated' : 'Needs attention'}
+                <div className="result-actions">
+                  <button onClick={showDiagramPage}>Open canvas</button>
+                  <div className={`status ${result.validation.ok ? 'ok' : 'error'}`}>
+                    {result.validation.ok ? 'Validated' : 'Needs attention'}
+                  </div>
                 </div>
               </header>
 
@@ -928,7 +1145,7 @@ function App() {
               </div>
 
               <nav className="tabs" aria-label="Result views">
-                {['summary', 'diagram', 'simulation', 'spice', 'kicad'].map((tab) => (
+                {['summary', 'simulation', 'spice', 'kicad'].map((tab) => (
                   <button
                     key={tab}
                     className={activeTab === tab ? 'active' : ''}
@@ -968,43 +1185,6 @@ function App() {
                     </ul>
                   </section>
                 </div>
-              )}
-
-              {activeTab === 'diagram' && (
-                <section className="panel-block">
-                  <div className="editor-header">
-                    <div>
-                      <h3>Circuit diagram</h3>
-                      <p>Add, delete, wire, or drag diagram items. Use Wire mode, then click two component terminals.</p>
-                    </div>
-                    <div className="button-row">
-                      <button onClick={() => setEditedDiagram(cloneDiagram(result.diagram))}>Reset layout</button>
-                      <button onClick={() => downloadText('generated.svg', toDiagramSvg(editedDiagram || result.diagram), 'image/svg+xml')} disabled={!editedDiagram && !result.diagram}>
-                        Download SVG
-                      </button>
-                    </div>
-                  </div>
-                  <div className="diagram-editbar">
-                    <button className={diagramTool === 'select' ? 'active-tool' : ''} onClick={() => { setDiagramTool('select'); setPendingTerminal(null); }}>Select</button>
-                    <button className={diagramTool === 'wire' ? 'active-tool' : ''} onClick={() => { setDiagramTool('wire'); setPendingTerminal(null); }}>Wire</button>
-                    <button onClick={() => addDiagramComponent('resistor')}>Add resistor</button>
-                    <button onClick={() => addDiagramComponent('capacitor')}>Add capacitor</button>
-                    <button onClick={() => addDiagramComponent('source')}>Add source</button>
-                    <button onClick={() => addDiagramComponent('led')}>Add LED</button>
-                    <button onClick={() => addDiagramComponent('bjt')}>Add BJT</button>
-                    <button onClick={() => addDiagramComponent('opamp')}>Add op amp</button>
-                    <button onClick={deleteDiagramSelection} disabled={!diagramSelection}>Delete selected</button>
-                  </div>
-                  <CircuitDiagram
-                    diagram={editedDiagram || result.diagram}
-                    onChange={setEditedDiagram}
-                    tool={diagramTool}
-                    selected={diagramSelection}
-                    onSelect={setDiagramSelection}
-                    pendingTerminal={pendingTerminal}
-                    onPendingTerminal={setPendingTerminal}
-                  />
-                </section>
               )}
 
               {activeTab === 'simulation' && (

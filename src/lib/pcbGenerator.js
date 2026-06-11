@@ -8,6 +8,9 @@ export const validateCircuit = (circuit) => {
     if (!part.nodes.includes('0') && part.kind === 'voltage_source') {
       warnings.push(`${part.ref} does not reference ground.`);
     }
+    if (part.kind === 'opamp' && part.nodes.length < 5) {
+      warnings.push(`${part.ref} op amp should include + input, - input, output, V+, and V- nodes.`);
+    }
     part.nodes.forEach((node) => nodeUse.set(node, (nodeUse.get(node) ?? 0) + 1));
   }
 
@@ -74,7 +77,7 @@ const symbolTypeByKind = {
   bjt_pnp: 'bjt_pnp',
   mosfet_n: 'generic',
   mosfet_p: 'generic',
-  opamp: 'generic',
+  opamp: 'opamp',
   regulator: 'generic',
 };
 
@@ -105,6 +108,18 @@ const pinPoint = (component, pinIndex, node, netPosition) => {
     if (pinIndex === 1) return { x: component.x + component.width / 2, y: collectorY };
     if (pinIndex === 2) return { x: component.x - component.width / 2, y: component.y };
     if (pinIndex === 3) return { x: component.x + component.width / 2, y: emitterY };
+  }
+
+  if (component.symbolType === 'opamp') {
+    const left = component.x - component.width / 2;
+    const right = component.x + component.width / 2;
+    const top = component.y - component.height / 2;
+    const bottom = component.y + component.height / 2;
+    if (pinIndex === 1) return { x: left, y: component.y + component.height * 0.22 };
+    if (pinIndex === 2) return { x: left, y: component.y - component.height * 0.22 };
+    if (pinIndex === 3) return { x: right, y: component.y };
+    if (pinIndex === 4) return { x: component.x, y: top };
+    if (pinIndex === 5) return { x: component.x, y: bottom };
   }
 
   if (component.pinCount <= 2) {
@@ -193,6 +208,10 @@ export const buildCircuitDiagram = (circuit) => {
     if (symbolType === 'bjt_npn' || symbolType === 'bjt_pnp') {
       widthForPart = 118;
       heightForPart = 100;
+    }
+    if (symbolType === 'opamp') {
+      widthForPart = 150;
+      heightForPart = 110;
     }
 
     const component = {
@@ -352,6 +371,18 @@ const renderSymbolSvg = (component) => {
       ? `${emitter.x - 21},${emitter.y - 8} ${emitter.x - 5},${emitter.y} ${emitter.x - 21},${emitter.y + 8}`
       : `${emitter.x - 5},${emitter.y - 8} ${emitter.x - 21},${emitter.y} ${emitter.x - 5},${emitter.y + 8}`;
     return `<circle class="diagram-symbol" cx="${x}" cy="${y}" r="${radius}" /><line class="diagram-symbol" x1="${base.x}" y1="${base.y}" x2="${baseX}" y2="${base.y}" /><line class="diagram-symbol" x1="${baseX}" y1="${y - 28}" x2="${baseX}" y2="${y + 28}" /><line class="diagram-symbol" x1="${baseX}" y1="${y - 18}" x2="${collectorJoin.x}" y2="${collectorJoin.y}" /><line class="diagram-symbol" x1="${collectorJoin.x}" y1="${collectorJoin.y}" x2="${collector.x}" y2="${collector.y}" /><line class="diagram-symbol" x1="${baseX}" y1="${y + 18}" x2="${emitterJoin.x}" y2="${emitterJoin.y}" /><line class="diagram-symbol" x1="${emitterJoin.x}" y1="${emitterJoin.y}" x2="${emitter.x}" y2="${emitter.y}" /><polygon points="${arrow}" fill="#17201a" /><text class="diagram-small" x="${collector.x - 10}" y="${collector.y - 8}" text-anchor="middle">C</text><text class="diagram-small" x="${base.x + 10}" y="${base.y - 8}" text-anchor="middle">B</text><text class="diagram-small" x="${emitter.x - 10}" y="${emitter.y + 18}" text-anchor="middle">E</text>`;
+  }
+  if (symbolType === 'opamp') {
+    const nonInverting = component.pins.find((pin) => pin.pinIndex === 1) || { x: left, y: y + height * 0.22 };
+    const inverting = component.pins.find((pin) => pin.pinIndex === 2) || { x: left, y: y - height * 0.22 };
+    const output = component.pins.find((pin) => pin.pinIndex === 3) || { x: right, y };
+    const positiveSupply = component.pins.find((pin) => pin.pinIndex === 4) || { x, y: top };
+    const negativeSupply = component.pins.find((pin) => pin.pinIndex === 5) || { x, y: bottom };
+    const bodyLeft = left + 28;
+    const bodyRight = right - 18;
+    const bodyTop = top + 12;
+    const bodyBottom = bottom - 12;
+    return `<line class="diagram-symbol" x1="${nonInverting.x}" y1="${nonInverting.y}" x2="${bodyLeft}" y2="${nonInverting.y}" /><line class="diagram-symbol" x1="${inverting.x}" y1="${inverting.y}" x2="${bodyLeft}" y2="${inverting.y}" /><polygon class="diagram-fill" points="${bodyLeft},${bodyTop} ${bodyLeft},${bodyBottom} ${bodyRight},${y}" /><line class="diagram-symbol" x1="${bodyRight}" y1="${y}" x2="${output.x}" y2="${output.y}" /><line class="diagram-symbol" x1="${positiveSupply.x}" y1="${positiveSupply.y}" x2="${positiveSupply.x}" y2="${bodyTop + 12}" /><line class="diagram-symbol" x1="${negativeSupply.x}" y1="${negativeSupply.y}" x2="${negativeSupply.x}" y2="${bodyBottom - 12}" /><text class="diagram-small" x="${bodyLeft + 18}" y="${nonInverting.y + 5}" text-anchor="middle">+</text><text class="diagram-small" x="${bodyLeft + 18}" y="${inverting.y + 5}" text-anchor="middle">-</text><text class="diagram-small" x="${positiveSupply.x + 18}" y="${positiveSupply.y + 14}" text-anchor="middle">V+</text><text class="diagram-small" x="${negativeSupply.x + 18}" y="${negativeSupply.y - 6}" text-anchor="middle">V-</text>`;
   }
   return `<rect class="diagram-symbol" x="${left}" y="${top}" width="${width}" height="${height}" rx="6" /><text class="diagram-small" x="${x}" y="${y + 5}" text-anchor="middle">${escapeXml(component.kind.replaceAll('_', ' '))}</text>`;
 };

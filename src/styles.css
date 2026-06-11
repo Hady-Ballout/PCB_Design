@@ -153,6 +153,14 @@ textarea {
   gap: 16px;
 }
 
+.result-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .status {
   border-radius: 999px;
   font-size: 13px;
@@ -491,12 +499,62 @@ pre {
   font-weight: 700;
 }
 
+.diagram-page-shell {
+  padding: 16px;
+}
+
+.diagram-workspace-page {
+  display: grid;
+  gap: 12px;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: calc(100vh - 32px);
+}
+
+.diagram-page-header,
+.diagram-page-toolbar {
+  background: #ffffff;
+  border: 1px solid #d8d9d2;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.diagram-page-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.diagram-page-header h1 {
+  font-size: 24px;
+}
+
+.diagram-page-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  min-width: 0;
+}
+
+.diagram-page-toolbar .diagram-editbar {
+  margin-top: 0;
+}
+
 .diagram-card {
+  background: #f7f8f4;
   border: 1px solid #d8d9d2;
   border-radius: 8px;
   margin-top: 18px;
   overflow: auto;
   padding: 12px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.diagram-page-shell .diagram-card {
+  margin-top: 0;
+  min-height: 520px;
+  padding: 0;
 }
 
 .diagram-editbar {
@@ -524,12 +582,30 @@ pre {
   width: 100%;
 }
 
+.diagram-page-shell .diagram-card svg {
+  height: calc(100vh - 178px);
+  min-height: 520px;
+  min-width: 960px;
+}
+
 .diagram-card svg.dragging {
   cursor: grabbing;
 }
 
 .diagram-bg {
-  fill: #fafaf7;
+  fill: #fbfbf7;
+}
+
+.diagram-grid-small {
+  fill: none;
+  stroke: #e2e5dc;
+  stroke-width: 0.8;
+}
+
+.diagram-grid-large {
+  fill: none;
+  stroke: #cfd6ca;
+  stroke-width: 1.2;
 }
 
 .diagram-wire,
@@ -544,6 +620,12 @@ pre {
 .diagram-wire {
   stroke: #617066;
   stroke-width: 1.5;
+}
+
+.diagram-wire.pending {
+  stroke: #23533a;
+  stroke-dasharray: 8 8;
+  stroke-width: 2.5;
 }
 
 .diagram-wire {
@@ -577,11 +659,17 @@ pre {
   fill: #17201a;
   font-size: 14px;
   font-weight: 700;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .diagram-small {
   fill: #425147;
   font-size: 12px;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .diagram-symbol.thin,
@@ -615,6 +703,11 @@ pre {
   cursor: crosshair;
 }
 
+.terminal-hit {
+  fill: transparent;
+  pointer-events: all;
+}
+
 .terminal-dot {
   fill: #ffffff;
   opacity: 0;
@@ -623,6 +716,7 @@ pre {
 }
 
 .editable-component:hover .terminal-dot,
+.wire-mode .terminal-dot,
 .terminal-dot.selected {
   opacity: 1;
 }
@@ -681,7 +775,19 @@ pre {
   .sim-header,
   .waveform-page-header,
   .waveform-page-summary,
+  .diagram-page-header,
+  .diagram-page-toolbar,
   .editor-header {
     display: grid;
+  }
+
+  .result-actions,
+  .diagram-page-header .button-row {
+    justify-content: flex-start;
+  }
+
+  .diagram-page-shell .diagram-card svg {
+    height: 68vh;
+    min-width: 760px;
   }
 }
