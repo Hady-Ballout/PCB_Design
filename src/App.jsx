@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { toDiagramSvg } from './lib/pcbGenerator.js';
 
+const API_BASE = import.meta.env.VITE_API_URL || '';
+
 const downloadText = (filename, text, mime = 'text/plain') => {
   const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -884,7 +886,7 @@ function App() {
     try {
       if (!prompt.trim()) throw new Error('Enter a circuit prompt before generating.');
 
-      const response = await fetch('/api/generate-circuit', {
+      const response = await fetch(`${API_BASE}/api/generate-circuit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt }),
@@ -914,7 +916,7 @@ function App() {
     setSimulationError('');
 
     try {
-      const response = await fetch('/api/simulate-circuit', {
+      const response = await fetch(`${API_BASE}/api/simulate-circuit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ circuit: result.circuit, spice: editableSpice }),
