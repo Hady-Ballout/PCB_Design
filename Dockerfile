@@ -13,7 +13,8 @@ RUN npm ci --omit=dev
 
 # Copy server source
 COPY server/ ./server/
-COPY src/lib/pcbGenerator.js ./src/lib/pcbGenerator.js
+COPY src/lib/ ./src/lib/
+RUN ls -la /app/server/
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
