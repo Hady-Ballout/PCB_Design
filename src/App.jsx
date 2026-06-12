@@ -58,7 +58,7 @@ function WaveformChart({ waveform }) {
   const margin = { top: 18, right: 20, bottom: 42, left: 62 };
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
-  const colors = ['#23533a', '#275f85', '#9a5b20', '#7b3f7a'];
+  const colors = ['#4cc38a', '#5a9bd5', '#d4943a', '#b87fd5'];
   const scaleX = (x) => margin.left + ((x - xMin) / Math.max(xMax - xMin, Number.EPSILON)) * plotWidth;
   const scaleY = (y) => margin.top + plotHeight - ((y - yMin) / Math.max(yMax - yMin, Number.EPSILON)) * plotHeight;
   const xTicks = [xMin, xMin + (xMax - xMin) / 2, xMax];
@@ -516,7 +516,7 @@ function DiagramSymbol({ component }) {
         <line className="diagram-symbol" x1={collectorJoin.x} y1={collectorJoin.y} x2={collector.x} y2={collector.y} />
         <line className="diagram-symbol" x1={baseX} y1={y + 18} x2={emitterJoin.x} y2={emitterJoin.y} />
         <line className="diagram-symbol" x1={emitterJoin.x} y1={emitterJoin.y} x2={emitter.x} y2={emitter.y} />
-        <polygon points={arrowPoints} fill="#17201a" />
+        <polygon points={arrowPoints} className="diagram-arrow" />
         <text className="diagram-small" x={collector.x - 10} y={collector.y - 8} textAnchor="middle">C</text>
         <text className="diagram-small" x={base.x + 10} y={base.y - 8} textAnchor="middle">B</text>
         <text className="diagram-small" x={emitter.x - 10} y={emitter.y + 18} textAnchor="middle">E</text>
@@ -789,7 +789,7 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
             <text className="diagram-text" x={component.x} y={component.y - component.height / 2 - 12} textAnchor="middle">
               {component.ref}
             </text>
-            <text className="diagram-small" x={component.x} y={component.y + component.height / 2 + 20} textAnchor="middle">
+            <text className="diagram-small diagram-value" x={component.x} y={component.y + component.height / 2 + 20} textAnchor="middle">
               {component.value}
             </text>
             {component.pins.map((pin) => (

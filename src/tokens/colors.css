@@ -1,0 +1,54 @@
+/* PCB Pilot — Color Tokens (Dark Workbench) */
+:root {
+  /* Primary (copper / amber) */
+  --color-primary: #d4943a;
+  --color-primary-hover: #c08430;
+  --color-primary-light: #2e2316;
+  --color-primary-border: #b07830;
+
+  /* Foreground / text */
+  --color-fg-1: #e4eaf0;
+  --color-fg-2: #94a3b5;
+  --color-fg-3: #637080;
+
+  /* Backgrounds (darkest → lightest) */
+  --color-bg-page: #0f1318;
+  --color-bg-chart: #141a21;
+  --color-bg-diagram: #161e26;
+  --color-bg-panel: #171d24;
+  --color-bg-canvas: #1a2028;
+  --color-bg-subtle: #1e252e;
+  --color-bg-code: #232b36;
+
+  /* Borders */
+  --color-border: #2a3240;
+  --color-border-muted: #364050;
+  --color-border-grid-sm: #1e2a34;
+  --color-border-grid-lg: #263240;
+
+  /* Semantic */
+  --color-success-bg: #132a1e;
+  --color-success-fg: #4cc38a;
+  --color-success-border: #1a4030;
+  --color-error-bg: #2a1515;
+  --color-error-fg: #e55c5c;
+  --color-error-border: #3a2020;
+  --color-warning-bg: #2a2210;
+  --color-warning-fg: #e0a840;
+  --color-warning-border: #3a3015;
+
+  /* Trace / accent palette */
+  --color-trace-green: #4cc38a;
+  --color-trace-blue: #5a9bd5;
+  --color-trace-amber: #d4943a;
+  --color-trace-purple: #b87fd5;
+  --color-accent-teal: #3ab4a8;
+  --color-accent-teal-dim: #2a8c82;
+
+  /* Diagram-specific */
+  --color-diagram-stroke: #94a3b5;
+  --color-diagram-wire: #637080;
+  --color-diagram-node: #d4943a;
+  --color-diagram-net-bg: #232b36;
+  --color-diagram-net-border: #364050;
+}
