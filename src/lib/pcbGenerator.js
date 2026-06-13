@@ -1,3 +1,29 @@
+import {
+  COMPONENT_CLEARANCE,
+  DiagramLayoutError,
+  diagramComponentsOverlap,
+  findNearestLegalPlacement,
+  layoutCircuitDiagram,
+  repairDiagramLayout,
+  rerouteAffectedNets,
+  resolveComponentOverlaps,
+  routeDiagramWire,
+  validateDiagramLayout,
+} from './schematicLayout.js';
+
+export {
+  COMPONENT_CLEARANCE,
+  DiagramLayoutError,
+  diagramComponentsOverlap,
+  findNearestLegalPlacement,
+  layoutCircuitDiagram,
+  repairDiagramLayout,
+  rerouteAffectedNets,
+  resolveComponentOverlaps,
+  routeDiagramWire,
+  validateDiagramLayout,
+};
+
 export const validateCircuit = (circuit) => {
   const errors = [];
   const warnings = [];
@@ -83,12 +109,42 @@ const symbolTypeByKind = {
 
 const isOutputNode = (node) => /(^|_)(v?out|out|load|filtered)(_|$)/i.test(node);
 const isSourceKind = (kind) => kind === 'voltage_source' || kind === 'signal_source';
+const isUnconnectedNode = (node) => /^NC_/i.test(String(node));
+const isUnconnectedTerminal = (node, ref, pin) =>
+  isUnconnectedNode(node) || String(node) === `${ref}_${pin}`;
+
+export const LM358_SUBCIRCUIT = `.subckt LM358 INP INN OUT VCC VEE
+EGAIN NRAW 0 INP INN 100k
+RPOLE NRAW NINT 1k
+CPOLE NINT 0 15.9n
+EOUT OUT 0 NINT 0 1
+.ends LM358`;
+
+export const addMissingSpiceModels = (spice, circuit) => {
+  const source = String(spice || '');
+  const needsLm358 = circuit?.components?.some((part) => part.kind === 'opamp')
+    && !/^\s*\.subckt\s+LM358\b/im.test(source);
+  if (!needsLm358) return source;
+
+  const endPattern = /^\s*\.end\s*$/im;
+  return endPattern.test(source)
+    ? source.replace(endPattern, `${LM358_SUBCIRCUIT}\n.end`)
+    : `${source.trimEnd()}\n${LM358_SUBCIRCUIT}`;
+};
 
 const orderNonGroundNets = (circuit) => {
-  const all = [...new Set(circuit.components.flatMap((part) => part.nodes.map(String)))].filter((node) => node !== '0');
+  const connectedNodes = circuit.components.flatMap((part) =>
+    part.nodes
+      .map((node, index) => ({ node: String(node), pin: index + 1 }))
+      .filter(({ node, pin }) => !isUnconnectedTerminal(node, part.ref, pin))
+      .map(({ node }) => node),
+  );
+  const all = [...new Set(connectedNodes)].filter((node) => node !== '0');
   const sourceNodes = circuit.components
     .filter((part) => isSourceKind(part.kind))
-    .flatMap((part) => part.nodes)
+    .flatMap((part) =>
+      part.nodes.filter((node, index) => !isUnconnectedTerminal(node, part.ref, index + 1)),
+    )
     .filter((node) => node !== '0');
   return [
     ...new Set([
@@ -147,7 +203,7 @@ const pinPoint = (component, pinIndex, node, netPosition) => {
   };
 };
 
-export const buildCircuitDiagram = (circuit) => {
+const buildCircuitDiagramLegacy = (circuit) => {
   const signalY = 120;
   const groundY = 390;
   const netOrder = orderNonGroundNets(circuit);
@@ -239,10 +295,13 @@ export const buildCircuitDiagram = (circuit) => {
     };
   });
 
-  const netNames = [...new Set(circuit.components.flatMap((part) => part.nodes))];
-  const height = Math.max(500, ...components.map((component) => component.y + component.height / 2 + 80));
+  const spacedComponents = legacyResolveComponentOverlaps(components);
+  const netNames = [...new Set(circuit.components.flatMap((part) =>
+    part.nodes.filter((node, index) => !isUnconnectedTerminal(node, part.ref, index + 1)),
+  ))];
+  const height = Math.max(500, ...spacedComponents.map((component) => component.y + component.height / 2 + 80));
   const nets = netNames.map((name, index) => {
-    const connections = components.flatMap((component) =>
+    const connections = spacedComponents.flatMap((component) =>
       component.pins
         .filter((pin) => pin.node === name)
         .map((pin) => ({ ref: component.ref, pin: pin.pinIndex, x: pin.x, y: pin.y })),
@@ -258,8 +317,8 @@ export const buildCircuitDiagram = (circuit) => {
   });
 
   const netByName = new Map(nets.map((net) => [net.name, net]));
-  const wires = components.flatMap((component) =>
-    component.pins.map((pin) => {
+  const wires = spacedComponents.flatMap((component) =>
+    component.pins.filter((pin) => !isUnconnectedTerminal(pin.node, component.ref, pin.pinIndex)).map((pin) => {
       const net = netByName.get(pin.node);
       return {
         ref: component.ref,
@@ -274,7 +333,7 @@ export const buildCircuitDiagram = (circuit) => {
     }),
   );
 
-  return { title: circuit.title, width, height, components, nets, wires };
+  return { title: circuit.title, width, height, components: spacedComponents, nets, wires };
 };
 
 const escapeXml = (value) =>
@@ -286,6 +345,109 @@ const escapeXml = (value) =>
 
 const svgPolyline = (points) => points.map((point) => `${point.x},${point.y}`).join(' ');
 
+const ROUTE_CLEARANCE = 16;
+const LEGACY_COMPONENT_CLEARANCE = 24;
+
+const moveDiagramComponent = (component, dx, dy) => ({
+  ...component,
+  x: component.x + dx,
+  y: component.y + dy,
+  pins: component.pins.map((pin) => ({ ...pin, x: pin.x + dx, y: pin.y + dy })),
+});
+
+const legacyDiagramComponentsOverlap = (first, second, clearance = LEGACY_COMPONENT_CLEARANCE) => {
+  const horizontalGap = Math.abs(first.x - second.x) - (first.width + second.width) / 2;
+  const verticalGap = Math.abs(first.y - second.y) - (first.height + second.height) / 2;
+  return horizontalGap < clearance && verticalGap < clearance;
+};
+
+const legacyResolveComponentOverlaps = (components, clearance = LEGACY_COMPONENT_CLEARANCE) => {
+  const placed = [];
+  for (const original of components) {
+    let component = original;
+    let attempts = 0;
+    while (attempts < 50) {
+      const collision = placed.find((other) => legacyDiagramComponentsOverlap(component, other, clearance));
+      if (!collision) break;
+      const targetY = collision.y + (collision.height + component.height) / 2 + clearance;
+      component = moveDiagramComponent(component, 0, targetY - component.y);
+      attempts += 1;
+    }
+    placed.push(component);
+  }
+  return placed;
+};
+
+const componentBounds = (component, clearance = ROUTE_CLEARANCE) => ({
+  left: component.x - component.width / 2 - clearance,
+  right: component.x + component.width / 2 + clearance,
+  top: component.y - component.height / 2 - clearance,
+  bottom: component.y + component.height / 2 + clearance,
+});
+
+const segmentCrossesBounds = (from, to, bounds) => {
+  if (from.x === to.x) {
+    const minY = Math.min(from.y, to.y);
+    const maxY = Math.max(from.y, to.y);
+    return from.x > bounds.left && from.x < bounds.right && maxY > bounds.top && minY < bounds.bottom;
+  }
+  if (from.y === to.y) {
+    const minX = Math.min(from.x, to.x);
+    const maxX = Math.max(from.x, to.x);
+    return from.y > bounds.top && from.y < bounds.bottom && maxX > bounds.left && minX < bounds.right;
+  }
+  return false;
+};
+
+const routeCollisionCount = (points, obstacles) => points.slice(1).reduce(
+  (count, point, index) => count + obstacles.filter((bounds) =>
+    segmentCrossesBounds(points[index], point, bounds)).length,
+  0,
+);
+
+const compactRoute = (points) => points.filter((point, index) => {
+  if (index === 0) return true;
+  const previous = points[index - 1];
+  return point.x !== previous.x || point.y !== previous.y;
+});
+
+const legacyRouteDiagramWire = (diagram, wire) => {
+  if (wire.manual) return null;
+  const component = diagram.components.find((item) => item.ref === wire.ref);
+  const pin = component?.pins.find((item) => item.pinIndex === wire.pin);
+  const net = diagram.nets.find((item) => item.name === wire.node);
+  if (!component || !pin || !net) return wire.points;
+
+  const offset = wire.offset || { x: 0, y: 0 };
+  const start = { x: pin.x, y: pin.y };
+  const end = { x: net.x, y: net.y };
+  const bendX = pin.x + offset.x;
+  const bendY = net.y + offset.y;
+  const obstacles = diagram.components
+    .filter((item) => item.ref !== component.ref)
+    .map((item) => componentBounds(item));
+  const candidates = [
+    compactRoute([start, { x: bendX, y: bendY }, { x: end.x, y: bendY }, end]),
+    compactRoute([start, { x: end.x, y: start.y + offset.y }, end]),
+  ];
+  const clearCandidate = candidates.find((points) => routeCollisionCount(points, obstacles) === 0);
+  if (clearCandidate) return clearCandidate;
+
+  const blockingBounds = obstacles.filter((bounds) => candidates.some((points) =>
+    routeCollisionCount(points, [bounds]) > 0));
+  const topLane = Math.min(start.y, end.y, ...blockingBounds.map((bounds) => bounds.top)) - ROUTE_CLEARANCE;
+  const bottomLane = Math.max(start.y, end.y, ...blockingBounds.map((bounds) => bounds.bottom)) + ROUTE_CLEARANCE;
+  const detours = [topLane, bottomLane].map((laneY) => compactRoute([
+    start,
+    { x: start.x, y: laneY },
+    { x: end.x, y: laneY },
+    end,
+  ]));
+
+  return detours.sort((first, second) =>
+    routeCollisionCount(first, obstacles) - routeCollisionCount(second, obstacles))[0];
+};
+
 const diagramTerminalPoint = (diagram, terminal) => {
   const component = diagram.components.find((item) => item.ref === terminal.ref);
   const pin = component?.pins.find((item) => item.pinIndex === terminal.pin);
@@ -293,30 +455,11 @@ const diagramTerminalPoint = (diagram, terminal) => {
 };
 
 const diagramWirePoints = (diagram, wire) => {
-  if (wire.manual) {
-    const from = diagramTerminalPoint(diagram, wire.from);
-    const to = diagramTerminalPoint(diagram, wire.to);
-    if (wire.offset) {
-      return [
-        from,
-        { x: (from.x + to.x) / 2 + wire.offset.x, y: (from.y + to.y) / 2 + wire.offset.y },
-        to,
-      ];
-    }
-    return [from, to];
-  }
-
-  const component = diagram.components.find((item) => item.ref === wire.ref);
-  const pin = component?.pins.find((item) => item.pinIndex === wire.pin);
-  const net = diagram.nets.find((item) => item.name === wire.node);
-  if (!pin || !net) return wire.points;
-  const offset = wire.offset || { x: 0, y: 0 };
-  return [
-    { x: pin.x, y: pin.y },
-    { x: pin.x + offset.x, y: net.y + offset.y },
-    { x: net.x, y: net.y },
-  ];
+  if (wire.points?.length) return wire.points;
+  return routeDiagramWire(diagram, wire);
 };
+
+export const buildCircuitDiagram = (circuit) => layoutCircuitDiagram(circuit);
 
 const renderSymbolSvg = (component) => {
   const { x, y, width, height, symbolType, orientation } = component;
@@ -394,9 +537,18 @@ export const toDiagramSvg = (diagram) => `<?xml version="1.0" encoding="UTF-8"?>
     .diagram-bg{fill:#fafaf7}.diagram-wire,.diagram-symbol{fill:none;stroke:#17201a;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.diagram-wire{stroke:#617066;stroke-width:1.5}.diagram-fill{fill:#fff;stroke:#17201a;stroke-width:2}.diagram-node{fill:#23533a}.diagram-net{fill:#eef0ea;stroke:#b8beb5}.diagram-text{fill:#17201a;font:700 14px Inter,Arial,sans-serif}.diagram-small{fill:#425147;font:12px Inter,Arial,sans-serif}.thin{stroke-width:1.5}
   </style>
   <rect class="diagram-bg" width="${diagram.width}" height="${diagram.height}" rx="8" />
-  ${diagram.wires.map((wire) => `<polyline class="diagram-wire" points="${svgPolyline(diagramWirePoints(diagram, wire))}" />`).join('\n  ')}
-  ${diagram.nets.map((net) => `<g><circle class="diagram-node" cx="${net.x}" cy="${net.y}" r="4" /><rect class="diagram-net" x="${net.labelX}" y="${net.labelY}" width="${net.labelWidth}" height="26" rx="13" /><text class="diagram-small" x="${net.labelX + net.labelWidth / 2}" y="${net.labelY + 17}" text-anchor="middle">${escapeXml(net.name)}</text></g>`).join('\n  ')}
-  ${diagram.components.map((component) => `<g>${renderSymbolSvg(component)}<text class="diagram-text" x="${component.x}" y="${component.y - component.height / 2 - 12}" text-anchor="middle">${escapeXml(component.ref)}</text><text class="diagram-small" x="${component.x}" y="${component.y + component.height / 2 + 20}" text-anchor="middle">${escapeXml(component.value)}</text>${component.pins.map((pin) => `<text class="diagram-small" x="${pin.x}" y="${pin.y - 8}" text-anchor="middle">${pin.pinIndex}</text>`).join('')}</g>`).join('\n  ')}
+  ${diagram.wires.map((wire) => {
+    const points = diagramWirePoints(diagram, wire);
+    return `<polyline class="diagram-wire" points="${svgPolyline(points)}" />`;
+  }).join('\n  ')}
+  ${(diagram.netLabels || []).map((label) => label.name === '0'
+    ? `<g class="diagram-ground" aria-label="Ground"><circle class="diagram-node" cx="${label.x}" cy="${label.y}" r="4" /><line class="diagram-symbol" x1="${label.x}" y1="${label.y}" x2="${label.x}" y2="${label.y + 16}" /><line class="diagram-symbol" x1="${label.x - 18}" y1="${label.y + 16}" x2="${label.x + 18}" y2="${label.y + 16}" /><line class="diagram-symbol" x1="${label.x - 12}" y1="${label.y + 22}" x2="${label.x + 12}" y2="${label.y + 22}" /><line class="diagram-symbol" x1="${label.x - 6}" y1="${label.y + 28}" x2="${label.x + 6}" y2="${label.y + 28}" /></g>`
+    : `<g><circle class="diagram-node" cx="${label.x}" cy="${label.y}" r="4" /><rect class="diagram-net" x="${label.labelX}" y="${label.labelY}" width="${label.labelWidth}" height="26" rx="13" /><text class="diagram-small" x="${label.labelX + label.labelWidth / 2}" y="${label.labelY + 17}" text-anchor="middle">${escapeXml(label.name)}</text></g>`).join('\n  ')}
+  ${diagram.components.map((component) => {
+    const refLabel = diagram.labels?.find((label) => label.ref === component.ref && label.kind === 'ref');
+    const valueLabel = diagram.labels?.find((label) => label.ref === component.ref && label.kind === 'value');
+    return `<g>${renderSymbolSvg(component)}<text class="diagram-text" x="${refLabel?.x || component.x}" y="${refLabel?.y || component.y - component.height / 2 - 12}" text-anchor="middle">${escapeXml(component.ref)}</text><text class="diagram-small" x="${valueLabel?.x || component.x}" y="${valueLabel?.y || component.y + component.height / 2 + 20}" text-anchor="middle">${escapeXml(component.value)}</text>${component.pins.map((pin) => `<text class="diagram-small" x="${pin.x}" y="${pin.y - 8}" text-anchor="middle">${pin.pinIndex}</text>`).join('')}</g>`;
+  }).join('\n  ')}
 </svg>`;
 
 export const toSpice = (circuit) => {
@@ -418,6 +570,7 @@ export const toSpice = (circuit) => {
   lines.push('.model DGEN D(IS=1e-14 RS=1 N=1)');
   lines.push('.model DRED D(IS=1e-20 N=2 RS=10 CJO=2p BV=5 IBV=10u)');
   lines.push('.model Q2N2222 NPN(IS=1e-14 BF=200 VAF=100)');
+  if (circuit.components.some((part) => part.kind === 'opamp')) lines.push(LM358_SUBCIRCUIT);
   lines.push('.tran 0.1ms 20ms');
   lines.push('.op');
   lines.push('.end');
@@ -428,11 +581,11 @@ export const toKiCadNetlist = (circuit) => {
   const nets = [...new Set(circuit.components.flatMap((part) => part.nodes))];
   const compXml = circuit.components
     .map(
-      (part) => `    <comp ref="${part.ref}">
-      <value>${part.value}</value>
-      <footprint>${part.footprint}</footprint>
+      (part) => `    <comp ref="${escapeXml(part.ref)}">
+      <value>${escapeXml(part.value)}</value>
+      <footprint>${escapeXml(part.footprint || '')}</footprint>
       <fields>
-        <field name="Kind">${part.kind}</field>
+        <field name="Kind">${escapeXml(part.kind)}</field>
       </fields>
     </comp>`,
     )
@@ -445,9 +598,9 @@ export const toKiCadNetlist = (circuit) => {
             .map((node, pinIndex) => ({ node, pinIndex: pinIndex + 1, ref: part.ref }))
             .filter((pin) => pin.node === net),
         )
-        .map((pin) => `      <node ref="${pin.ref}" pin="${pin.pinIndex}" />`)
+        .map((pin) => `      <node ref="${escapeXml(pin.ref)}" pin="${pin.pinIndex}" />`)
         .join('\n');
-      return `    <net code="${index}" name="${net}">
+      return `    <net code="${index}" name="${escapeXml(net)}">
 ${nodes}
     </net>`;
     })

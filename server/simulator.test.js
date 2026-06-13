@@ -23,6 +23,22 @@ describe('ngspice simulator helpers', () => {
     expect(deck.trim().endsWith('.end')).toBe(true);
   });
 
+  it('injects the built-in LM358 model into older op amp decks', () => {
+    const opampCircuit = {
+      components: [
+        { ref: 'XU1', kind: 'opamp', nodes: ['0', 'N1', 'VOUT', 'VCC', 'VEE'] },
+      ],
+    };
+    const deck = buildSimulationDeck(
+      '* op amp\nXU1 0 N1 VOUT VCC VEE LM358\n.end',
+      ['VOUT'],
+      opampCircuit,
+    );
+
+    expect(deck).toContain('.subckt LM358 INP INN OUT VCC VEE');
+    expect(deck).toContain('.ends LM358');
+  });
+
   it('parses ngspice waveform data into series points', () => {
     const raw = 'time v(VIN) v(VOUT)\n0 5 0\n0.001 5 3.2\n';
     const series = parseWaveformData(raw, ['VIN', 'VOUT']);

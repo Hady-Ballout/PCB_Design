@@ -1,8 +1,9 @@
 import { createServer } from 'node:http';
 import { loadEnv } from './env.js';
-import { buildCircuitResponse, normalizeAiCircuit } from './circuitResponse.js';
-import { generateCircuitWithOllama } from './ollamaProvider.js';
+import { buildCircuitResponse, reconcileCircuitRevision } from './circuitResponse.js';
+import { streamCircuitWithOllama } from './ollamaProvider.js';
 import { runNgspiceSimulation } from './simulator.js';
+import { buildStreamingSpice } from './streamingCircuit.js';
 
 loadEnv();
 
@@ -23,6 +24,20 @@ const readJsonBody = async (request) => {
   for await (const chunk of request) chunks.push(chunk);
   const raw = Buffer.concat(chunks).toString('utf8');
   return raw ? JSON.parse(raw) : {};
+};
+
+const startJsonStream = (response) => {
+  response.writeHead(200, {
+    'Content-Type': 'application/x-ndjson; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    'Access-Control-Allow-Origin': 'http://127.0.0.1:5173',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+  });
+};
+
+const writeStreamEvent = (response, event) => {
+  response.write(`${JSON.stringify(event)}\n`);
 };
 
 const server = createServer(async (request, response) => {
@@ -49,11 +64,44 @@ const server = createServer(async (request, response) => {
         return;
       }
 
-      const aiCircuit = await generateCircuitWithOllama(prompt);
-      const circuit = normalizeAiCircuit(aiCircuit, prompt);
-      sendJson(response, 200, buildCircuitResponse(circuit, { rawPrompt: prompt, type: circuit.type }, 'ollama'));
+      const messages = Array.isArray(body.messages) ? body.messages : [];
+      const currentDesign = body.currentDesign?.circuit ? body.currentDesign : null;
+      startJsonStream(response);
+      writeStreamEvent(response, {
+        type: 'spice',
+        provisional: true,
+        componentCount: currentDesign?.circuit.components?.length || 0,
+        spice: currentDesign?.spice || '* AI is preparing the circuit...\n* Components will appear here as they are generated.',
+      });
+
+      let lastSpiceEvent = '';
+      const aiCircuit = await streamCircuitWithOllama(prompt, messages, currentDesign, (content, streamState) => {
+        const partial = buildStreamingSpice(content, prompt, currentDesign?.circuit);
+        const eventKey = `${streamState.attempt}:${partial.spice}`;
+        if (eventKey === lastSpiceEvent) return;
+        lastSpiceEvent = eventKey;
+        writeStreamEvent(response, {
+          type: 'spice',
+          provisional: true,
+          correcting: streamState.correcting,
+          ...partial,
+        });
+      });
+      const circuit = reconcileCircuitRevision(aiCircuit, prompt, currentDesign?.circuit);
+      writeStreamEvent(response, {
+        type: 'complete',
+        data: buildCircuitResponse(circuit, { rawPrompt: prompt, type: circuit.type }, 'ollama'),
+      });
+      response.end();
     } catch (error) {
-      sendJson(response, 500, { error: error.message });
+      const errorCode = error.code || 'generation_failed';
+      console.error(`[circuit-generation:${errorCode}] ${error.message}`);
+      if (response.headersSent) {
+        writeStreamEvent(response, { type: 'error', code: errorCode, error: error.message });
+        response.end();
+      } else {
+        sendJson(response, 500, { code: errorCode, error: error.message });
+      }
     }
     return;
   }

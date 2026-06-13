@@ -43,6 +43,30 @@ export function normalizeAiCircuit(aiCircuit, prompt) {
   };
 }
 
+export function reconcileCircuitRevision(aiCircuit, prompt, existingCircuit = null) {
+  const revised = normalizeAiCircuit(aiCircuit, prompt);
+  if (!existingCircuit?.components?.length) return revised;
+
+  const existingByRef = new Map(
+    existingCircuit.components.map((component) => [String(component.ref).toUpperCase(), component]),
+  );
+  const components = revised.components.map((component) => {
+    const existing = existingByRef.get(component.ref);
+    if (!existing) return component;
+    return {
+      ...component,
+      footprint: component.footprint || String(existing.footprint || ''),
+    };
+  });
+
+  return {
+    ...revised,
+    title: revised.title || String(existingCircuit.title || 'AI generated circuit'),
+    type: revised.type || String(existingCircuit.type || 'ai_generated'),
+    components,
+  };
+}
+
 export function buildCircuitResponse(circuit, intent, source) {
   const diagram = buildCircuitDiagram(circuit);
   return {

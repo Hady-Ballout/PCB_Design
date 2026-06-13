@@ -1,5 +1,25 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  buildConversationContext,
+  chatTitleFromPrompt,
+  createChat,
+  loadChatStore,
+  saveChatStore,
+} from './lib/chatStore.js';
+import {
+  circuitElectricalSignature,
+  circuitFromDiagram,
+  parseKiCadNetlist,
+  parseSpiceNetlist,
+  synchronizeResult,
+} from './lib/circuitSync.js';
 import { toDiagramSvg } from './lib/pcbGenerator.js';
+import {
+  findNearestLegalPlacement,
+  layoutCircuitDiagram,
+  rerouteAffectedNets,
+  routeDiagramWire,
+} from './lib/schematicLayout.js';
 
 const downloadText = (filename, text, mime = 'text/plain') => {
   const blob = new Blob([text], { type: mime });
@@ -16,6 +36,81 @@ const formatAxisValue = (value) => {
   if (value === 0) return '0';
   if (Math.abs(value) >= 1_000 || Math.abs(value) < 0.01) return value.toExponential(2);
   return Number(value.toFixed(3)).toString();
+};
+
+const messageId = () => globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+const formatChatTime = (timestamp) => {
+  const date = new Date(timestamp);
+  const today = new Date();
+  if (date.toDateString() === today.toDateString()) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+};
+
+const EDITOR_VIEW_LABELS = {
+  spice: 'Spice',
+  canvas: 'Canvas',
+  kicad: 'KiCad',
+};
+
+const EDITOR_SPLIT_STORAGE_KEY = 'prompt-to-pcb-editor-split-v1';
+
+const clampEditorSplit = (value, minimum, maximum, fallback) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(maximum, Math.max(minimum, number)) : fallback;
+};
+
+const loadEditorSplit = () => {
+  try {
+    const saved = JSON.parse(globalThis.localStorage?.getItem(EDITOR_SPLIT_STORAGE_KEY) || 'null');
+    return {
+      columns: clampEditorSplit(saved?.columns, 25, 75, 50),
+      rows: clampEditorSplit(saved?.rows, 32, 72, 58),
+    };
+  } catch {
+    return { columns: 50, rows: 58 };
+  }
+};
+
+const readGenerationStream = async (response, onEvent) => {
+  if (!response.body) throw new Error('Generation response could not be streamed.');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = '';
+  let completed = null;
+
+  const consumeLine = (line) => {
+    if (!line.trim()) return;
+    const event = JSON.parse(line);
+    if (event.type === 'error') {
+      const error = new Error(event.error || 'Circuit generation failed.');
+      error.code = event.code;
+      throw error;
+    }
+    onEvent(event);
+    if (event.type === 'complete') completed = event.data;
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffered += decoder.decode(value || new Uint8Array(), { stream: !done });
+    const lines = buffered.split(/\r?\n/);
+    buffered = lines.pop() || '';
+    lines.forEach(consumeLine);
+    if (done) break;
+  }
+  if (buffered.trim()) consumeLine(buffered);
+  if (!completed) throw new Error('Generation ended before the final circuit was returned.');
+  return completed;
+};
+
+const markSpiceAsProvisional = (spice, correcting = false) => {
+  const label = correcting
+    ? '* Unconfirmed AI preview - correcting an invalid model response'
+    : '* Unconfirmed AI preview - generation is still in progress';
+  return `${label}\n${String(spice || '')}`;
 };
 
 function WaveformChart({ waveform }) {
@@ -230,6 +325,8 @@ const diagramPath = (points) => points.map((point) => `${point.x},${point.y}`).j
 
 const cloneDiagram = (diagram) => (diagram ? structuredClone(diagram) : null);
 const wireId = (wire) => wire.id || `${wire.ref}-${wire.pin}-${wire.node}`;
+const isUnconnectedTerminal = (node, ref, pin) =>
+  /^NC_/i.test(String(node)) || String(node) === `${ref}_${pin}`;
 const symbolDefaults = {
   resistor: { kind: 'resistor', symbolType: 'resistor', width: 130, height: 58, orientation: 'horizontal', value: '1k', prefix: 'R', nodes: 2 },
   capacitor: { kind: 'capacitor', symbolType: 'capacitor', width: 98, height: 112, orientation: 'vertical', value: '100nF', prefix: 'C', nodes: 2 },
@@ -316,12 +413,17 @@ const makePins = (component, nodes) =>
 
 const addedComponent = (diagram, type) => {
   const defaults = symbolDefaults[type];
-  const sameKindCount = diagram.components.filter((component) => component.kind === defaults.kind).length + 1;
+  const existingRefs = new Set(diagram.components.map((component) => component.ref));
+  let nextRefNumber = 1;
+  while (existingRefs.has(`${defaults.prefix}${nextRefNumber}`)) nextRefNumber += 1;
   const column = diagram.components.length % 3;
   const row = Math.floor(diagram.components.length / 3);
-  const nodes = Array.from({ length: defaults.nodes }, (_, index) => `${defaults.prefix}${sameKindCount}_${index + 1}`);
+  const nodes = Array.from(
+    { length: defaults.nodes },
+    (_, index) => `NC_${defaults.prefix}${nextRefNumber}_${index + 1}`,
+  );
   const component = {
-    ref: `${defaults.prefix}${sameKindCount}`,
+    ref: `${defaults.prefix}${nextRefNumber}`,
     kind: defaults.kind,
     value: defaults.value,
     nodes,
@@ -344,29 +446,8 @@ const terminalPoint = (diagram, terminal) => {
 };
 
 const wirePoints = (diagram, wire) => {
-  if (wire.manual) {
-    const from = terminalPoint(diagram, wire.from);
-    const to = terminalPoint(diagram, wire.to);
-    if (wire.offset) {
-      return [
-        from,
-        { x: (from.x + to.x) / 2 + wire.offset.x, y: (from.y + to.y) / 2 + wire.offset.y },
-        to,
-      ];
-    }
-    return [from, to];
-  }
-
-  const component = diagram.components.find((item) => item.ref === wire.ref);
-  const pin = component?.pins.find((item) => item.pinIndex === wire.pin);
-  const net = diagram.nets.find((item) => item.name === wire.node);
-  if (!pin || !net) return wire.points;
-  const offset = wire.offset || { x: 0, y: 0 };
-  return [
-    { x: pin.x, y: pin.y },
-    { x: pin.x + offset.x, y: net.y + offset.y },
-    { x: net.x, y: net.y },
-  ];
+  if (wire.points?.length) return wire.points;
+  return routeDiagramWire(diagram, wire);
 };
 
 function DiagramSymbol({ component }) {
@@ -597,10 +678,10 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
   const beginNetDrag = (event, net) => {
     event.preventDefault();
     event.stopPropagation();
-    onSelect({ type: 'net', name: net.name });
+    onSelect({ type: 'netLabel', id: net.id, name: net.name });
     if (tool === 'wire') return;
     capturePointer(event);
-    setDrag({ type: 'net', name: net.name, start: svgPointer(event, diagram), original: net });
+    setDrag({ type: 'netLabel', id: net.id, start: svgPointer(event, diagram), original: net });
   };
 
   const beginWireDrag = (event, wire) => {
@@ -637,6 +718,9 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
           {
             id: `wire-${Date.now()}`,
             manual: true,
+            routingMode: 'manual',
+            preferredWaypoints: [],
+            points: [],
             from: pendingTerminal,
             to: terminal,
           },
@@ -653,28 +737,46 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
     onChange((current) => {
       if (!current) return current;
       if (activeDrag.type === 'component') {
+        const target = { x: activeDrag.original.x + dx, y: activeDrag.original.y + dy };
+        const placement = findNearestLegalPlacement(current, activeDrag.ref, target);
+        const moved = placement
+          ? movedComponent(activeDrag.original, placement.x - activeDrag.original.x, placement.y - activeDrag.original.y)
+          : activeDrag.original;
         return {
           ...current,
+          width: Math.max(current.width, placement?.width || 0),
+          height: Math.max(current.height, placement?.height || 0),
           components: current.components.map((component) =>
-            component.ref === activeDrag.ref ? movedComponent(activeDrag.original, dx, dy) : component,
+            component.ref === activeDrag.ref ? moved : component,
           ),
         };
       }
 
       return {
         ...current,
-        ...(activeDrag.type === 'net'
-          ? { nets: current.nets.map((net) => (net.name === activeDrag.name ? movedNet(activeDrag.original, dx, dy) : net)) }
+        ...(activeDrag.type === 'netLabel'
+          ? { netLabels: current.netLabels.map((net) => (net.id === activeDrag.id ? movedNet(activeDrag.original, dx, dy) : net)) }
           : {
               wires: current.wires.map((wire) =>
                 wireId(wire) === activeDrag.id
-                  ? {
-                      ...wire,
-                      offset: {
-                        x: (activeDrag.original.offset?.x || 0) + dx,
-                        y: (activeDrag.original.offset?.y || 0) + dy,
-                      },
-                    }
+                  ? (() => {
+                      const endpoints = wire.manual
+                        ? { from: terminalPoint(current, wire.from), to: terminalPoint(current, wire.to) }
+                        : {
+                            from: terminalPoint(current, { ref: wire.ref, pin: wire.pin }),
+                            to: current.netLabels?.find((label) => label.id === wire.labelId) || { x: 0, y: 0 },
+                          };
+                      const originalWaypoint = activeDrag.original.preferredWaypoints?.[0] || {
+                        x: (endpoints.from.x + endpoints.to.x) / 2,
+                        y: (endpoints.from.y + endpoints.to.y) / 2,
+                      };
+                      return {
+                        ...wire,
+                        routingMode: 'manual',
+                        preferredWaypoints: [{ x: originalWaypoint.x + dx, y: originalWaypoint.y + dy }],
+                        points: [],
+                      };
+                    })()
                   : wire,
               ),
             }),
@@ -704,6 +806,7 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
 
   const endDrag = (event) => {
     if (!drag) return;
+    const completedDrag = drag;
     if (pendingDragRef.current) {
       applyDragMove(pendingDragRef.current.activeDrag, pendingDragRef.current.point);
       pendingDragRef.current = null;
@@ -714,6 +817,28 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
     }
     releasePointer(event);
     setDrag(null);
+    onChange((current) => {
+      if (!current) return current;
+      try {
+        return rerouteAffectedNets(current);
+      } catch {
+        const reverted = cloneDiagram(current);
+        if (completedDrag.type === 'component') {
+          reverted.components = reverted.components.map((component) =>
+            component.ref === completedDrag.ref ? completedDrag.original : component,
+          );
+        } else if (completedDrag.type === 'netLabel') {
+          reverted.netLabels = reverted.netLabels.map((label) =>
+            label.id === completedDrag.id ? completedDrag.original : label,
+          );
+        } else {
+          reverted.wires = reverted.wires.map((wire) =>
+            wireId(wire) === completedDrag.id ? completedDrag.original : wire,
+          );
+        }
+        return rerouteAffectedNets(reverted);
+      }
+    });
   };
 
   const cancelPendingWire = (event) => {
@@ -727,6 +852,10 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
   };
 
   const pendingWireStart = pendingTerminal ? terminalPoint(diagram, pendingTerminal) : null;
+  const visibleWires = diagram.wires.filter(
+    (wire) => wire.manual || !isUnconnectedTerminal(wire.node, wire.ref, wire.pin),
+  );
+  const visibleNets = diagram.netLabels || [];
 
   return (
     <div className="diagram-card">
@@ -751,14 +880,17 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
         </defs>
         <rect className="diagram-bg" width={diagram.width} height={diagram.height} rx="8" onPointerDown={cancelPendingWire} />
         <rect width={diagram.width} height={diagram.height} fill="url(#diagram-grid-large)" pointerEvents="none" />
-        {diagram.wires.map((wire) => (
-          <polyline
-            key={wireId(wire)}
-            className={selected?.type === 'wire' && selected.id === wireId(wire) ? 'diagram-wire selected' : 'diagram-wire'}
-            points={diagramPath(wirePoints(diagram, wire))}
-            onPointerDown={(event) => beginWireDrag(event, wire)}
-          />
-        ))}
+        {visibleWires.map((wire) => {
+          const points = wirePoints(diagram, wire);
+          return (
+            <polyline
+              key={wireId(wire)}
+              className={selected?.type === 'wire' && selected.id === wireId(wire) ? 'diagram-wire selected' : 'diagram-wire'}
+              points={diagramPath(points)}
+              onPointerDown={(event) => beginWireDrag(event, wire)}
+            />
+          );
+        })}
         {pendingWireStart && wirePointer && (
           <polyline
             className="diagram-wire pending"
@@ -766,28 +898,43 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
             pointerEvents="none"
           />
         )}
-        {diagram.nets.map((net) => (
+        {visibleNets.map((net) => (
           <g
-            key={net.name}
-            className={selected?.type === 'net' && selected.name === net.name ? 'editable-net selected' : 'editable-net'}
+            key={net.id}
+            className={selected?.type === 'netLabel' && selected.id === net.id ? 'editable-net selected' : 'editable-net'}
             onPointerDown={(event) => beginNetDrag(event, net)}
           >
-            <circle className="diagram-node" cx={net.x} cy={net.y} r="4" />
-            <rect className="diagram-net" x={net.labelX} y={net.labelY} width={net.labelWidth} height="26" rx="13" />
-            <text className="diagram-small" x={net.labelX + net.labelWidth / 2} y={net.labelY + 17} textAnchor="middle">{net.name}</text>
+            {net.name === '0' ? (
+              <g className="diagram-ground" aria-label="Ground">
+                <circle className="diagram-node" cx={net.x} cy={net.y} r="4" />
+                <line x1={net.x} y1={net.y} x2={net.x} y2={net.y + 16} />
+                <line x1={net.x - 18} y1={net.y + 16} x2={net.x + 18} y2={net.y + 16} />
+                <line x1={net.x - 12} y1={net.y + 22} x2={net.x + 12} y2={net.y + 22} />
+                <line x1={net.x - 6} y1={net.y + 28} x2={net.x + 6} y2={net.y + 28} />
+              </g>
+            ) : (
+              <>
+                <circle className="diagram-node" cx={net.x} cy={net.y} r="4" />
+                <rect className="diagram-net" x={net.labelX} y={net.labelY} width={net.labelWidth} height="26" rx="13" />
+                <text className="diagram-small" x={net.labelX + net.labelWidth / 2} y={net.labelY + 17} textAnchor="middle">{net.name}</text>
+              </>
+            )}
           </g>
         ))}
-        {diagram.components.map((component) => (
+        {diagram.components.map((component) => {
+          const refLabel = diagram.labels?.find((label) => label.ref === component.ref && label.kind === 'ref');
+          const valueLabel = diagram.labels?.find((label) => label.ref === component.ref && label.kind === 'value');
+          return (
           <g
             key={component.ref}
             className={selected?.type === 'component' && selected.ref === component.ref ? 'editable-component selected' : 'editable-component'}
             onPointerDown={(event) => beginComponentDrag(event, component)}
           >
             <DiagramSymbol component={component} />
-            <text className="diagram-text" x={component.x} y={component.y - component.height / 2 - 12} textAnchor="middle">
+            <text className="diagram-text" x={refLabel?.x || component.x} y={refLabel?.y || component.y - component.height / 2 - 12} textAnchor="middle">
               {component.ref}
             </text>
-            <text className="diagram-small" x={component.x} y={component.y + component.height / 2 + 20} textAnchor="middle">
+            <text className="diagram-small" x={valueLabel?.x || component.x} y={valueLabel?.y || component.y + component.height / 2 + 20} textAnchor="middle">
               {component.value}
             </text>
             {component.pins.map((pin) => (
@@ -805,41 +952,120 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
               </g>
             ))}
           </g>
-        ))}
+          );
+        })}
       </svg>
     </div>
   );
 }
 
 function App() {
-  const [prompt, setPrompt] = useState('');
-  const [result, setResult] = useState(null);
-  const [editableSpice, setEditableSpice] = useState('');
-  const [editableKicadNetlist, setEditableKicadNetlist] = useState('');
-  const [editedDiagram, setEditedDiagram] = useState(null);
+  const [chatStore, setChatStore] = useState(loadChatStore);
   const [diagramTool, setDiagramTool] = useState('select');
   const [diagramSelection, setDiagramSelection] = useState(null);
   const [pendingTerminal, setPendingTerminal] = useState(null);
-  const [simulationRun, setSimulationRun] = useState(null);
-  const [activeTab, setActiveTab] = useState('summary');
+  const [openEditorViews, setOpenEditorViews] = useState(['spice']);
+  const [activeEditorView, setActiveEditorView] = useState('spice');
+  const [editorSplit, setEditorSplit] = useState(loadEditorSplit);
+  const [resizingAxis, setResizingAxis] = useState(null);
+  const [chatPanelView, setChatPanelView] = useState('conversation');
   const [page, setPage] = useState(() => {
     if (window.location.hash === '#waveform') return 'waveform';
-    if (window.location.hash === '#diagram') return 'diagram';
     return 'workspace';
   });
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatingChatId, setGeneratingChatId] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
-  const [error, setError] = useState('');
-  const [simulationError, setSimulationError] = useState('');
+  const messagesEndRef = useRef(null);
+  const spiceEditorRef = useRef(null);
+  const resizeDragRef = useRef(null);
+  const activeChat = chatStore.chats.find((chat) => chat.id === chatStore.activeChatId) || chatStore.chats[0];
+  const prompt = activeChat?.draft || '';
+  const result = activeChat?.result || null;
+  const editableSpice = activeChat?.editableSpice || '';
+  const editableKicadNetlist = activeChat?.editableKicadNetlist || '';
+  const editedDiagram = activeChat?.editedDiagram || null;
+  const simulationRun = activeChat?.simulationRun || null;
+  const error = activeChat?.error || '';
+  const simulationError = activeChat?.simulationError || '';
+  const spiceSyncError = activeChat?.spiceSyncError || '';
+  const kicadSyncError = activeChat?.kicadSyncError || '';
+  const isGenerating = generatingChatId === activeChat?.id;
+  const generationBusy = Boolean(generatingChatId);
+  const sortedChats = useMemo(
+    () => [...chatStore.chats].sort((a, b) => b.updatedAt - a.updatedAt),
+    [chatStore.chats],
+  );
+
+  const updateChat = (chatId, updater) => {
+    setChatStore((current) => ({
+      ...current,
+      chats: current.chats.map((chat) => (chat.id === chatId ? updater(chat) : chat)),
+    }));
+  };
+
+  const updateActiveChat = (updater) => updateChat(chatStore.activeChatId, updater);
+  const setChatField = (field, value) => {
+    updateActiveChat((chat) => ({
+      ...chat,
+      [field]: typeof value === 'function' ? value(chat[field]) : value,
+    }));
+  };
+  const setPrompt = (value) => setChatField('draft', value);
+  const setEditableSpice = (value) => setChatField('editableSpice', value);
+  const setEditableKicadNetlist = (value) => setChatField('editableKicadNetlist', value);
+  const setEditedDiagram = (value) => setChatField('editedDiagram', value);
+  const setSimulationRun = (value) => setChatField('simulationRun', value);
+  const setError = (value) => setChatField('error', value);
+  const setSimulationError = (value) => setChatField('simulationError', value);
+
+  const applyDiagramChange = (value) => {
+    updateActiveChat((chat) => {
+      try {
+        const currentDiagram = chat.editedDiagram || chat.result?.diagram;
+        const nextDiagram = typeof value === 'function' ? value(currentDiagram) : value;
+        if (!chat.result || !nextDiagram) return { ...chat, editedDiagram: nextDiagram };
+
+        const nextCircuit = circuitFromDiagram(nextDiagram, chat.result.circuit);
+        if (circuitElectricalSignature(nextCircuit) === circuitElectricalSignature(chat.result.circuit)) {
+          return { ...chat, editedDiagram: nextDiagram, error: '' };
+        }
+
+        const synchronized = synchronizeResult(chat.result, nextCircuit, nextDiagram);
+        return {
+          ...chat,
+          updatedAt: Date.now(),
+          result: synchronized,
+          editedDiagram: synchronized.diagram,
+          editableSpice: synchronized.spice,
+          editableKicadNetlist: synchronized.kicadNetlist,
+          simulationRun: null,
+          simulationError: '',
+          spiceSyncError: '',
+          kicadSyncError: '',
+          error: '',
+        };
+      } catch (layoutError) {
+        return { ...chat, error: layoutError.message };
+      }
+    });
+  };
+
+  useEffect(() => {
+    saveChatStore(chatStore);
+  }, [chatStore]);
+
+  useEffect(() => {
+    try {
+      globalThis.localStorage?.setItem(EDITOR_SPLIT_STORAGE_KEY, JSON.stringify(editorSplit));
+    } catch {
+      // Resizing still works when browser storage is unavailable.
+    }
+  }, [editorSplit]);
 
   useEffect(() => {
     const syncPageFromHash = () => {
       if (window.location.hash === '#waveform') {
         setPage('waveform');
-        return;
-      }
-      if (window.location.hash === '#diagram') {
-        setPage('diagram');
         return;
       }
       setPage('workspace');
@@ -850,15 +1076,120 @@ function App() {
   }, []);
 
   useEffect(() => {
-    setEditedDiagram(cloneDiagram(result?.diagram));
+    if (result?.diagram && !activeChat?.editedDiagram) {
+      setEditedDiagram(cloneDiagram(result.diagram));
+    }
+  }, [result?.diagram, activeChat?.editedDiagram]);
+
+  useEffect(() => {
     setDiagramSelection(null);
     setPendingTerminal(null);
     setDiagramTool('select');
-  }, [result?.diagram]);
+  }, [chatStore.activeChatId]);
 
   useEffect(() => {
-    if (activeTab === 'diagram') setActiveTab('summary');
-  }, [activeTab]);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, [chatStore.activeChatId, activeChat?.messages.length, generatingChatId, chatPanelView]);
+
+  useEffect(() => {
+    if (!isGenerating || !openEditorViews.includes('spice') || !spiceEditorRef.current) return;
+    spiceEditorRef.current.scrollTop = spiceEditorRef.current.scrollHeight;
+  }, [editableSpice, isGenerating, openEditorViews]);
+
+  useEffect(() => {
+    if (!result || isGenerating || !activeChat) return undefined;
+    if (editableSpice === result.spice) {
+      if (spiceSyncError) setChatField('spiceSyncError', '');
+      return undefined;
+    }
+
+    const chatId = activeChat.id;
+    const source = editableSpice;
+    const timer = window.setTimeout(() => {
+      updateChat(chatId, (chat) => {
+        if (!chat.result || chat.editableSpice !== source) return chat;
+        const parsed = parseSpiceNetlist(source, chat.result.circuit);
+        if (!parsed.ok) return { ...chat, spiceSyncError: parsed.errors.join(' ') };
+
+        if (circuitElectricalSignature(parsed.circuit) === circuitElectricalSignature(chat.result.circuit)) {
+          return { ...chat, result: { ...chat.result, spice: source }, spiceSyncError: '' };
+        }
+
+        try {
+          const synchronized = synchronizeResult(
+            chat.result,
+            parsed.circuit,
+            chat.editedDiagram || chat.result.diagram,
+            { spice: source },
+          );
+          return {
+            ...chat,
+            updatedAt: Date.now(),
+            result: synchronized,
+            editedDiagram: synchronized.diagram,
+            editableKicadNetlist: synchronized.kicadNetlist,
+            simulationRun: null,
+            simulationError: '',
+            spiceSyncError: '',
+            kicadSyncError: '',
+          };
+        } catch (layoutError) {
+          return { ...chat, spiceSyncError: layoutError.message };
+        }
+      });
+    }, 400);
+
+    return () => window.clearTimeout(timer);
+  }, [activeChat?.id, editableSpice, isGenerating, result?.spice]);
+
+  useEffect(() => {
+    if (!result || isGenerating || !activeChat) return undefined;
+    if (editableKicadNetlist === result.kicadNetlist) {
+      if (kicadSyncError) setChatField('kicadSyncError', '');
+      return undefined;
+    }
+
+    const chatId = activeChat.id;
+    const source = editableKicadNetlist;
+    const timer = window.setTimeout(() => {
+      updateChat(chatId, (chat) => {
+        if (!chat.result || chat.editableKicadNetlist !== source) return chat;
+        const parsed = parseKiCadNetlist(source, chat.result.circuit);
+        if (!parsed.ok) return { ...chat, kicadSyncError: parsed.errors.join(' ') };
+
+        if (circuitElectricalSignature(parsed.circuit) === circuitElectricalSignature(chat.result.circuit)) {
+          return {
+            ...chat,
+            result: { ...chat.result, kicadNetlist: source },
+            kicadSyncError: '',
+          };
+        }
+
+        try {
+          const synchronized = synchronizeResult(
+            chat.result,
+            parsed.circuit,
+            chat.editedDiagram || chat.result.diagram,
+            { kicadNetlist: source },
+          );
+          return {
+            ...chat,
+            updatedAt: Date.now(),
+            result: synchronized,
+            editedDiagram: synchronized.diagram,
+            editableSpice: synchronized.spice,
+            simulationRun: null,
+            simulationError: '',
+            kicadSyncError: '',
+          };
+        } catch (layoutError) {
+          return { ...chat, kicadSyncError: layoutError.message };
+        }
+      });
+    }, 400);
+
+    return () => window.clearTimeout(timer);
+  }, [activeChat?.id, editableKicadNetlist, isGenerating, result?.kicadNetlist]);
 
   const manifest = useMemo(
     () =>
@@ -877,39 +1208,166 @@ function App() {
     [result],
   );
 
+  const openEditorView = (view) => {
+    setOpenEditorViews((current) => (current.includes(view) ? current : [...current, view]));
+    setActiveEditorView(view);
+  };
+
+  const closeEditorView = (view) => {
+    const next = openEditorViews.filter((item) => item !== view);
+    setOpenEditorViews(next);
+    if (activeEditorView === view) setActiveEditorView(next.at(-1) || null);
+  };
+
+  const startEditorResize = (axis, event) => {
+    event.preventDefault();
+    const container = event.currentTarget.parentElement;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resizeDragRef.current = { axis, container };
+    setResizingAxis(axis);
+  };
+
+  const moveEditorResize = (event) => {
+    const drag = resizeDragRef.current;
+    if (!drag || !drag.container) return;
+    const bounds = drag.container.getBoundingClientRect();
+    const raw = drag.axis === 'columns'
+      ? ((event.clientX - bounds.left) / bounds.width) * 100
+      : ((event.clientY - bounds.top) / bounds.height) * 100;
+    const minimum = drag.axis === 'columns' ? 25 : 32;
+    const maximum = drag.axis === 'columns' ? 75 : 72;
+    setEditorSplit((current) => ({
+      ...current,
+      [drag.axis]: Math.min(maximum, Math.max(minimum, raw)),
+    }));
+  };
+
+  const stopEditorResize = (event) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    resizeDragRef.current = null;
+    setResizingAxis(null);
+  };
+
   const generate = async () => {
-    setIsGenerating(true);
-    setError('');
+    const submittedPrompt = prompt.trim();
+    if (!submittedPrompt) {
+      setError('Enter a circuit prompt before sending.');
+      return;
+    }
+
+    const chatId = activeChat.id;
+    const priorMessages = activeChat.messages;
+    const currentDesign = result
+      ? {
+          circuit: result.circuit,
+          spice: editableSpice,
+          kicadNetlist: editableKicadNetlist,
+        }
+      : null;
+    const isRevision = Boolean(currentDesign);
+    const userMessage = {
+      id: messageId(),
+      role: 'user',
+      content: submittedPrompt,
+      createdAt: Date.now(),
+    };
+
+    setGeneratingChatId(chatId);
+    openEditorView('spice');
+    window.location.hash = '';
+    setPage('workspace');
+    updateChat(chatId, (chat) => ({
+      ...chat,
+      title: chat.messages.length ? chat.title : chatTitleFromPrompt(submittedPrompt),
+      updatedAt: Date.now(),
+      draft: '',
+      error: '',
+      editableSpice: isRevision
+        ? chat.editableSpice
+        : '* AI is preparing the circuit...\n* Components will appear here as they are generated.',
+      simulationRun: null,
+      simulationError: '',
+      messages: [...chat.messages, userMessage],
+    }));
 
     try {
-      if (!prompt.trim()) throw new Error('Enter a circuit prompt before generating.');
-
       const response = await fetch('/api/generate-circuit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({
+          prompt: submittedPrompt,
+          messages: buildConversationContext(priorMessages),
+          currentDesign,
+        }),
       });
 
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || `Generation failed with HTTP ${response.status}.`);
+      if (!response.ok) {
+        const failed = await response.json();
+        throw new Error(failed.error || `Generation failed with HTTP ${response.status}.`);
+      }
+      const contentType = response.headers.get('content-type') || '';
+      const data = contentType.includes('application/x-ndjson')
+        ? await readGenerationStream(response, (event) => {
+            if (event.type !== 'spice') return;
+            updateChat(chatId, (chat) => ({
+              ...chat,
+              editableSpice: event.provisional
+                ? markSpiceAsProvisional(event.spice, event.correcting)
+                : event.spice,
+              updatedAt: Date.now(),
+            }));
+          })
+        : await response.json();
       if (data.error) throw new Error(data.error);
-      setResult(data);
-      setEditableSpice(data.spice || '');
-      setEditableKicadNetlist(data.kicadNetlist || '');
-      setSimulationRun(null);
-      setSimulationError('');
+      const assistantMessage = {
+        id: messageId(),
+        role: 'assistant',
+        content: `${isRevision ? 'Updated' : 'Generated'} ${data.circuit.title} with ${data.circuit.components.length} components. The latest circuit package is open in the workspace.`,
+        circuit: data.circuit,
+        createdAt: Date.now(),
+      };
+      updateChat(chatId, (chat) => ({
+        ...chat,
+        updatedAt: Date.now(),
+        messages: [...chat.messages, assistantMessage],
+        result: data,
+        editableSpice: data.spice || '',
+        editableKicadNetlist: data.kicadNetlist || '',
+        editedDiagram: cloneDiagram(data.diagram),
+        simulationRun: null,
+        simulationError: '',
+        spiceSyncError: '',
+        kicadSyncError: '',
+        error: '',
+      }));
       window.location.hash = '';
       setPage('workspace');
     } catch (requestError) {
-      setError(requestError.message);
+      updateChat(chatId, (chat) => ({
+        ...chat,
+        updatedAt: Date.now(),
+        editableSpice: currentDesign ? currentDesign.spice : chat.editableSpice,
+        error: requestError.message,
+        messages: [
+          ...chat.messages,
+          {
+            id: messageId(),
+            role: 'assistant',
+            content: `I could not generate the circuit: ${requestError.message}`,
+            createdAt: Date.now(),
+          },
+        ],
+      }));
     } finally {
-      setActiveTab('summary');
-      setIsGenerating(false);
+      setGeneratingChatId(null);
     }
   };
 
   const runSimulation = async () => {
     if (!result) return;
+    const chatId = activeChat.id;
     setIsSimulating(true);
     setSimulationError('');
 
@@ -920,14 +1378,14 @@ function App() {
         body: JSON.stringify({ circuit: result.circuit, spice: editableSpice }),
       });
       const data = await response.json();
-      setSimulationRun(data);
+      updateChat(chatId, (chat) => ({ ...chat, simulationRun: data }));
       if (!response.ok || !data.ok) {
         throw new Error(data.errors?.join(' ') || data.error || `Simulation failed with HTTP ${response.status}.`);
       }
       window.location.hash = 'waveform';
       setPage('waveform');
     } catch (requestError) {
-      setSimulationError(requestError.message);
+      updateChat(chatId, (chat) => ({ ...chat, simulationError: requestError.message }));
     } finally {
       setIsSimulating(false);
     }
@@ -943,12 +1401,19 @@ function App() {
   };
 
   const addDiagramComponent = (type) => {
-    setEditedDiagram((current) => {
+    applyDiagramChange((current) => {
       const base = current || result?.diagram;
       if (!base) return current;
       const next = cloneDiagram(base);
       const component = addedComponent(next, type);
       next.components.push(component);
+      const placement = findNearestLegalPlacement(next, component.ref, component);
+      const placedComponent = placement
+        ? movedComponent(component, placement.x - component.x, placement.y - component.y)
+        : component;
+      next.components = next.components.map((item) => item.ref === component.ref ? placedComponent : item);
+      next.width = Math.max(next.width, placement?.width || 0);
+      next.height = Math.max(next.height, placement?.height || 0, placedComponent.y + placedComponent.height / 2 + 80);
       setDiagramSelection({ type: 'component', ref: component.ref });
       setPendingTerminal(null);
       setDiagramTool('select');
@@ -958,7 +1423,7 @@ function App() {
 
   const deleteDiagramSelection = () => {
     if (!diagramSelection) return;
-    setEditedDiagram((current) => {
+    applyDiagramChange((current) => {
       const base = current || result?.diagram;
       if (!base) return current;
       const next = cloneDiagram(base);
@@ -972,9 +1437,9 @@ function App() {
       if (diagramSelection.type === 'wire') {
         next.wires = next.wires.filter((wire) => wireId(wire) !== diagramSelection.id);
       }
-      if (diagramSelection.type === 'net') {
-        next.nets = next.nets.filter((net) => net.name !== diagramSelection.name);
-        next.wires = next.wires.filter((wire) => wire.node !== diagramSelection.name);
+      if (diagramSelection.type === 'netLabel') {
+        next.netLabels = next.netLabels.filter((label) => label.id !== diagramSelection.id);
+        next.wires = next.wires.filter((wire) => wire.labelId !== diagramSelection.id);
       }
       return next;
     });
@@ -982,15 +1447,301 @@ function App() {
     setPendingTerminal(null);
   };
 
+  const updateSelectedComponentValue = (value) => {
+    if (diagramSelection?.type !== 'component') return;
+    applyDiagramChange((current) => {
+      const base = current || result?.diagram;
+      if (!base) return current;
+      return {
+        ...base,
+        components: base.components.map((component) =>
+          component.ref === diagramSelection.ref ? { ...component, value } : component,
+        ),
+      };
+    });
+  };
+
   const showWorkspace = () => {
     window.location.hash = '';
     setPage('workspace');
   };
 
-  const showDiagramPage = () => {
-    if (!result) return;
-    window.location.hash = 'diagram';
-    setPage('diagram');
+  const openChat = (chatId) => {
+    setChatStore((current) => ({ ...current, activeChatId: chatId }));
+    setChatPanelView('conversation');
+    openEditorView('spice');
+    window.location.hash = '';
+    setPage('workspace');
+  };
+
+  const startNewChat = () => {
+    if (activeChat && activeChat.messages.length === 0 && !activeChat.result) {
+      openChat(activeChat.id);
+      return;
+    }
+    const chat = createChat();
+    setChatStore((current) => ({
+      chats: [chat, ...current.chats],
+      activeChatId: chat.id,
+    }));
+    setChatPanelView('conversation');
+    openEditorView('spice');
+    window.location.hash = '';
+    setPage('workspace');
+  };
+
+  const handleComposerKeyDown = (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      if (!generationBusy) generate();
+    }
+  };
+
+  const selectedDiagramComponent = diagramSelection?.type === 'component'
+    ? (editedDiagram || result?.diagram)?.components.find((component) => component.ref === diagramSelection.ref)
+    : null;
+
+  const renderSpiceView = () => (
+    <div className="editor-window-body code-window-body">
+      <div className="editor-header">
+        <div>
+          <h3>SPICE deck</h3>
+          <p>
+            {isGenerating
+              ? 'AI is updating this deck in real time.'
+              : result
+                ? 'Valid component edits update the canvas and KiCad netlist automatically.'
+                : 'The live deck will appear here while the AI generates the circuit.'}
+          </p>
+        </div>
+        <div className="spice-editor-actions">
+          <button
+            className="play-simulation-button"
+            onClick={runSimulation}
+            disabled={!result || isSimulating || isGenerating}
+            type="button"
+            aria-label={isSimulating ? 'Simulation running' : 'Run simulation'}
+            title={isSimulating ? 'Simulation running' : 'Run simulation'}
+          >
+            <span aria-hidden="true">{isSimulating ? '...' : '\u25B6'}</span>
+          </button>
+          <button onClick={() => setEditableSpice(result?.spice || '')} disabled={!result || isGenerating}>Reset</button>
+          <button onClick={() => downloadText('generated.cir', editableSpice)} disabled={!editableSpice || isGenerating}>Download</button>
+        </div>
+      </div>
+      <textarea
+        ref={spiceEditorRef}
+        className={`code-editor editor-window-code ${isGenerating ? 'live-code-editor' : ''}`}
+        value={editableSpice}
+        readOnly={isGenerating}
+        onChange={(event) => {
+          setEditableSpice(event.target.value);
+          setSimulationRun(null);
+          setSimulationError('');
+        }}
+        spellCheck="false"
+        rows={24}
+        aria-label="Editable SPICE deck"
+        placeholder="Generate a circuit to create a SPICE deck."
+      />
+      <div className="spice-simulation-results">
+        {spiceSyncError && <p className="inline-error simulation-message">Canvas sync paused: {spiceSyncError}</p>}
+        {simulationError && <p className="inline-error simulation-message">{simulationError}</p>}
+        {simulationRun?.ok && (
+          <p className="simulation-ok">
+            Simulation completed successfully. <button className="text-button" onClick={() => { window.location.hash = 'waveform'; setPage('waveform'); }}>Open waveform page</button>
+          </p>
+        )}
+        {simulationRun?.rawOutput && (
+          <details className="sim-log">
+            <summary>Ngspice log</summary>
+            <pre>{simulationRun.rawOutput}</pre>
+          </details>
+        )}
+      </div>
+    </div>
+  );
+
+  const renderCanvasView = () => (
+    <div className="editor-window-body canvas-window-body">
+      {!result ? (
+        <div className="editor-window-empty">
+          <strong>No canvas available</strong>
+          <p>Generate a circuit to open its editable schematic canvas.</p>
+        </div>
+      ) : (
+        <>
+          <div className="canvas-window-toolbar">
+            <div className="canvas-tool-stack">
+              <div className="diagram-editbar" aria-label="Diagram tools">
+                <button className={diagramTool === 'select' ? 'active-tool' : ''} onClick={() => { setDiagramTool('select'); setPendingTerminal(null); }}>Select</button>
+                <button className={diagramTool === 'wire' ? 'active-tool' : ''} onClick={() => { setDiagramTool('wire'); setPendingTerminal(null); }}>Wire</button>
+                <button onClick={() => addDiagramComponent('resistor')}>+ R</button>
+                <button onClick={() => addDiagramComponent('capacitor')}>+ C</button>
+                <button onClick={() => addDiagramComponent('source')}>+ Source</button>
+                <button onClick={() => addDiagramComponent('led')}>+ LED</button>
+                <button onClick={() => addDiagramComponent('bjt')}>+ BJT</button>
+                <button onClick={() => addDiagramComponent('opamp')}>+ Op amp</button>
+                <button onClick={deleteDiagramSelection} disabled={!diagramSelection}>Delete</button>
+              </div>
+              {selectedDiagramComponent && (
+                <label className="component-value-editor">
+                  <span>{selectedDiagramComponent.ref} value</span>
+                  <input
+                    type="text"
+                    value={selectedDiagramComponent.value}
+                    onChange={(event) => updateSelectedComponentValue(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        event.currentTarget.blur();
+                        setDiagramSelection(null);
+                      }
+                    }}
+                    aria-label={`Value for ${selectedDiagramComponent.ref}`}
+                    spellCheck="false"
+                  />
+                </label>
+              )}
+            </div>
+            <div className="button-row">
+              <button onClick={() => applyDiagramChange(() => layoutCircuitDiagram(result.circuit))}>Auto-layout</button>
+              <button onClick={() => setEditedDiagram(cloneDiagram(result.diagram))}>Reset</button>
+              <button onClick={() => downloadText('generated.svg', toDiagramSvg(editedDiagram || result.diagram), 'image/svg+xml')}>Download SVG</button>
+            </div>
+          </div>
+          <CircuitDiagram
+            diagram={editedDiagram || result.diagram}
+            onChange={applyDiagramChange}
+            tool={diagramTool}
+            selected={diagramSelection}
+            onSelect={setDiagramSelection}
+            pendingTerminal={pendingTerminal}
+            onPendingTerminal={setPendingTerminal}
+          />
+        </>
+      )}
+    </div>
+  );
+
+  const renderKicadView = () => (
+    <div className="editor-window-body code-window-body">
+      <div className="editor-header">
+        <div>
+          <h3>KiCad netlist</h3>
+          <p>Valid component and net edits update the schematic automatically.</p>
+        </div>
+        <div className="button-row">
+          <button onClick={() => setEditableKicadNetlist(result?.kicadNetlist || '')} disabled={!result}>Reset</button>
+          <button onClick={() => downloadText('generated.net', editableKicadNetlist, 'application/xml')} disabled={!editableKicadNetlist}>Download</button>
+          <button onClick={() => downloadText('README-export.json', manifest, 'application/json')} disabled={!result}>Manifest</button>
+        </div>
+      </div>
+      <textarea
+        className="code-editor editor-window-code"
+        value={editableKicadNetlist}
+        onChange={(event) => setEditableKicadNetlist(event.target.value)}
+        spellCheck="false"
+        rows={24}
+        aria-label="Editable KiCad netlist"
+        placeholder="Generate a circuit to create a KiCad netlist."
+      />
+      {kicadSyncError && <p className="inline-error simulation-message">Schematic sync paused: {kicadSyncError}</p>}
+    </div>
+  );
+
+  const renderEditorWindow = (view) => (
+    <article
+      className={`editor-window ${activeEditorView === view ? 'active' : ''}`}
+      key={view}
+      onMouseDown={() => setActiveEditorView(view)}
+    >
+      <header className="editor-window-titlebar">
+        <strong>{EDITOR_VIEW_LABELS[view]}</strong>
+        <button
+          className="editor-window-close"
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={() => closeEditorView(view)}
+          type="button"
+          aria-label={`Close ${EDITOR_VIEW_LABELS[view]}`}
+          title={`Close ${EDITOR_VIEW_LABELS[view]}`}
+        >
+          &times;
+        </button>
+      </header>
+      {view === 'spice' && renderSpiceView()}
+      {view === 'canvas' && renderCanvasView()}
+      {view === 'kicad' && renderKicadView()}
+    </article>
+  );
+
+  const adjustEditorSplit = (axis, amount) => {
+    const minimum = axis === 'columns' ? 25 : 32;
+    const maximum = axis === 'columns' ? 75 : 72;
+    setEditorSplit((current) => ({
+      ...current,
+      [axis]: Math.min(maximum, Math.max(minimum, current[axis] + amount)),
+    }));
+  };
+
+  const renderResizeHandle = (axis) => (
+    <div
+      className={`editor-resize-handle ${axis}`}
+      role="separator"
+      aria-label={`Resize editor windows ${axis === 'columns' ? 'horizontally' : 'vertically'}`}
+      aria-orientation={axis === 'columns' ? 'vertical' : 'horizontal'}
+      aria-valuemin={axis === 'columns' ? 25 : 32}
+      aria-valuemax={axis === 'columns' ? 75 : 72}
+      aria-valuenow={Math.round(editorSplit[axis])}
+      tabIndex={0}
+      onPointerDown={(event) => startEditorResize(axis, event)}
+      onPointerMove={moveEditorResize}
+      onPointerUp={stopEditorResize}
+      onPointerCancel={stopEditorResize}
+      onKeyDown={(event) => {
+        const decrease = axis === 'columns' ? event.key === 'ArrowLeft' : event.key === 'ArrowUp';
+        const increase = axis === 'columns' ? event.key === 'ArrowRight' : event.key === 'ArrowDown';
+        if (!decrease && !increase) return;
+        event.preventDefault();
+        adjustEditorSplit(axis, decrease ? -5 : 5);
+      }}
+    >
+      <span aria-hidden="true" />
+    </div>
+  );
+
+  const renderEditorLayout = () => {
+    if (openEditorViews.length === 1) {
+      return <section className="editor-window-layout single">{renderEditorWindow(openEditorViews[0])}</section>;
+    }
+
+    if (openEditorViews.length === 2) {
+      return (
+        <section
+          className={`editor-window-layout split-two ${resizingAxis ? `resizing-${resizingAxis}` : ''}`}
+          style={{ '--column-split': `${editorSplit.columns}%` }}
+        >
+          {renderEditorWindow(openEditorViews[0])}
+          {renderResizeHandle('columns')}
+          {renderEditorWindow(openEditorViews[1])}
+        </section>
+      );
+    }
+
+    return (
+      <section
+        className={`editor-window-layout split-three ${resizingAxis ? `resizing-${resizingAxis}` : ''}`}
+        style={{ '--column-split': `${editorSplit.columns}%`, '--row-split': `${editorSplit.rows}%` }}
+      >
+        <div className="editor-split-row">
+          {renderEditorWindow(openEditorViews[0])}
+          {renderResizeHandle('columns')}
+          {renderEditorWindow(openEditorViews[1])}
+        </div>
+        {renderResizeHandle('rows')}
+        {renderEditorWindow(openEditorViews[2])}
+      </section>
+    );
   };
 
   if (page === 'waveform') {
@@ -1008,7 +1759,7 @@ function App() {
           {!simulationRun?.waveform?.series?.length ? (
             <section className="panel-block empty-waveform-page">
               <h2>No waveform data yet</h2>
-              <p>Run a successful simulation from the Simulation tab to open the waveform here.</p>
+              <p>Run a successful simulation from the play button in the Spice tab to open the waveform here.</p>
             </section>
           ) : (
             <section className="panel-block waveform-page-panel">
@@ -1035,243 +1786,161 @@ function App() {
     );
   }
 
-  if (page === 'diagram') {
-    return (
-      <main className="app-shell diagram-page-shell">
-        <section className="diagram-workspace-page">
-          <header className="diagram-page-header">
-            <div>
-              <p className="eyebrow">Schematic canvas</p>
-              <h1>{result?.circuit?.title || 'No circuit generated yet'}</h1>
-            </div>
-            <div className="button-row">
-              <button onClick={showWorkspace}>Back to generator</button>
-              <button onClick={() => setEditedDiagram(cloneDiagram(result?.diagram))} disabled={!result}>Reset layout</button>
-              <button onClick={() => downloadText('generated.svg', toDiagramSvg(editedDiagram || result.diagram), 'image/svg+xml')} disabled={!result}>
-                Download SVG
-              </button>
-            </div>
-          </header>
-
-          {!result ? (
-            <section className="panel-block empty-state">
-              <p className="eyebrow">Awaiting AI generation</p>
-              <h2>No circuit generated yet</h2>
-              <p>Generate a circuit first, then open the canvas.</p>
-            </section>
-          ) : (
-            <>
-              <div className="diagram-page-toolbar">
-                <div className="diagram-editbar" aria-label="Diagram tools">
-                  <button className={diagramTool === 'select' ? 'active-tool' : ''} onClick={() => { setDiagramTool('select'); setPendingTerminal(null); }}>Select</button>
-                  <button className={diagramTool === 'wire' ? 'active-tool' : ''} onClick={() => { setDiagramTool('wire'); setPendingTerminal(null); }}>Wire</button>
-                  <button onClick={() => addDiagramComponent('resistor')}>Add resistor</button>
-                  <button onClick={() => addDiagramComponent('capacitor')}>Add capacitor</button>
-                  <button onClick={() => addDiagramComponent('source')}>Add source</button>
-                  <button onClick={() => addDiagramComponent('led')}>Add LED</button>
-                  <button onClick={() => addDiagramComponent('bjt')}>Add BJT</button>
-                  <button onClick={() => addDiagramComponent('opamp')}>Add op amp</button>
-                  <button onClick={deleteDiagramSelection} disabled={!diagramSelection}>Delete selected</button>
-                </div>
-              </div>
-              <CircuitDiagram
-                diagram={editedDiagram || result.diagram}
-                onChange={setEditedDiagram}
-                tool={diagramTool}
-                selected={diagramSelection}
-                onSelect={setDiagramSelection}
-                pendingTerminal={pendingTerminal}
-                onPendingTerminal={setPendingTerminal}
-              />
-            </>
-          )}
-        </section>
-      </main>
-    );
-  }
-
   return (
     <main className="app-shell">
       <section className="workspace">
-        <aside className="side-panel">
-          <div>
-            <p className="eyebrow">Prompt-to-PCB MVP</p>
-            <h1>Generate a simulated schematic package</h1>
-          </div>
-
-          <label className="prompt-box">
-            <span>Circuit prompt</span>
-            <textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              rows={8}
-              placeholder="Describe the circuit you want the AI to generate..."
-            />
-          </label>
-
-          <div className="button-row">
-              <button className="primary" onClick={generate} disabled={isGenerating}>
-                {isGenerating ? 'Generating...' : 'Generate'}
-              </button>
-              <button onClick={exportAll} disabled={!result}>Export files</button>
-            </div>
-            {error && <p className="inline-error">{error}</p>}
-        </aside>
-
-        <section className="main-panel">
-          {!result ? (
-            <section className="empty-state">
-              <p className="eyebrow">Awaiting AI generation</p>
-              <h2>No circuit generated yet</h2>
-              <p>Enter a prompt and generate a circuit to view validation, simulation metadata, SPICE, and KiCad netlist output.</p>
-            </section>
-          ) : (
+        <aside className={`side-panel chat-panel-${chatPanelView}`}>
+          {chatPanelView === 'history' ? (
             <>
-              <header className="result-header">
+              <header className="chat-sidebar-header chat-history-header">
                 <div>
-                  <p className="eyebrow">{result.circuit.type.replaceAll('_', ' ')}</p>
-                  <h2>{result.circuit.title}</h2>
+                  <p className="eyebrow">Prompt-to-PCB MVP</p>
+                  <h1>Previous chats</h1>
                 </div>
-                <div className="result-actions">
-                  <button onClick={showDiagramPage}>Open canvas</button>
-                  <div className={`status ${result.validation.ok ? 'ok' : 'error'}`}>
-                    {result.validation.ok ? 'Validated' : 'Needs attention'}
-                  </div>
-                </div>
+                <button className="new-chat-button" onClick={startNewChat} type="button">
+                  + New chat
+                </button>
               </header>
 
-              <div className="source-strip">
-                <span>Generator: Ollama AI</span>
-              </div>
-
-              <nav className="tabs" aria-label="Result views">
-                {['summary', 'simulation', 'spice', 'kicad'].map((tab) => (
-                  <button
-                    key={tab}
-                    className={activeTab === tab ? 'active' : ''}
-                    onClick={() => setActiveTab(tab)}
-                  >
-                    {tab}
-                  </button>
-                ))}
-              </nav>
-
-              {activeTab === 'summary' && (
-                <div className="content-grid">
-                  <section className="panel-block">
-                    <h3>Components</h3>
-                    <div className="component-list">
-                      {result.circuit.components.map((part) => (
-                        <article key={part.ref} className="component-card">
-                          <strong>{part.ref}</strong>
-                          <span>{part.kind}</span>
-                          <code>{part.value}</code>
-                          <small>{part.nodes.join(' -> ')}</small>
-                        </article>
-                      ))}
-                    </div>
-                  </section>
-
-                  <section className="panel-block">
-                    <h3>Validation</h3>
-                    <ul className="checks">
-                      {result.validation.errors.map((item) => <li className="bad" key={item}>{item}</li>)}
-                      {result.validation.warnings.map((item) => <li className="warn" key={item}>{item}</li>)}
-                      {result.validation.ok && result.validation.warnings.length === 0 && <li className="good">No validation issues found.</li>}
-                    </ul>
-                    <h3>Notes</h3>
-                    <ul className="checks">
-                      {result.circuit.notes.map((item) => <li key={item}>{item}</li>)}
-                    </ul>
-                  </section>
+              <section className="chat-history chat-history-page" aria-label="Previous chats">
+                <div className="chat-section-label">
+                  <span>All conversations</span>
+                  <span>{chatStore.chats.length}</span>
                 </div>
-              )}
+                <div className="chat-history-list">
+                  {sortedChats.map((chat) => (
+                    <button
+                      className={`chat-history-item ${chat.id === activeChat?.id ? 'active' : ''}`}
+                      key={chat.id}
+                      onClick={() => openChat(chat.id)}
+                      type="button"
+                    >
+                      <span className="chat-history-copy">
+                        <strong>{chat.title}</strong>
+                        <small>{chat.messages.at(-1)?.content || 'Start a new circuit conversation'}</small>
+                      </span>
+                      <time>{formatChatTime(chat.updatedAt)}</time>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            </>
+          ) : (
+            <>
+              <header className="chat-conversation-header">
+                <button
+                  className="chat-back-button"
+                  onClick={() => setChatPanelView('history')}
+                  type="button"
+                  aria-label="Open previous chats"
+                  title="Previous chats"
+                >
+                  <span aria-hidden="true">&larr;</span>
+                </button>
+                <div className="chat-conversation-title">
+                  <p className="eyebrow">AI circuit assistant</p>
+                  <h1>{activeChat?.title}</h1>
+                </div>
+                <button onClick={exportAll} disabled={!result} type="button">Export</button>
+              </header>
 
-              {activeTab === 'simulation' && (
-                <section className="panel-block">
-                  <div className="sim-header">
-                    <div>
-                      <h3>{result.simulation.engine}</h3>
-                      <p>Run Ngspice locally to generate waveform data from the current SPICE deck.</p>
+              <section className="chat-thread" aria-label="Current conversation">
+
+                <div className="chat-messages" aria-live="polite">
+                  {activeChat?.messages.length === 0 && (
+                    <div className="chat-welcome">
+                      <strong>What would you like to build?</strong>
+                      <p>Describe a circuit, then continue refining it with follow-up messages.</p>
                     </div>
-                    <button className="primary" onClick={runSimulation} disabled={isSimulating}>
-                      {isSimulating ? 'Simulating...' : 'Run simulation'}
+                  )}
+                  {activeChat?.messages.map((message) => (
+                    <article className={`chat-message ${message.role}`} key={message.id}>
+                      <div className="chat-message-meta">
+                        <strong>{message.role === 'user' ? 'You' : 'AI'}</strong>
+                        <time>{formatChatTime(message.createdAt)}</time>
+                      </div>
+                      <p>{message.content}</p>
+                      {message.circuit && (
+                        <div className="chat-artifact-chip">
+                          <span>{message.circuit.type.replaceAll('_', ' ')}</span>
+                          <strong>{message.circuit.title}</strong>
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                  {isGenerating && (
+                    <article className="chat-message assistant pending">
+                      <div className="chat-message-meta"><strong>AI</strong></div>
+                      <p>Designing the circuit package...</p>
+                    </article>
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
+
+                <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); generate(); }}>
+                  <textarea
+                    value={prompt}
+                    onChange={(event) => setPrompt(event.target.value)}
+                    onKeyDown={handleComposerKeyDown}
+                    rows={3}
+                    placeholder="Message the circuit assistant..."
+                    aria-label="Message the circuit assistant"
+                  />
+                  <div className="chat-composer-footer">
+                    <small>Enter to send, Shift+Enter for a new line</small>
+                    <button className="primary" type="submit" disabled={generationBusy || !prompt.trim()}>
+                      {isGenerating ? 'Sending...' : generationBusy ? 'AI busy...' : 'Send'}
                     </button>
                   </div>
-                  {simulationError && <p className="inline-error simulation-message">{simulationError}</p>}
-                  {simulationRun?.ok && (
-                    <p className="simulation-ok">
-                      Simulation completed successfully. <button className="text-button" onClick={() => { window.location.hash = 'waveform'; setPage('waveform'); }}>Open waveform page</button>
-                    </p>
-                  )}
-                  <div className="metrics">
-                    {result.simulation.metrics.map((metric) => (
-                      <article key={metric.label}>
-                        <span>{metric.label}</span>
-                        <strong>{metric.value}</strong>
-                      </article>
-                    ))}
-                  </div>
-                  {simulationRun?.rawOutput && (
-                    <details className="sim-log">
-                      <summary>Ngspice log</summary>
-                      <pre>{simulationRun.rawOutput}</pre>
-                    </details>
-                  )}
-                </section>
-              )}
-
-              {activeTab === 'spice' && (
-                <section className="panel-block code-panel">
-                  <div className="editor-header">
-                    <div>
-                      <h3>SPICE deck</h3>
-                      <p>Edits here are used by downloads and by the Simulation tab.</p>
-                    </div>
-                    <div className="button-row">
-                      <button onClick={() => setEditableSpice(result.spice)}>Reset SPICE</button>
-                      <button onClick={() => downloadText('generated.cir', editableSpice)}>Download SPICE</button>
-                    </div>
-                  </div>
-                  <textarea
-                    className="code-editor"
-                    value={editableSpice}
-                    onChange={(event) => {
-                      setEditableSpice(event.target.value);
-                      setSimulationRun(null);
-                      setSimulationError('');
-                    }}
-                    spellCheck="false"
-                    rows={24}
-                    aria-label="Editable SPICE deck"
-                  />
-                </section>
-              )}
-
-              {activeTab === 'kicad' && (
-                <section className="panel-block code-panel">
-                  <div className="editor-header">
-                    <div>
-                      <h3>KiCad netlist</h3>
-                      <p>Edits here are included when you download the KiCad netlist or export all files.</p>
-                    </div>
-                    <div className="button-row">
-                      <button onClick={() => setEditableKicadNetlist(result.kicadNetlist)}>Reset KiCad</button>
-                      <button onClick={() => downloadText('generated.net', editableKicadNetlist, 'application/xml')}>Download KiCad netlist</button>
-                      <button onClick={() => downloadText('README-export.json', manifest, 'application/json')}>Download manifest</button>
-                    </div>
-                  </div>
-                  <textarea
-                    className="code-editor"
-                    value={editableKicadNetlist}
-                    onChange={(event) => setEditableKicadNetlist(event.target.value)}
-                    spellCheck="false"
-                    rows={24}
-                    aria-label="Editable KiCad netlist"
-                  />
-                </section>
-              )}
+                </form>
+                {error && <p className="inline-error chat-error">{error}</p>}
+              </section>
             </>
+          )}
+        </aside>
+
+        <section className="main-panel editor-workbench">
+          <header className="result-header workbench-header">
+            <div>
+              <p className="eyebrow">
+                {isGenerating ? 'Live AI generation' : result ? result.circuit.type.replaceAll('_', ' ') : 'Editor workspace'}
+              </p>
+              <h2>{isGenerating ? 'Writing SPICE deck' : result?.circuit.title || 'Open an editor window'}</h2>
+            </div>
+            <div className="result-actions">
+              {isGenerating && <div className="status streaming-status">Generating...</div>}
+              {!isGenerating && result && (
+                <div className={`status ${result.validation.ok ? 'ok' : 'error'}`}>
+                  {result.validation.ok ? 'Validated' : 'Needs attention'}
+                </div>
+              )}
+            </div>
+          </header>
+
+          <nav className="editor-launchbar" aria-label="Editor windows">
+            <span>Open views</span>
+            {Object.entries(EDITOR_VIEW_LABELS).map(([view, label]) => {
+              const isOpen = openEditorViews.includes(view);
+              return (
+                <button
+                  className={`${isOpen ? 'open' : ''} ${activeEditorView === view ? 'active' : ''}`}
+                  key={view}
+                  onClick={() => openEditorView(view)}
+                  type="button"
+                >
+                  {isOpen ? label : `+ ${label}`}
+                </button>
+              );
+            })}
+          </nav>
+
+          {openEditorViews.length === 0 ? (
+            <section className="workbench-empty">
+              <h3>All editor windows are closed</h3>
+              <p>Open Spice, Canvas, or KiCad from the bar above.</p>
+            </section>
+          ) : (
+            renderEditorLayout()
           )}
         </section>
       </section>

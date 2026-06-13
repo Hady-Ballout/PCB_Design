@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildCircuitDiagram,
+  diagramComponentsOverlap,
   simulateCircuit,
   toDiagramSvg,
   toKiCadNetlist,
+  routeDiagramWire,
   toSpice,
   validateCircuit,
 } from './pcbGenerator.js';
@@ -58,6 +60,14 @@ describe('prompt-to-pcb generator', () => {
     expect(kicadNetlist).toContain('<net');
   });
 
+  it('renders node zero as a standard ground symbol in exported SVG', () => {
+    const svg = toDiagramSvg(buildCircuitDiagram(aiCircuit));
+
+    expect(svg).toContain('class="diagram-ground"');
+    expect(svg).toContain('aria-label="Ground"');
+    expect(svg).not.toContain('>0</text>');
+  });
+
   it('normalizes AI refs to SPICE-safe prefixes during export', () => {
     const spice = toSpice({
       title: 'LED ref safety',
@@ -109,6 +119,32 @@ describe('prompt-to-pcb generator', () => {
     });
     expect(diagram.nets.map((net) => net.name)).toEqual(expect.arrayContaining(['VIN', 'VOUT', '0']));
     expect(diagram.wires).toHaveLength(6);
+    for (const [index, component] of diagram.components.entries()) {
+      expect(diagram.components.slice(index + 1).some((other) =>
+        diagramComponentsOverlap(component, other))).toBe(false);
+    }
+  });
+
+  it('separates crowded generated components with minimum clearance', () => {
+    const crowded = {
+      title: 'Crowded loads',
+      type: 'custom',
+      supplyVoltage: 5,
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'R1', kind: 'load', value: '1k', nodes: ['OUT', '0'] },
+        { ref: 'R2', kind: 'load', value: '2k', nodes: ['OUT', '0'] },
+        { ref: 'R3', kind: 'load', value: '3k', nodes: ['OUT', '0'] },
+      ],
+      notes: [],
+    };
+    const diagram = buildCircuitDiagram(crowded);
+
+    for (const [index, component] of diagram.components.entries()) {
+      expect(diagram.components.slice(index + 1).some((other) =>
+        diagramComponentsOverlap(component, other))).toBe(false);
+    }
+    expect(diagram.height).toBeGreaterThanOrEqual(500);
   });
 
   it('places voltage divider output and load connections in the diagram model', () => {
@@ -189,7 +225,27 @@ describe('prompt-to-pcb generator', () => {
     expect(pins.get(4).y).toBeLessThan(opamp.y);
     expect(pins.get(5)).toMatchObject({ node: '0' });
     expect(pins.get(5).y).toBeGreaterThan(opamp.y);
-    expect(toSpice(circuit)).toContain('XU1 VINP VINN VOUT VCC 0 LM358');
+    const spice = toSpice(circuit);
+    expect(spice).toContain('XU1 VINP VINN VOUT VCC 0 LM358');
+    expect(spice).toContain('.subckt LM358 INP INN OUT VCC VEE');
+    expect(spice).toContain('.ends LM358');
+  });
+
+  it('routes automatic wires around unrelated component bodies', () => {
+    const diagram = {
+      components: [
+        { ref: 'XU1', x: 400, y: 300, width: 150, height: 110, pins: [{ pinIndex: 3, x: 475, y: 300 }] },
+        { ref: 'R1', x: 475, y: 120, width: 110, height: 58, pins: [] },
+      ],
+      nets: [{ name: 'OUT', x: 650, y: 120 }],
+    };
+    const points = routeDiagramWire(diagram, { ref: 'XU1', pin: 3, node: 'OUT' });
+
+    expect(points).toEqual([
+      { x: 475, y: 300 },
+      { x: 650, y: 300 },
+      { x: 650, y: 120 },
+    ]);
   });
 
   it('exports op amp triangle labels in the diagram SVG', () => {
@@ -238,10 +294,15 @@ describe('prompt-to-pcb generator', () => {
   });
 
   it('exports the generated diagram model as SVG', () => {
-    const svg = toDiagramSvg(buildCircuitDiagram(aiCircuit));
+    const diagram = buildCircuitDiagram(aiCircuit);
+    const svg = toDiagramSvg(diagram);
 
     expect(svg).toContain('<svg');
     expect(svg).toContain('R1');
     expect(svg).toContain('VOUT');
+    expect(diagram.netLabels).toHaveLength(diagram.wires.length);
+    expect(diagram.bridges).toEqual([]);
+    expect(diagram.junctions).toEqual([]);
+    expect(svg).not.toContain('diagram-bridge-clear');
   });
 });
