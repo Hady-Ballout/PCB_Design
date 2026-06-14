@@ -24,6 +24,7 @@ describe('chat store', () => {
       title: 'New circuit',
       createdAt: 10,
       messages: [],
+      memory: { summary: '', updatedAt: 0 },
     });
     expect(chatTitleFromPrompt('  Design   a voltage divider  ')).toBe('Design a voltage divider');
     expect(chatTitleFromPrompt('x'.repeat(50))).toHaveLength(42);
@@ -49,6 +50,31 @@ describe('chat store', () => {
       { role: 'user', content: 'Make a filter' },
       { role: 'assistant', content: 'Ready', circuit: { title: 'Filter' } },
     ]);
+  });
+
+  it('migrates legacy chats with empty memory and persists updated memory', () => {
+    const storage = memoryStorage();
+    const legacy = { ...createChat({ id: 'legacy', now: 10 }) };
+    delete legacy.memory;
+    storage.setItem(CHAT_STORAGE_KEY, JSON.stringify({ chats: [legacy], activeChatId: legacy.id }));
+
+    expect(loadChatStore(storage).chats[0].memory).toEqual({ summary: '', updatedAt: 0 });
+
+    const chat = {
+      ...createChat({ id: 'remembered', now: 20 }),
+      memory: { summary: 'Use through-hole parts.', updatedAt: 30 },
+    };
+    saveChatStore({ chats: [chat], activeChatId: chat.id }, storage);
+    expect(loadChatStore(storage).chats[0].memory).toEqual(chat.memory);
+  });
+
+  it('leaves history truncation to the server', () => {
+    const messages = Array.from({ length: 8 }, (_, index) => ({
+      role: 'user',
+      content: `Requirement ${index + 1}`,
+    }));
+
+    expect(buildConversationContext(messages)).toHaveLength(8);
   });
 
   it('migrates and repairs saved diagrams without changing the circuit model', () => {

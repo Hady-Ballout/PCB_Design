@@ -219,6 +219,69 @@ V2 IN 0 DC 5
     expect(synchronizeResult({ intent: {} }, nextCircuit, previousDiagram).spice).toContain('R1 VIN VOUT 4.7k');
   });
 
+  it('keeps the surviving canvas layout and wires when a netlist component is deleted', () => {
+    const previousDiagram = buildCircuitDiagram(circuit);
+    const resistor = previousDiagram.components.find((part) => part.ref === 'R1');
+    resistor.x += 120;
+    resistor.y += 80;
+    resistor.pins = resistor.pins.map((pin) => ({ ...pin, x: pin.x + 120, y: pin.y + 80 }));
+    const previousPositions = new Map(previousDiagram.components.map((part) => [part.ref, { x: part.x, y: part.y }]));
+    const editedDeck = toSpice(circuit).replace(/^C1 .*\r?\n/m, '');
+    const parsed = parseSpiceNetlist(editedDeck, circuit);
+
+    expect(parsed.ok).toBe(true);
+    const synchronized = synchronizeResult({ intent: {} }, parsed.circuit, previousDiagram, { spice: editedDeck });
+
+    expect(synchronized.diagram.components.map((part) => part.ref)).toEqual(['V1', 'R1']);
+    for (const part of synchronized.diagram.components) {
+      expect({ x: part.x, y: part.y }).toEqual(previousPositions.get(part.ref));
+    }
+    expect(synchronized.diagram.wires).toHaveLength(4);
+    expect(synchronized.diagram.wires.every((wire) => wire.points.length >= 2)).toBe(true);
+  });
+
+  it('restores component wires when a deleted netlist line is added back', () => {
+    const originalDeck = toSpice(circuit);
+    const deletedDeck = originalDeck.replace(/^C1 .*\r?\n/m, '');
+    const deleted = parseSpiceNetlist(deletedDeck, circuit);
+    const afterDeletion = synchronizeResult({ intent: {} }, deleted.circuit, buildCircuitDiagram(circuit), {
+      spice: deletedDeck,
+    });
+    const restored = parseSpiceNetlist(originalDeck, afterDeletion.circuit);
+
+    expect(restored.ok).toBe(true);
+    const afterRestore = synchronizeResult(afterDeletion, restored.circuit, afterDeletion.diagram, {
+      spice: originalDeck,
+    });
+
+    expect(afterRestore.diagram.components.map((part) => part.ref)).toEqual(['V1', 'R1', 'C1']);
+    expect(afterRestore.diagram.wires.filter((wire) => wire.ref === 'C1')).toHaveLength(2);
+    expect(afterRestore.diagram.wires.filter((wire) => wire.ref === 'C1').every((wire) => wire.points.length >= 2)).toBe(true);
+  });
+
+  it('repairs missing visual connections when a netlist component is restored', () => {
+    const originalDeck = toSpice(circuit);
+    const deletedDeck = originalDeck.replace(/^C1 .*\r?\n/m, '');
+    const deleted = parseSpiceNetlist(deletedDeck, circuit);
+    const afterDeletion = synchronizeResult({ intent: {} }, deleted.circuit, buildCircuitDiagram(circuit), {
+      spice: deletedDeck,
+    });
+    const restored = parseSpiceNetlist(originalDeck, afterDeletion.circuit);
+    const incompleteDiagram = buildCircuitDiagram(restored.circuit);
+    incompleteDiagram.wires = incompleteDiagram.wires.filter((wire) => wire.ref !== 'C1');
+    incompleteDiagram.netLabels = incompleteDiagram.netLabels.filter((label) => label.ref !== 'C1');
+
+    const afterRestore = synchronizeResult(afterDeletion, restored.circuit, incompleteDiagram, {
+      spice: originalDeck,
+    });
+    const capacitorWires = afterRestore.diagram.wires.filter((wire) => wire.ref === 'C1');
+
+    expect(capacitorWires).toHaveLength(2);
+    expect(capacitorWires.every((wire) => wire.points.length >= 2)).toBe(true);
+    expect(capacitorWires.every((wire) =>
+      afterRestore.diagram.netLabels.some((label) => label.id === wire.labelId))).toBe(true);
+  });
+
   it('separates preserved component positions that collide', () => {
     const previousDiagram = buildCircuitDiagram(circuit);
     const first = previousDiagram.components[0];

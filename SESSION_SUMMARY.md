@@ -23,7 +23,7 @@ Chat prompt
 - The old Summary and Simulation pages were removed.
 - Simulation is launched with the play button in the Spice window.
 - The `Generator: Ollama AI` banner was removed.
-- Spice, Canvas, and KiCad behave like closable editor windows.
+- Spice and Canvas behave like closable editor windows. The KiCad window is currently hidden while development focuses on the SPICE workflow.
 - Multiple editor windows can be open in split view.
 - Split panes can be resized horizontally and vertically.
 
@@ -34,6 +34,8 @@ Chat prompt
 - The current circuit, edited SPICE, and edited KiCad netlist are sent as revision context.
 - SPICE generation streams into the editor while the AI is working.
 - Chat history includes previous user and assistant messages.
+- Each chat now keeps an isolated, persisted memory summary of earlier requirements and confirmed design decisions.
+- Ollama requests combine that summary, the canonical current circuit, recent turns, and the newest prompt in a server-controlled context window.
 
 ## AI Output Reliability
 
@@ -128,6 +130,8 @@ Supported edits include:
 
 Malformed or incomplete XML pauses synchronization and preserves the last valid circuit. Generated XML now escapes references, values, footprints, kinds, and net names correctly.
 
+AI revisions now open SPICE in a review state. Added or edited proposal lines are highlighted in yellow, with compact green check and red X controls at the end of the final highlighted line. Accepting confirms the synchronized revision; rejecting restores the previous circuit and SPICE deck.
+
 ## Layout Preservation
 
 When a valid SPICE or KiCad edit redraws the schematic:
@@ -138,7 +142,8 @@ When a valid SPICE or KiCad edit redraws the schematic:
 - Electrical changes regenerate normalized wires.
 - Every connected pin receives its own repeated net label or ground symbol, so same-net wires do not share trunks or junctions.
 - Components, component labels, net labels, and previously routed wires are hard routing obstacles.
-- Automatic and manually adjusted routes cannot cross, touch, share segments, or come within 16px of another wire.
+- Generated automatic routes cannot cross, touch, share segments, or come within 16px of another wire.
+- Interactive dragging is unrestricted: components, repeated net labels, and wire paths follow the pointer without snapping, collision correction, or automatic rollback.
 - The canvas expands in bounded steps when more routing space is required; failed layouts raise an error instead of returning partial stubs.
 - Saved v1/v2 diagrams migrate to layout v3 by preserving legal component positions and rerouting without bridges or junction dots.
 
@@ -159,8 +164,8 @@ When a valid SPICE or KiCad edit redraws the schematic:
 Latest verification completed during this session:
 
 ```text
-7 test files passed
-44 tests passed
+10 test files passed
+71 tests passed
 Vite production build succeeded
 ```
 

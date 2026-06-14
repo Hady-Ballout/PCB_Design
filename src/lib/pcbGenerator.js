@@ -543,7 +543,8 @@ export const toDiagramSvg = (diagram) => `<?xml version="1.0" encoding="UTF-8"?>
   }).join('\n  ')}
   ${(diagram.netLabels || []).map((label) => label.name === '0'
     ? `<g class="diagram-ground" aria-label="Ground"><circle class="diagram-node" cx="${label.x}" cy="${label.y}" r="4" /><line class="diagram-symbol" x1="${label.x}" y1="${label.y}" x2="${label.x}" y2="${label.y + 16}" /><line class="diagram-symbol" x1="${label.x - 18}" y1="${label.y + 16}" x2="${label.x + 18}" y2="${label.y + 16}" /><line class="diagram-symbol" x1="${label.x - 12}" y1="${label.y + 22}" x2="${label.x + 12}" y2="${label.y + 22}" /><line class="diagram-symbol" x1="${label.x - 6}" y1="${label.y + 28}" x2="${label.x + 6}" y2="${label.y + 28}" /></g>`
-    : `<g><circle class="diagram-node" cx="${label.x}" cy="${label.y}" r="4" /><rect class="diagram-net" x="${label.labelX}" y="${label.labelY}" width="${label.labelWidth}" height="26" rx="13" /><text class="diagram-small" x="${label.labelX + label.labelWidth / 2}" y="${label.labelY + 17}" text-anchor="middle">${escapeXml(label.name)}</text></g>`).join('\n  ')}
+    : `<g><rect class="diagram-net" x="${label.labelX}" y="${label.labelY}" width="${label.labelWidth}" height="26" rx="13" /><text class="diagram-small" x="${label.labelX + label.labelWidth / 2}" y="${label.labelY + 17}" text-anchor="middle">${escapeXml(label.name)}</text></g>`).join('\n  ')}
+  ${(diagram.junctions || []).map((junction) => `<circle class="diagram-node" cx="${junction.x}" cy="${junction.y}" r="4" />`).join('\n  ')}
   ${diagram.components.map((component) => {
     const refLabel = diagram.labels?.find((label) => label.ref === component.ref && label.kind === 'ref');
     const valueLabel = diagram.labels?.find((label) => label.ref === component.ref && label.kind === 'value');

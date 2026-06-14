@@ -40,6 +40,35 @@ describe('Ollama circuit output', () => {
     expect(body.options).toMatchObject({ num_ctx: 8192, num_predict: 2400, temperature: 0 });
   });
 
+  it('orders memory, canonical design, recent turns, and the new request', () => {
+    const history = Array.from({ length: 15 }, (_, index) => ({
+      role: 'user',
+      content: `Requirement ${index + 1}`,
+    }));
+    const body = buildOllamaRequestBody(
+      'Change R1 to 2.2k',
+      history,
+      true,
+      { circuit: validCircuit, spice: 'R1 IN OUT 1k', kicadNetlist: '<export />' },
+      { summary: 'Use through-hole parts and keep the output node named OUT.', updatedAt: 10 },
+    );
+
+    expect(body.messages[1].content).toContain('Active chat memory');
+    expect(body.messages[2].content).toContain('exact canonical current design');
+    expect(body.messages[3].content).toContain('Requirement 4');
+    expect(body.messages.at(-1).content).toContain('Change R1 to 2.2k');
+    expect(body.messages.at(-1).content).toContain('Replace the whole circuit only');
+    expect(body.messages.filter((message) => message.content.includes('Previous circuit request'))).toHaveLength(12);
+  });
+
+  it('does not attach memory or revision context to a new chat', () => {
+    const body = buildOllamaRequestBody('Make a new filter', [], true, null, null);
+
+    expect(body.messages).toHaveLength(2);
+    expect(body.messages.some((message) => message.content.includes('Active chat memory'))).toBe(false);
+    expect(body.messages.some((message) => message.content.includes('canonical current design'))).toBe(false);
+  });
+
   it('classifies malformed and schema-invalid responses', () => {
     expect(() => parseCircuitResponse('{"title": broken}')).toThrowError(
       expect.objectContaining({ code: 'json_syntax' }),

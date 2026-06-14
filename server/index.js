@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { loadEnv } from './env.js';
 import { buildCircuitResponse, reconcileCircuitRevision } from './circuitResponse.js';
+import { normalizeChatMemory, sanitizeConversationHistory, updateChatMemory } from './chatMemory.js';
 import { streamCircuitWithOllama } from './ollamaProvider.js';
 import { runNgspiceSimulation } from './simulator.js';
 import { buildStreamingSpice } from './streamingCircuit.js';
@@ -66,6 +67,14 @@ const server = createServer(async (request, response) => {
 
       const messages = Array.isArray(body.messages) ? body.messages : [];
       const currentDesign = body.currentDesign?.circuit ? body.currentDesign : null;
+      const memory = normalizeChatMemory(body.memory);
+      const contextDiagnostics = {
+        contextTurnCount: sanitizeConversationHistory(messages).length,
+        revision: Boolean(currentDesign),
+      };
+      if (process.env.OLLAMA_CONTEXT_DIAGNOSTICS === '1') {
+        console.info(`[circuit-context] turns=${contextDiagnostics.contextTurnCount} revision=${contextDiagnostics.revision}`);
+      }
       startJsonStream(response);
       writeStreamEvent(response, {
         type: 'spice',
@@ -86,11 +95,21 @@ const server = createServer(async (request, response) => {
           correcting: streamState.correcting,
           ...partial,
         });
-      });
+      }, memory);
       const circuit = reconcileCircuitRevision(aiCircuit, prompt, currentDesign?.circuit);
+      let updatedMemory = memory;
+      try {
+        updatedMemory = updateChatMemory(memory, prompt, circuit);
+      } catch (memoryError) {
+        console.error(`[chat-memory] ${memoryError.message}`);
+      }
       writeStreamEvent(response, {
         type: 'complete',
-        data: buildCircuitResponse(circuit, { rawPrompt: prompt, type: circuit.type }, 'ollama'),
+        data: {
+          ...buildCircuitResponse(circuit, { rawPrompt: prompt, type: circuit.type }, 'ollama'),
+          memory: updatedMemory,
+          ...(process.env.OLLAMA_CONTEXT_DIAGNOSTICS === '1' ? { contextDiagnostics } : {}),
+        },
       });
       response.end();
     } catch (error) {

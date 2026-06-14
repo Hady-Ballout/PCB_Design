@@ -1,3 +1,5 @@
+import { normalizeChatMemory, sanitizeConversationHistory } from './chatMemory.js';
+
 const SYSTEM_PROMPT = `You are a JSON API for beginner-safe electronics circuit generation.
 Return exactly one valid JSON object and no other text.
 Use node "0" for ground.
@@ -169,20 +171,32 @@ const positiveIntegerOption = (value, fallback) => {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-export const buildOllamaRequestBody = (prompt, history, stream, currentDesign = null, correction = null) => {
-  const conversation = history
-    .filter((message) => message?.role === 'user' || (message?.role === 'assistant' && message.circuit))
-    .slice(-6)
+export const buildOllamaRequestBody = (
+  prompt,
+  history,
+  stream,
+  currentDesign = null,
+  memory = null,
+  correction = null,
+) => {
+  const conversation = sanitizeConversationHistory(history)
     .map((message) => ({
       role: message.role,
       content: message.role === 'assistant'
-        ? JSON.stringify(message.circuit)
+        ? JSON.stringify(message.circuit).slice(0, 12000)
         : `Previous circuit request: ${String(message.content || '')}`,
     }));
 
+  const normalizedMemory = normalizeChatMemory(memory);
+  const memoryContext = normalizedMemory.summary
+    ? [{ role: 'system', content: `Active chat memory:\n${normalizedMemory.summary}` }]
+    : [];
   const revisionContext = currentDesign?.circuit
-    ? `\nThis is an EDIT to the current design, not a new design. Start from this exact canonical circuit JSON:\n${JSON.stringify(currentDesign.circuit)}\nCurrent edited SPICE deck, included only as supplemental context:\n${String(currentDesign.spice || '').slice(0, 6000)}\nCurrent edited KiCad netlist, included only as supplemental context:\n${String(currentDesign.kicadNetlist || '').slice(0, 6000)}\nReturn the complete revised circuit JSON. Keep every unchanged component, reference, node, value, and footprint exactly as-is. Only change, add, or remove items required by the new request.`
-    : '';
+    ? [{
+        role: 'system',
+        content: `This request belongs to an existing circuit conversation. The following circuit is the exact canonical current design:\n${JSON.stringify(currentDesign.circuit)}\nCurrent edited SPICE deck, included only as supplemental context:\n${String(currentDesign.spice || '').slice(0, 6000)}\nCurrent edited KiCad netlist, included only as supplemental context:\n${String(currentDesign.kicadNetlist || '').slice(0, 6000)}\nTreat the new request as an edit and return the complete revised circuit. Keep every unchanged component, reference, node, value, and footprint exactly as-is. Only replace the whole design when the new request explicitly asks to start over, replace it, or create a different circuit.`,
+      }]
+    : [];
 
   const correctionMessages = correction
     ? [
@@ -205,6 +219,8 @@ export const buildOllamaRequestBody = (prompt, history, stream, currentDesign = 
     },
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
+      ...memoryContext,
+      ...revisionContext,
       ...conversation,
       {
         role: 'user',
@@ -212,7 +228,7 @@ export const buildOllamaRequestBody = (prompt, history, stream, currentDesign = 
 {"title":"...","type":"...","supplyVoltage":5,"nodes":["0"],"components":[{"ref":"R1","kind":"resistor","value":"1k","nodes":["A","0"],"footprint":"Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"}],"notes":["..."]}
 Use SPICE-safe component refs. For example, an LED must be {"ref":"DLED1","kind":"led",...}, not {"ref":"LED1",...}.
 Circuit prompt: ${prompt}
-If this is a follow-up request, revise the most recent circuit JSON from the conversation while preserving details the user did not ask to change.${revisionContext}`,
+This is a follow-up whenever canonical design context is present. Preserve all prior requirements and unchanged design details. Replace the whole circuit only when this request explicitly asks to start over, replace it, or create a different circuit.`,
       },
       ...correctionMessages,
     ],
@@ -249,12 +265,12 @@ const parseWithCorrectionRetry = async (requestAttempt) => {
 
 const ollamaUrl = () => `${(process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '')}/api/chat`;
 
-export async function generateCircuitWithOllama(prompt, history = [], currentDesign = null) {
+export async function generateCircuitWithOllama(prompt, history = [], currentDesign = null, memory = null) {
   return parseWithCorrectionRetry(async (correction) => {
     const response = await fetch(ollamaUrl(), {
       method: 'POST',
       headers: ollamaHeaders(),
-      body: JSON.stringify(buildOllamaRequestBody(prompt, history, false, currentDesign, correction)),
+      body: JSON.stringify(buildOllamaRequestBody(prompt, history, false, currentDesign, memory, correction)),
     });
 
     if (!response.ok) throw new Error(`Ollama returned ${response.status}: ${await response.text()}`);
@@ -263,12 +279,18 @@ export async function generateCircuitWithOllama(prompt, history = [], currentDes
   });
 }
 
-export async function streamCircuitWithOllama(prompt, history = [], currentDesign = null, onContent = () => {}) {
+export async function streamCircuitWithOllama(
+  prompt,
+  history = [],
+  currentDesign = null,
+  onContent = () => {},
+  memory = null,
+) {
   return parseWithCorrectionRetry(async (correction, attempt) => {
     const response = await fetch(ollamaUrl(), {
       method: 'POST',
       headers: ollamaHeaders(),
-      body: JSON.stringify(buildOllamaRequestBody(prompt, history, true, currentDesign, correction)),
+      body: JSON.stringify(buildOllamaRequestBody(prompt, history, true, currentDesign, memory, correction)),
     });
 
     if (!response.ok) throw new Error(`Ollama returned ${response.status}: ${await response.text()}`);

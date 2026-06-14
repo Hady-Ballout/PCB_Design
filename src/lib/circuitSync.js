@@ -1,5 +1,7 @@
 import {
+  DiagramLayoutError,
   buildCircuitDiagram,
+  layoutCircuitDiagram,
   repairDiagramLayout,
   simulateCircuit,
   toDiagramSvg,
@@ -248,6 +250,27 @@ const chooseNetName = (names) => {
   return unique[0] || '';
 };
 
+const diagramHasCompleteConnectivity = (diagram, circuit) => {
+  const automaticWires = new Map(
+    (diagram?.wires || [])
+      .filter((wire) => !wire.manual)
+      .map((wire) => [`${wire.ref}:${wire.pin}:${wire.node}`, wire]),
+  );
+  const netLabels = new Set((diagram?.netLabels || []).map((label) => label.id));
+
+  return (circuit?.components || []).every((component) => component.nodes.every((node, index) => {
+    const pin = index + 1;
+    if (isUnconnectedTerminal(node, component.ref, pin)) return true;
+    const wire = automaticWires.get(`${component.ref}:${pin}:${node}`);
+    return Boolean(
+      wire
+      && wire.points?.length >= 2
+      && wire.labelId
+      && netLabels.has(wire.labelId),
+    );
+  }));
+};
+
 export const circuitElectricalSignature = (circuit) =>
   JSON.stringify(
     (circuit?.components || []).map((component) => ({
@@ -425,7 +448,7 @@ export const parseKiCadNetlist = (source, baseCircuit) => {
   };
 };
 
-export const preserveDiagramLayout = (diagram, previousDiagram) => {
+export const preserveDiagramLayout = (diagram, previousDiagram, circuit = null) => {
   if (!previousDiagram) return diagram;
   const previousComponents = new Map(previousDiagram.components.map((component) => [component.ref, component]));
   const previousNetLabels = new Map((previousDiagram.netLabels || []).map((label) => [label.id, label]));
@@ -468,18 +491,51 @@ export const preserveDiagramLayout = (diagram, previousDiagram) => {
       preferredWaypoints: previous.preferredWaypoints || [],
     } : wire;
   });
-  return repairDiagramLayout({
+  const preserved = {
     ...diagram,
     width: Math.max(diagram.width, previousDiagram.width),
     height: Math.max(diagram.height, previousDiagram.height),
     components,
     netLabels,
     wires,
-  });
+  };
+  try {
+    const repaired = repairDiagramLayout(preserved);
+    if (!circuit || diagramHasCompleteConnectivity(repaired, circuit)) return repaired;
+  } catch (error) {
+    if (!(error instanceof DiagramLayoutError)) throw error;
+  }
+
+  // A topology edit can invalidate old label positions or routed waypoints. Keep
+  // the surviving component placement and rebuild that routing state from scratch.
+  try {
+    const repaired = repairDiagramLayout({
+      ...preserved,
+      netLabels: [],
+      wires: diagram.wires,
+    });
+    if (!circuit || diagramHasCompleteConnectivity(repaired, circuit)) return repaired;
+  } catch (error) {
+    if (!(error instanceof DiagramLayoutError)) throw error;
+  }
+
+  if (circuit) {
+    try {
+      const anchors = new Map(components.map((component) => [component.ref, component]));
+      const repaired = layoutCircuitDiagram(circuit, { anchors });
+      if (diagramHasCompleteConnectivity(repaired, circuit)) return repaired;
+    } catch (error) {
+      if (!(error instanceof DiagramLayoutError)) throw error;
+    }
+  }
+
+  return circuit && !diagramHasCompleteConnectivity(diagram, circuit)
+    ? layoutCircuitDiagram(circuit)
+    : diagram;
 };
 
 export const synchronizeResult = (previousResult, circuit, previousDiagram, options = {}) => {
-  const diagram = preserveDiagramLayout(buildCircuitDiagram(circuit), previousDiagram);
+  const diagram = preserveDiagramLayout(buildCircuitDiagram(circuit), previousDiagram, circuit);
   const spice = options.spice ?? toSpice(circuit);
   const kicadNetlist = options.kicadNetlist ?? toKiCadNetlist(circuit);
   return {

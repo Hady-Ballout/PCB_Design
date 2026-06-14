@@ -244,6 +244,22 @@ describe('schematic layout engine', () => {
     expect(placement.y % 20).toBe(0);
   });
 
+  it('allows interactive component placement along both axes', () => {
+    const diagram = layoutCircuitDiagram(fixtures[0]);
+    const component = diagram.components.find((item) => item.ref === 'R1');
+    const vertical = findNearestLegalPlacement(diagram, component.ref, {
+      x: component.x,
+      y: component.y + 120,
+    });
+    const horizontal = findNearestLegalPlacement(diagram, component.ref, {
+      x: component.x + 120,
+      y: component.y,
+    });
+
+    expect(vertical.y).not.toBe(component.y);
+    expect(horizontal.x).not.toBe(component.x);
+  });
+
   it('preserves waypoint intent while repairing and incrementally rerouting', () => {
     const diagram = layoutCircuitDiagram(fixtures[1]);
     const selected = diagram.wires.find((wire) => wire.node === 'OUT');

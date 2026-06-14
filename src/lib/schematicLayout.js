@@ -1,4 +1,4 @@
-export const LAYOUT_VERSION = 3;
+export const LAYOUT_VERSION = 4;
 export const GRID_SIZE = 20;
 export const COMPONENT_CLEARANCE = 24;
 export const WIRE_CLEARANCE = 16;
@@ -384,16 +384,11 @@ const segmentsConflict = (first, second, clearance = WIRE_CLEARANCE) =>
   segmentDistance(first, second) < clearance;
 
 const routeObstacles = (diagram, wire) => {
-  const endpointRefs = new Set([wire.ref, wire.from?.ref, wire.to?.ref].filter(Boolean));
-  const ownLabelId = wire.labelId;
+  const endpointRefs = new Set([wire.ref, wire.from?.ref, wire.to?.ref, wire.targetRef].filter(Boolean));
   return [
     ...diagram.components
       .filter((component) => !endpointRefs.has(component.ref))
       .map((component) => componentBounds(component, WIRE_CLEARANCE)),
-    ...(diagram.labels || []).map((label) => labelBounds(label, WIRE_CLEARANCE)),
-    ...(diagram.netLabels || [])
-      .filter((label) => label.id !== ownLabelId)
-      .map((label) => netLabelBounds(label, WIRE_CLEARANCE)),
   ];
 };
 
@@ -479,7 +474,9 @@ const routeSection = (start, end, diagram, wire, routedWires) => {
   const endGrid = endpointGridPoint(diagram, end, grid);
   const obstacles = routeObstacles(diagram, wire);
   const hardBodies = diagram.components.map((component) => componentBounds(component));
-  const occupiedSegments = routedWires.flatMap((item) => pathSegments(item.points || [])
+  const occupiedSegments = routedWires
+    .filter((item) => wire.node === '0' || !wire.node || item.node !== wire.node)
+    .flatMap((item) => pathSegments(item.points || [])
     .map((segment) => ({ ...segment, wireId: item.id })));
   const open = [{ ...startGrid, direction: '', cost: 0, score: Math.abs(startGrid.x - endGrid.x) + Math.abs(startGrid.y - endGrid.y) }];
   const best = new Map();
@@ -573,7 +570,9 @@ const fastOrthogonalRoute = (diagram, wire, routedWires, start, end) => {
     index === 0 || pointKey(point) !== pointKey(list[index - 1])));
   const obstacles = routeObstacles(diagram, wire);
   const hardBodies = diagram.components.map((component) => componentBounds(component));
-  const occupied = routedWires.flatMap((item) => pathSegments(item.points || [])
+  const occupied = routedWires
+    .filter((item) => wire.node === '0' || !wire.node || item.node !== wire.node)
+    .flatMap((item) => pathSegments(item.points || [])
     .map((segment) => ({ ...segment, wireId: item.id })));
   const candidate = candidates.find((points) => pathSegments(points).every((segment, index) => {
     if (index >= lead.length - 1 && hardBodies.some((rect) => segmentIntersectsRect(segment.from, segment.to, rect))) return false;
@@ -583,59 +582,72 @@ const fastOrthogonalRoute = (diagram, wire, routedWires, start, end) => {
   return candidate ? compactOrthogonalPath(candidate) : null;
 };
 
-const routeOneWire = (diagram, wire, routedWires) => {
-  const { start, end } = wireEndpoints(diagram, wire);
-  const label = !wire.manual && (diagram.netLabels || []).find((item) => item.id === wire.labelId);
-  if (label?.routePoints?.length && wire.routingMode !== 'manual' && !wire.preferredWaypoints?.length) {
-    const points = compactOrthogonalPath([
-      start,
-      ...label.routePoints.slice(1, -1),
-      end,
-    ]);
-    const obstacles = routeObstacles(diagram, wire);
-    const hardBodies = diagram.components.map((component) => componentBounds(component));
-    const occupied = routedWires.flatMap((item) => pathSegments(item.points || []));
-    const legal = pathSegments(points).every((segment) =>
-      !hardBodies.some((rect) => segmentIntersectsRect(segment.from, segment.to, rect))
-      && !obstacles.some((rect) => segmentIntersectsRect(segment.from, segment.to, rect))
-      && occupied.every((other) => !segmentsConflict(segment, other)));
-    if (legal) {
+const routeOneWire = (diagram, wire, routedWires, target = null) => {
+  const endpoints = wireEndpoints(diagram, wire);
+  const start = endpoints.start;
+  const componentPins = new Set(diagram.components.flatMap((component) =>
+    (component.pins || []).map((pin) => pointKey(pin))));
+  const sameNetWires = wire.node && wire.node !== '0'
+    ? routedWires.filter((item) => item.node === wire.node)
+    : [];
+  const sameNetPoints = sameNetWires.flatMap((item) => [
+    ...(item.points || []),
+    ...pathSegments(item.points || []).map((segment) => segment.from.x === segment.to.x
+      ? {
+          x: segment.from.x,
+          y: Math.max(Math.min(start.y, Math.max(segment.from.y, segment.to.y)), Math.min(segment.from.y, segment.to.y)),
+        }
+      : {
+          x: Math.max(Math.min(start.x, Math.max(segment.from.x, segment.to.x)), Math.min(segment.from.x, segment.to.x)),
+          y: segment.from.y,
+        }),
+  ]).filter((point) => !componentPins.has(pointKey(point)));
+  const targets = [...new Map(
+    [...sameNetPoints, target || endpoints.end]
+      .sort((first, second) =>
+        Math.abs(first.x - start.x) + Math.abs(first.y - start.y)
+        - Math.abs(second.x - start.x) - Math.abs(second.y - start.y))
+      .map((point) => [pointKey(point), point]),
+  ).values()].slice(0, 12);
+
+  for (const end of targets) {
+    const fastRoute = fastOrthogonalRoute(diagram, wire, routedWires, start, end);
+    if (fastRoute) {
       return {
         ...wire,
+        id: wire.id || `${wire.ref || wire.from?.ref}-${wire.pin || wire.from?.pin}-${wire.node || wire.to?.ref}`,
         routingMode: wire.routingMode || 'auto',
+        points: fastRoute,
+      };
+    }
+    const preferences = (wire.preferredWaypoints || (wire.offset ? [{
+      x: (start.x + end.x) / 2 + wire.offset.x,
+      y: (start.y + end.y) / 2 + wire.offset.y,
+    }] : [])).map((point) => ({
+      x: snap(Math.max(CANVAS_MARGIN, Math.min(diagram.width - CANVAS_MARGIN, point.x))),
+      y: snap(Math.max(CANVAS_MARGIN, Math.min(diagram.height - CANVAS_MARGIN, point.y))),
+    }));
+    const stops = [start, ...preferences, end];
+    const points = [];
+    let failed = false;
+    for (let index = 0; index < stops.length - 1; index += 1) {
+      const section = routeSection(stops[index], stops[index + 1], diagram, wire, routedWires);
+      if (!section) {
+        failed = true;
+        break;
+      }
+      points.push(...section.slice(points.length ? 1 : 0));
+    }
+    if (!failed) {
+      return {
+        ...wire,
+        id: wire.id || `${wire.ref || wire.from?.ref}-${wire.pin || wire.from?.pin}-${wire.node || wire.to?.ref}`,
+        routingMode: wire.manual ? 'manual' : wire.routingMode || 'auto',
         points,
       };
     }
   }
-  const fastRoute = fastOrthogonalRoute(diagram, wire, routedWires, start, end);
-  if (fastRoute) {
-    return {
-      ...wire,
-      id: wire.id || `${wire.ref || wire.from?.ref}-${wire.pin || wire.from?.pin}-${wire.node || wire.to?.ref}`,
-      routingMode: wire.routingMode || 'auto',
-      points: fastRoute,
-    };
-  }
-  const preferences = (wire.preferredWaypoints || (wire.offset ? [{
-    x: (start.x + end.x) / 2 + wire.offset.x,
-    y: (start.y + end.y) / 2 + wire.offset.y,
-  }] : [])).map((point) => ({
-    x: snap(Math.max(CANVAS_MARGIN, Math.min(diagram.width - CANVAS_MARGIN, point.x))),
-    y: snap(Math.max(CANVAS_MARGIN, Math.min(diagram.height - CANVAS_MARGIN, point.y))),
-  }));
-  const stops = [start, ...preferences, end];
-  const points = [];
-  for (let index = 0; index < stops.length - 1; index += 1) {
-    const section = routeSection(stops[index], stops[index + 1], diagram, wire, routedWires);
-    if (!section) return null;
-    points.push(...section.slice(points.length ? 1 : 0));
-  }
-  return {
-    ...wire,
-    id: wire.id || `${wire.ref || wire.from?.ref}-${wire.pin || wire.from?.pin}-${wire.node || wire.to?.ref}`,
-    routingMode: wire.manual ? 'manual' : wire.routingMode || 'auto',
-    points,
-  };
+  return null;
 };
 
 const wirePriority = (wire, diagram) => {
@@ -656,8 +668,8 @@ const pinSide = (component, pin) => {
   ].sort((first, second) => first.distance - second.distance)[0].direction;
 };
 
-const connectionLabel = (wire, anchor, direction) => {
-  const labelWidth = wire.node === '0' ? 0 : textWidth(wire.node);
+const connectionLabel = (id, name, anchor, direction, terminal = {}) => {
+  const labelWidth = name === '0' ? 0 : textWidth(name);
   let labelX = anchor.x - labelWidth / 2;
   let labelY = anchor.y - 13;
   if (direction === 'right') labelX = anchor.x;
@@ -665,10 +677,9 @@ const connectionLabel = (wire, anchor, direction) => {
   if (direction === 'up') labelY = anchor.y - 26;
   if (direction === 'down') labelY = anchor.y;
   return {
-    id: wire.labelId,
-    name: wire.node,
-    ref: wire.ref,
-    pin: wire.pin,
+    id,
+    name,
+    ...terminal,
     x: anchor.x,
     y: anchor.y,
     direction,
@@ -678,24 +689,15 @@ const connectionLabel = (wire, anchor, direction) => {
   };
 };
 
-const labelRoutePoints = (pin, label) => compactOrthogonalPath([
-  { x: pin.x, y: pin.y },
-  label.direction === 'left' || label.direction === 'right'
-    ? { x: label.x, y: pin.y }
-    : { x: pin.x, y: label.y },
-  { x: label.x, y: label.y },
-]);
-
-const placeConnectionLabels = (diagram, preferredLabels = new Map()) => {
+const placeNetLabels = (diagram, preferredLabels = new Map()) => {
   const labels = [];
-  const reservedSegments = [];
   const withinCanvas = (label) => {
     const bounds = netLabelBounds(label);
     return bounds.left >= CANVAS_MARGIN && bounds.top >= CANVAS_MARGIN
       && bounds.right <= diagram.width - CANVAS_MARGIN
       && bounds.bottom <= diagram.height - CANVAS_MARGIN;
   };
-  const legal = (label, wire, component) => {
+  const legal = (label) => {
     if (!withinCanvas(label)) return false;
     const visualBounds = netLabelBounds(label);
     if (diagram.components.some((other) => rectsOverlap(
@@ -713,36 +715,28 @@ const placeConnectionLabels = (diagram, preferredLabels = new Map()) => {
       netLabelBounds(other),
       WIRE_CLEARANCE,
     ))) return false;
-    const route = pathSegments(label.routePoints || []);
-    if (route.some((segment) => diagram.components.some((other) => other.ref !== component.ref
-      && segmentIntersectsRect(segment.from, segment.to, componentBounds(other, WIRE_CLEARANCE))))) return false;
-    if (route.some((segment) => (diagram.labels || []).some((other) =>
-      segmentIntersectsRect(segment.from, segment.to, labelBounds(other, WIRE_CLEARANCE))))) return false;
-    if (route.some((segment) => labels.some((other) =>
-      segmentIntersectsRect(segment.from, segment.to, netLabelBounds(other, WIRE_CLEARANCE))))) return false;
-    return route.every((segment) => reservedSegments.every((other) => !segmentsConflict(segment, other)));
+    if (diagram.components.some((component) => (component.pins || []).some((pin) =>
+      !(label.ref === component.ref && label.pin === pin.pinIndex)
+      && rectsOverlap(visualBounds, pinEscapeBounds(component, pin), WIRE_CLEARANCE)))) return false;
+    return !diagram.components.some((component) => rectsOverlap(
+      { left: label.x - 1, right: label.x + 1, top: label.y - 1, bottom: label.y + 1 },
+      componentBounds(component, WIRE_CLEARANCE),
+    ));
   };
 
-  const automaticWires = diagram.wires.filter((item) => !item.manual).sort((first, second) => {
-    const firstPins = diagram.components.find((item) => item.ref === first.ref)?.pinCount || 0;
-    const secondPins = diagram.components.find((item) => item.ref === second.ref)?.pinCount || 0;
-    return secondPins - firstPins || String(first.id).localeCompare(String(second.id));
-  });
-  for (const wire of automaticWires) {
+  const groundWires = diagram.wires.filter((wire) => !wire.manual && wire.node === '0');
+  for (const wire of groundWires) {
     const component = diagram.components.find((item) => item.ref === wire.ref);
     const pin = component?.pins.find((item) => item.pinIndex === wire.pin);
     if (!component || !pin) continue;
     const preferred = preferredLabels.get(wire.labelId);
     let placed = preferred
-      ? connectionLabel(wire, preferred, preferred.direction || pinSide(component, pin))
+      ? connectionLabel(wire.labelId, wire.node, preferred, preferred.direction || 'down', { ref: wire.ref, pin: wire.pin })
       : null;
-    if (placed) placed.routePoints = labelRoutePoints(pin, placed);
-    if (!placed || !legal(placed, wire, component)) {
+    if (!placed || !legal(placed)) {
       placed = null;
       const outward = pinSide(component, pin);
-      const directions = wire.node === '0'
-        ? ['down', outward, 'left', 'right', 'up']
-        : [outward, 'right', 'left', 'up', 'down'];
+      const directions = ['down', outward, 'left', 'right', 'up'];
       const uniqueDirections = [...new Set(directions)];
       for (let radius = 2; radius <= 36 && !placed; radius += 1) {
         const distance = radius * GRID_SIZE;
@@ -754,12 +748,11 @@ const placeConnectionLabels = (diagram, preferredLabels = new Map()) => {
               up: { x: tangent * GRID_SIZE, y: -distance },
               down: { x: tangent * GRID_SIZE, y: distance },
             }[direction];
-            const candidate = connectionLabel(wire, {
+            const candidate = connectionLabel(wire.labelId, wire.node, {
               x: snap(pin.x + delta.x),
               y: snap(pin.y + delta.y),
-            }, direction);
-            candidate.routePoints = labelRoutePoints(pin, candidate);
-            if (legal(candidate, wire, component)) {
+            }, direction, { ref: wire.ref, pin: wire.pin });
+            if (legal(candidate)) {
               placed = candidate;
               break;
             }
@@ -774,7 +767,48 @@ const placeConnectionLabels = (diagram, preferredLabels = new Map()) => {
       ]);
     }
     labels.push(placed);
-    reservedSegments.push(...pathSegments(placed.routePoints));
+  }
+
+  const signalNets = (diagram.nets || []).filter((net) => net.name !== '0' && net.connections.length);
+  for (const net of signalNets) {
+    const id = `net-label:${net.name}`;
+    const preferred = preferredLabels.get(id);
+    const center = {
+      x: snap(net.connections.reduce((sum, connection) => sum + connection.x, 0) / net.connections.length),
+      y: snap(net.connections.reduce((sum, connection) => sum + connection.y, 0) / net.connections.length),
+    };
+    let placed = preferred
+      ? connectionLabel(id, net.name, preferred, preferred.direction || 'up')
+      : null;
+    if (!placed || !legal(placed)) {
+      placed = null;
+      for (let radius = 0; radius <= 36 && !placed; radius += 1) {
+        const candidates = radius === 0
+          ? [center]
+          : [
+              { x: center.x + radius * GRID_SIZE, y: center.y },
+              { x: center.x - radius * GRID_SIZE, y: center.y },
+              { x: center.x, y: center.y + radius * GRID_SIZE },
+              { x: center.x, y: center.y - radius * GRID_SIZE },
+            ];
+        for (const anchor of candidates) {
+          for (const direction of ['up', 'right', 'left', 'down']) {
+            const candidate = connectionLabel(id, net.name, anchor, direction);
+            if (legal(candidate)) {
+              placed = candidate;
+              break;
+            }
+          }
+          if (placed) break;
+        }
+      }
+    }
+    if (!placed) {
+      throw new DiagramLayoutError(`No legal label position is available for net ${net.name}.`, [
+        { type: 'net_label_placement_failed', node: net.name },
+      ]);
+    }
+    labels.push(placed);
   }
   return labels;
 };
@@ -791,8 +825,8 @@ const buildDraft = (circuit, options = {}) => {
   const maxRank = Math.max(0, ...ranks.values());
   const rankColumns = Math.min(8, maxRank + 1);
   const rankBands = Math.ceil((maxRank + 1) / rankColumns);
-  const width = Math.max(900, CANVAS_MARGIN * 2 + rankColumns * 240) + (options.extraWidth || 0);
-  const height = Math.max(620, 420 + rankBands * 240 + Math.ceil((circuit.components?.length || 0) / 8) * 90)
+  const width = Math.max(1100, CANVAS_MARGIN * 2 + rankColumns * 340) + (options.extraWidth || 0);
+  const height = Math.max(720, 480 + rankBands * 300 + Math.ceil((circuit.components?.length || 0) / 8) * 110)
     + (options.extraHeight || 0);
   const netPositions = new Map(nonGroundNets.map((name, index) => [name, {
     x: snap(CANVAS_MARGIN + 100 + index * ((width - CANVAS_MARGIN * 2 - 200) / Math.max(1, nonGroundNets.length - 1))),
@@ -814,8 +848,8 @@ const buildDraft = (circuit, options = {}) => {
     const isTwoPin = nodes.length <= 2;
     let orientation = 'horizontal';
     let preferred = {
-      x: CANVAS_MARGIN + 140 + visualColumn * 240,
-      y: 220 + rankBand * 240 + row * 150,
+      x: CANVAS_MARGIN + 180 + visualColumn * 320 + (row % 3) * 220,
+      y: 260 + rankBand * 300 + Math.floor(row / 3) * 190,
     };
     let componentWidth = size.width;
     let componentHeight = size.height;
@@ -860,7 +894,9 @@ const buildDraft = (circuit, options = {}) => {
     .filter((pin) => !isUnconnectedTerminal(pin.node, component.ref, pin.pinIndex))
     .map((pin) => ({
       id: `${component.ref}-${pin.pinIndex}-${pin.node}`,
-      labelId: `net-label:${component.ref}:${pin.pinIndex}`,
+      labelId: pin.node === '0'
+        ? `ground-label:${component.ref}:${pin.pinIndex}`
+        : `net-label:${pin.node}`,
       ref: component.ref,
       pin: pin.pinIndex,
       node: pin.node,
@@ -886,36 +922,204 @@ const buildDraft = (circuit, options = {}) => {
 };
 
 const routeOrders = (diagram) => {
-  const base = [...diagram.wires].sort((first, second) =>
-    wirePriority(first, diagram) - wirePriority(second, diagram) || String(first.id).localeCompare(String(second.id)));
   const distance = (wire) => {
     const { start, end } = wireEndpoints(diagram, wire);
     return Math.abs(start.x - end.x) + Math.abs(start.y - end.y);
   };
-  const longestFirst = [...diagram.wires].sort((first, second) =>
-    distance(second) - distance(first) || String(first.id).localeCompare(String(second.id)));
-  const shortestFirst = [...longestFirst].reverse();
-  return [base, [...base].reverse(), longestFirst, shortestFirst];
+  const groups = new Map();
+  for (const wire of diagram.wires) {
+    const key = wire.manual || wire.node === '0' ? `wire:${wire.id}` : `net:${wire.node}`;
+    groups.set(key, [...(groups.get(key) || []), wire]);
+  }
+  const grouped = [...groups.values()].map((wires) => [...wires].sort((first, second) =>
+    distance(first) - distance(second) || String(first.id).localeCompare(String(second.id))));
+  const signalGroups = grouped.filter((wires) => !wires[0].manual && wires[0].node !== '0');
+  const manualGroups = grouped.filter((wires) => wires[0].manual);
+  const groundGroups = grouped.filter((wires) => !wires[0].manual && wires[0].node === '0');
+  const byPriority = [...signalGroups].sort((first, second) =>
+    wirePriority(first[0], diagram) - wirePriority(second[0], diagram)
+    || String(first[0].node || first[0].id).localeCompare(String(second[0].node || second[0].id)));
+  const bySize = [...signalGroups].sort((first, second) =>
+    second.length - first.length
+    || wirePriority(first[0], diagram) - wirePriority(second[0], diagram));
+  const tail = [...manualGroups, ...groundGroups];
+  const permutations = (items) => {
+    if (items.length < 2) return [items];
+    if (items.length > 5) {
+      return items.map((_, index) => [...items.slice(index), ...items.slice(0, index)]);
+    }
+    return items.flatMap((item, index) => permutations([
+      ...items.slice(0, index),
+      ...items.slice(index + 1),
+    ]).map((rest) => [item, ...rest]));
+  };
+  const candidates = signalGroups.length <= 5
+    ? permutations(byPriority)
+    : [byPriority, [...byPriority].reverse(), bySize, [...bySize].reverse()];
+  return candidates.map((groups) => [...groups, ...tail]);
+};
+
+const splitPathAtHalf = (points) => {
+  const segments = pathSegments(points);
+  const total = segments.reduce((sum, segment) =>
+    sum + Math.abs(segment.to.x - segment.from.x) + Math.abs(segment.to.y - segment.from.y), 0);
+  let remaining = total / 2;
+  let splitIndex = 0;
+  let hub = points[0];
+  for (const [index, segment] of segments.entries()) {
+    const length = Math.abs(segment.to.x - segment.from.x) + Math.abs(segment.to.y - segment.from.y);
+    if (remaining <= length) {
+      hub = segment.from.x === segment.to.x
+        ? { x: segment.from.x, y: snap(segment.from.y + Math.sign(segment.to.y - segment.from.y) * remaining) }
+        : { x: snap(segment.from.x + Math.sign(segment.to.x - segment.from.x) * remaining), y: segment.from.y };
+      splitIndex = index;
+      break;
+    }
+    remaining -= length;
+  }
+  const first = compactOrthogonalPath([...points.slice(0, splitIndex + 1), hub]
+    .filter((point, index, list) => index === 0 || pointKey(point) !== pointKey(list[index - 1])));
+  const second = compactOrthogonalPath([hub, ...points.slice(splitIndex + 1)].reverse()
+    .filter((point, index, list) => index === 0 || pointKey(point) !== pointKey(list[index - 1])));
+  return { first, second, hub };
+};
+
+const limitedPermutations = (items) => {
+  if (items.length < 2) return [items];
+  if (items.length > 5) return [items, [...items].reverse()];
+  return items.flatMap((item, index) => limitedPermutations([
+    ...items.slice(0, index),
+    ...items.slice(index + 1),
+  ]).map((rest) => [item, ...rest]));
+};
+
+const routeNetGroup = (diagram, wires, routedWires) => {
+  if (wires.length < 2) {
+    const routed = routeOneWire(diagram, wires[0], routedWires);
+    return routed ? [routed] : null;
+  }
+  const starts = new Map(wires.map((wire) => [wire.id, wireEndpoints(diagram, wire).start]));
+  const pairs = wires.flatMap((first, firstIndex) => wires.slice(firstIndex + 1).map((second) => ({
+    first,
+    second,
+    distance: Math.abs(starts.get(first.id).x - starts.get(second.id).x)
+      + Math.abs(starts.get(first.id).y - starts.get(second.id).y),
+  }))).sort((first, second) => first.distance - second.distance
+    || first.first.id.localeCompare(second.first.id)
+    || first.second.id.localeCompare(second.second.id));
+
+  for (const pair of pairs) {
+    const target = starts.get(pair.second.id);
+    const trunk = routeOneWire(diagram, { ...pair.first, targetRef: pair.second.ref }, routedWires, target);
+    if (!trunk) continue;
+    const split = splitPathAtHalf(trunk.points);
+    const first = { ...trunk, targetRef: undefined, points: split.first };
+    const second = { ...pair.second, points: split.second };
+    const remaining = wires.filter((wire) => wire !== pair.first && wire !== pair.second)
+      .sort((left, right) => {
+        const leftPoint = starts.get(left.id);
+        const rightPoint = starts.get(right.id);
+        const leftDistance = Math.abs(leftPoint.x - split.hub.x) + Math.abs(leftPoint.y - split.hub.y);
+        const rightDistance = Math.abs(rightPoint.x - split.hub.x) + Math.abs(rightPoint.y - split.hub.y);
+        return leftDistance - rightDistance || left.id.localeCompare(right.id);
+      });
+    for (const order of limitedPermutations(remaining)) {
+      const routed = [first, second];
+      let failed = false;
+      for (const wire of order) {
+        const next = routeOneWire(diagram, wire, [...routedWires, ...routed]);
+        if (!next) {
+          failed = true;
+          break;
+        }
+        routed.push(next);
+      }
+      if (!failed) return routed;
+    }
+  }
+  return null;
+};
+
+const pointOnSegment = (point, segment) => {
+  if (segment.from.x === segment.to.x) {
+    return point.x === segment.from.x
+      && point.y >= Math.min(segment.from.y, segment.to.y)
+      && point.y <= Math.max(segment.from.y, segment.to.y);
+  }
+  return point.y === segment.from.y
+    && point.x >= Math.min(segment.from.x, segment.to.x)
+    && point.x <= Math.max(segment.from.x, segment.to.x);
+};
+
+const junctionsForWires = (wires) => {
+  const junctions = [];
+  const byNode = new Map();
+  for (const wire of wires.filter((item) => item.node && item.node !== '0')) {
+    byNode.set(wire.node, [...(byNode.get(wire.node) || []), wire]);
+  }
+  for (const [node, nodeWires] of byNode.entries()) {
+    if (nodeWires.length < 3) continue;
+    const candidates = new Map(nodeWires.flatMap((wire) => (wire.points || []).map((point) => [pointKey(point), point])));
+    for (const point of candidates.values()) {
+      const directions = new Set();
+      for (const wire of nodeWires) {
+        for (const segment of pathSegments(wire.points || [])) {
+          if (!pointOnSegment(point, segment)) continue;
+          if (segment.from.x < point.x || segment.to.x < point.x) directions.add('left');
+          if (segment.from.x > point.x || segment.to.x > point.x) directions.add('right');
+          if (segment.from.y < point.y || segment.to.y < point.y) directions.add('up');
+          if (segment.from.y > point.y || segment.to.y > point.y) directions.add('down');
+        }
+      }
+      if (directions.size >= 3) junctions.push({ id: `junction:${node}:${point.x}:${point.y}`, node, ...point });
+    }
+  }
+  return junctions;
 };
 
 const routeWithExpansion = (diagram) => {
   let current = structuredClone(diagram);
   let lastViolations = [];
+  let failedNode = null;
   current.layoutVersion = LAYOUT_VERSION;
   current.junctions = [];
   current.bridges = [];
   current.wires = (current.wires || []).map((wire) => ({
     ...wire,
     id: wire.id || `${wire.ref || wire.from?.ref}-${wire.pin || wire.from?.pin}-${wire.node || wire.to?.ref}`,
-    labelId: wire.manual ? undefined : wire.labelId || `net-label:${wire.ref}:${wire.pin}`,
+    labelId: wire.manual ? undefined : wire.labelId || (wire.node === '0'
+      ? `ground-label:${wire.ref}:${wire.pin}`
+      : `net-label:${wire.node}`),
     stub: false,
     points: [],
   }));
 
   for (let attempt = 0; attempt <= MAX_EXPANSIONS; attempt += 1) {
+    if (failedNode) {
+      const offsets = [
+        { x: 80, y: 0 },
+        { x: -80, y: 0 },
+        { x: 0, y: -80 },
+        { x: 0, y: 80 },
+        { x: 160, y: 0 },
+        { x: -160, y: 0 },
+        { x: 0, y: -160 },
+        { x: 0, y: 160 },
+      ];
+      const offset = offsets[Math.min(attempt - 1, offsets.length - 1)];
+      current.netLabels = (current.netLabels || []).map((label) => label.name === failedNode
+        ? {
+            ...label,
+            x: label.x + offset.x,
+            y: label.y + offset.y,
+            labelX: label.labelX + offset.x,
+            labelY: label.labelY + offset.y,
+          }
+        : label);
+    }
     const preferredLabels = new Map((current.netLabels || []).map((label) => [label.id, label]));
     try {
-      current.netLabels = placeConnectionLabels(current, preferredLabels);
+      current.netLabels = placeNetLabels(current, preferredLabels);
     } catch (error) {
       const labelFailure = error instanceof DiagramLayoutError
         && error.violations.some((violation) => violation.type === 'net_label_placement_failed');
@@ -927,20 +1131,22 @@ const routeWithExpansion = (diagram) => {
     for (const order of routeOrders(current)) {
       const routed = [];
       let failed = null;
-      for (const wire of order) {
-        const next = routeOneWire(current, wire, routed);
+      for (const group of order) {
+        const isSignalNet = group.length > 1 && !group[0].manual && group[0].node !== '0';
+        const single = isSignalNet ? null : routeOneWire(current, group[0], routed);
+        const next = isSignalNet ? routeNetGroup(current, group, routed) : single && [single];
         if (!next) {
-          failed = wire;
+          failed = group[0];
           break;
         }
-        routed.push(next);
+        routed.push(...next);
       }
       if (!failed) {
         const byId = new Map(routed.map((wire) => [wire.id, wire]));
         const candidate = {
           ...current,
           wires: current.wires.map((wire) => byId.get(wire.id)),
-          junctions: [],
+          junctions: junctionsForWires(routed),
           bridges: [],
         };
         const validation = validateDiagramLayout(candidate);
@@ -948,6 +1154,7 @@ const routeWithExpansion = (diagram) => {
         lastViolations = validation.violations;
       } else {
         lastViolations = [{ type: 'route_failed', wire: failed.id }];
+        failedNode = failed.node && failed.node !== '0' ? failed.node : null;
       }
     }
     current.width += 160;
@@ -1000,7 +1207,7 @@ export const findNearestLegalPlacement = (diagram, componentRef, target) => {
   let width = diagram.width;
   let height = diagram.height;
   for (let attempt = 0; attempt <= MAX_EXPANSIONS; attempt += 1) {
-    const position = nearestFreePosition(component, others, target, { width, height, clearance: PLACEMENT_CLEARANCE });
+    const position = nearestFreePosition(component, others, target, { width, height, clearance: COMPONENT_CLEARANCE });
     if (position) return { ...position, width, height };
     width += 160;
     height += 120;
@@ -1066,19 +1273,12 @@ export const validateDiagramLayout = (diagram) => {
         && segmentIntersectsRect(segment.from, segment.to, componentBounds(component, WIRE_CLEARANCE)))) {
         violations.push({ type: 'wire_component_clearance', wire: wire.id });
       }
-      if (labels.some((label) =>
-        segmentIntersectsRect(segment.from, segment.to, labelBounds(label, WIRE_CLEARANCE)))) {
-        violations.push({ type: 'wire_label_overlap', wire: wire.id });
-      }
-      if (netLabels.some((label) => label.id !== wire.labelId
-        && segmentIntersectsRect(segment.from, segment.to, netLabelBounds(label, WIRE_CLEARANCE)))) {
-        violations.push({ type: 'wire_label_overlap', wire: wire.id });
-      }
       for (const other of diagram.wires.slice(0, index)) {
         for (const otherSegment of pathSegments(other.points || [])) {
-          if (segmentsTouch(segment, otherSegment)) {
+          const sameNet = Boolean(wire.node) && wire.node !== '0' && wire.node === other.node;
+          if (!sameNet && segmentsTouch(segment, otherSegment)) {
             violations.push({ type: 'wire_wire_intersection', wires: [wire.id, other.id] });
-          } else if (segmentsConflict(segment, otherSegment)) {
+          } else if (!sameNet && segmentsConflict(segment, otherSegment)) {
             violations.push({ type: 'wire_wire_clearance', wires: [wire.id, other.id] });
           }
         }
@@ -1112,7 +1312,9 @@ export const repairDiagramLayout = (diagram, options = {}) => {
     return {
       ...wire,
       id: wire.id || `${wire.ref || wire.from?.ref}-${wire.pin || wire.from?.pin}-${wire.node || wire.to?.ref}`,
-      labelId: wire.manual ? undefined : wire.labelId || `net-label:${wire.ref}:${wire.pin}`,
+      labelId: wire.manual ? undefined : wire.labelId || (wire.node === '0'
+        ? `ground-label:${wire.ref}:${wire.pin}`
+        : `net-label:${wire.node}`),
       routingMode: wire.manual ? 'manual' : wire.routingMode || 'auto',
       preferredWaypoints,
       points: [],
@@ -1122,4 +1324,14 @@ export const repairDiagramLayout = (diagram, options = {}) => {
   copy.junctions = [];
   copy.bridges = [];
   return routeWithExpansion(copy);
+};
+
+export {
+  buildDraft as __debugBuildDraft,
+  fastOrthogonalRoute as __debugFastOrthogonalRoute,
+  placeNetLabels as __debugPlaceNetLabels,
+  routeObstacles as __debugRouteObstacles,
+  routeOneWire as __debugRouteOneWire,
+  routeOrders as __debugRouteOrders,
+  routeSection as __debugRouteSection,
 };

@@ -14,9 +14,15 @@ export const createChat = ({ id = createId(), now = Date.now() } = {}) => ({
   updatedAt: now,
   draft: '',
   messages: [],
+  memory: {
+    summary: '',
+    updatedAt: 0,
+  },
   result: null,
   editableSpice: '',
+  pendingSpiceChange: null,
   editableKicadNetlist: '',
+  pendingKicadChange: null,
   editedDiagram: null,
   simulationRun: null,
   error: '',
@@ -45,7 +51,7 @@ const normalizeMessage = (message) => {
 const migrateDiagram = (diagram, circuit = null) => {
   if (!diagram || typeof diagram !== 'object' || diagram.layoutVersion >= LAYOUT_VERSION) return diagram;
   try {
-    return repairDiagramLayout(diagram);
+    return repairDiagramLayout(diagram, circuit ? { circuit } : {});
   } catch {
     return circuit ? layoutCircuitDiagram(circuit) : diagram;
   }
@@ -66,9 +72,25 @@ const normalizeChat = (chat) => {
     updatedAt: Number(chat.updatedAt) || base.createdAt,
     draft: String(chat.draft || ''),
     messages: Array.isArray(chat.messages) ? chat.messages.map(normalizeMessage).filter(Boolean) : [],
+    memory: {
+      summary: String(chat.memory?.summary || ''),
+      updatedAt: Number(chat.memory?.updatedAt) || 0,
+    },
     result,
     editableSpice: String(chat.editableSpice || chat.result?.spice || ''),
+    pendingSpiceChange: chat.pendingSpiceChange && typeof chat.pendingSpiceChange === 'object'
+      ? {
+          previous: String(chat.pendingSpiceChange.previous || ''),
+          proposed: String(chat.pendingSpiceChange.proposed || ''),
+        }
+      : null,
     editableKicadNetlist: String(chat.editableKicadNetlist || chat.result?.kicadNetlist || ''),
+    pendingKicadChange: chat.pendingKicadChange && typeof chat.pendingKicadChange === 'object'
+      ? {
+          previous: String(chat.pendingKicadChange.previous || ''),
+          proposed: String(chat.pendingKicadChange.proposed || ''),
+        }
+      : null,
     editedDiagram: chat.editedDiagram && typeof chat.editedDiagram === 'object'
       ? migrateDiagram(chat.editedDiagram, chat.result?.circuit)
       : null,
@@ -109,10 +131,9 @@ export const saveChatStore = (store, storage = globalThis.localStorage) => {
   }
 };
 
-export const buildConversationContext = (messages, limit = 6) =>
+export const buildConversationContext = (messages) =>
   (Array.isArray(messages) ? messages : [])
     .filter((message) => message.role === 'user' || (message.role === 'assistant' && message.circuit))
-    .slice(-limit)
     .map((message) => ({
       role: message.role,
       content: message.content,

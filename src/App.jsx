@@ -14,6 +14,7 @@ import {
   synchronizeResult,
 } from './lib/circuitSync.js';
 import { toDiagramSvg } from './lib/pcbGenerator.js';
+import { changedLineIndexes } from './lib/lineDiff.js';
 import {
   findNearestLegalPlacement,
   layoutCircuitDiagram,
@@ -52,7 +53,6 @@ const formatChatTime = (timestamp) => {
 const EDITOR_VIEW_LABELS = {
   spice: 'Spice',
   canvas: 'Canvas',
-  kicad: 'KiCad',
 };
 
 const EDITOR_SPLIT_STORAGE_KEY = 'prompt-to-pcb-editor-split-v1';
@@ -358,8 +358,35 @@ const movedNet = (net, dx, dy) => ({
   y: net.y + dy,
   labelX: net.labelX + dx,
   labelY: net.labelY + dy,
-  connections: net.connections.map((connection) => ({ ...connection, x: connection.x + dx, y: connection.y + dy })),
+  ...(net.connections ? {
+    connections: net.connections.map((connection) => ({ ...connection, x: connection.x + dx, y: connection.y + dy })),
+  } : {}),
 });
+
+const moveWireEndpoint = (wire, endpoint, dx, dy) => {
+  if (!wire.points?.length) return wire;
+  return {
+    ...wire,
+    points: wire.points.map((point, index) => {
+      const isEndpoint = endpoint === 'start' ? index === 0 : index === wire.points.length - 1;
+      return isEndpoint ? { x: point.x + dx, y: point.y + dy } : point;
+    }),
+  };
+};
+
+const moveWirePath = (wire, diagram, dx, dy) => {
+  const points = wire.points?.length ? wire.points : wirePoints(diagram, wire);
+  if (points.length < 2) return wire;
+  const midpoint = points.length === 2
+    ? [{ x: (points[0].x + points[1].x) / 2 + dx, y: (points[0].y + points[1].y) / 2 + dy }]
+    : points.slice(1, -1).map((point) => ({ x: point.x + dx, y: point.y + dy }));
+  return {
+    ...wire,
+    routingMode: 'manual',
+    preferredWaypoints: midpoint,
+    points: [points[0], ...midpoint, points.at(-1)],
+  };
+};
 
 const componentPinPoint = (component, pinIndex) => {
   if (component.symbolType === 'bjt_npn' || component.symbolType === 'bjt_pnp') {
@@ -672,7 +699,15 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
     onSelect({ type: 'component', ref: component.ref });
     if (tool === 'wire') return;
     capturePointer(event);
-    setDrag({ type: 'component', ref: component.ref, start: svgPointer(event, diagram), original: component });
+    setDrag({
+      type: 'component',
+      ref: component.ref,
+      start: svgPointer(event, diagram),
+      original: component,
+      originalWires: diagram.wires.filter((wire) =>
+        wire.ref === component.ref || wire.from?.ref === component.ref || wire.to?.ref === component.ref,
+      ),
+    });
   };
 
   const beginNetDrag = (event, net) => {
@@ -681,7 +716,13 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
     onSelect({ type: 'netLabel', id: net.id, name: net.name });
     if (tool === 'wire') return;
     capturePointer(event);
-    setDrag({ type: 'netLabel', id: net.id, start: svgPointer(event, diagram), original: net });
+    setDrag({
+      type: 'netLabel',
+      id: net.id,
+      start: svgPointer(event, diagram),
+      original: net,
+      originalWire: diagram.wires.find((wire) => wire.labelId === net.id),
+    });
   };
 
   const beginWireDrag = (event, wire) => {
@@ -737,46 +778,42 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
     onChange((current) => {
       if (!current) return current;
       if (activeDrag.type === 'component') {
-        const target = { x: activeDrag.original.x + dx, y: activeDrag.original.y + dy };
-        const placement = findNearestLegalPlacement(current, activeDrag.ref, target);
-        const moved = placement
-          ? movedComponent(activeDrag.original, placement.x - activeDrag.original.x, placement.y - activeDrag.original.y)
-          : activeDrag.original;
+        const moved = movedComponent(activeDrag.original, dx, dy);
         return {
           ...current,
-          width: Math.max(current.width, placement?.width || 0),
-          height: Math.max(current.height, placement?.height || 0),
           components: current.components.map((component) =>
             component.ref === activeDrag.ref ? moved : component,
           ),
+          wires: current.wires.map((wire) => {
+            const originalWire = activeDrag.originalWires.find((item) => wireId(item) === wireId(wire));
+            if (!originalWire) return wire;
+            if (wire.manual) {
+              if (wire.from?.ref === activeDrag.ref) return moveWireEndpoint(originalWire, 'start', dx, dy);
+              if (wire.to?.ref === activeDrag.ref) return moveWireEndpoint(originalWire, 'end', dx, dy);
+              return wire;
+            }
+            return wire.ref === activeDrag.ref ? moveWireEndpoint(originalWire, 'start', dx, dy) : wire;
+          }),
         };
       }
 
       return {
         ...current,
         ...(activeDrag.type === 'netLabel'
-          ? { netLabels: current.netLabels.map((net) => (net.id === activeDrag.id ? movedNet(activeDrag.original, dx, dy) : net)) }
+          ? {
+              netLabels: current.netLabels.map((net) =>
+                net.id === activeDrag.id ? movedNet(activeDrag.original, dx, dy) : net,
+              ),
+              wires: current.wires.map((wire) =>
+                wire.labelId === activeDrag.id && activeDrag.originalWire
+                  ? moveWireEndpoint(activeDrag.originalWire, 'end', dx, dy)
+                  : wire,
+              ),
+            }
           : {
               wires: current.wires.map((wire) =>
                 wireId(wire) === activeDrag.id
-                  ? (() => {
-                      const endpoints = wire.manual
-                        ? { from: terminalPoint(current, wire.from), to: terminalPoint(current, wire.to) }
-                        : {
-                            from: terminalPoint(current, { ref: wire.ref, pin: wire.pin }),
-                            to: current.netLabels?.find((label) => label.id === wire.labelId) || { x: 0, y: 0 },
-                          };
-                      const originalWaypoint = activeDrag.original.preferredWaypoints?.[0] || {
-                        x: (endpoints.from.x + endpoints.to.x) / 2,
-                        y: (endpoints.from.y + endpoints.to.y) / 2,
-                      };
-                      return {
-                        ...wire,
-                        routingMode: 'manual',
-                        preferredWaypoints: [{ x: originalWaypoint.x + dx, y: originalWaypoint.y + dy }],
-                        points: [],
-                      };
-                    })()
+                  ? moveWirePath(activeDrag.original, current, dx, dy)
                   : wire,
               ),
             }),
@@ -806,7 +843,6 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
 
   const endDrag = (event) => {
     if (!drag) return;
-    const completedDrag = drag;
     if (pendingDragRef.current) {
       applyDragMove(pendingDragRef.current.activeDrag, pendingDragRef.current.point);
       pendingDragRef.current = null;
@@ -816,29 +852,17 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
       dragFrameRef.current = 0;
     }
     releasePointer(event);
-    setDrag(null);
-    onChange((current) => {
-      if (!current) return current;
-      try {
-        return rerouteAffectedNets(current);
-      } catch {
-        const reverted = cloneDiagram(current);
-        if (completedDrag.type === 'component') {
-          reverted.components = reverted.components.map((component) =>
-            component.ref === completedDrag.ref ? completedDrag.original : component,
-          );
-        } else if (completedDrag.type === 'netLabel') {
-          reverted.netLabels = reverted.netLabels.map((label) =>
-            label.id === completedDrag.id ? completedDrag.original : label,
-          );
-        } else {
-          reverted.wires = reverted.wires.map((wire) =>
-            wireId(wire) === completedDrag.id ? completedDrag.original : wire,
-          );
+    if (drag.type === 'component') {
+      onChange((current) => {
+        if (!current) return current;
+        try {
+          return rerouteAffectedNets(current);
+        } catch {
+          return current;
         }
-        return rerouteAffectedNets(reverted);
-      }
-    });
+      });
+    }
+    setDrag(null);
   };
 
   const cancelPendingWire = (event) => {
@@ -867,7 +891,6 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
         onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        onPointerLeave={endDrag}
       >
         <defs>
           <pattern id="diagram-grid-small" width="24" height="24" patternUnits="userSpaceOnUse">
@@ -914,12 +937,21 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
               </g>
             ) : (
               <>
-                <circle className="diagram-node" cx={net.x} cy={net.y} r="4" />
                 <rect className="diagram-net" x={net.labelX} y={net.labelY} width={net.labelWidth} height="26" rx="13" />
                 <text className="diagram-small" x={net.labelX + net.labelWidth / 2} y={net.labelY + 17} textAnchor="middle">{net.name}</text>
               </>
             )}
           </g>
+        ))}
+        {(diagram.junctions || []).map((junction) => (
+          <circle
+            key={junction.id || `${junction.node}-${junction.x}-${junction.y}`}
+            className="diagram-node"
+            cx={junction.x}
+            cy={junction.y}
+            r="4"
+            pointerEvents="none"
+          />
         ))}
         {diagram.components.map((component) => {
           const refLabel = diagram.labels?.find((label) => label.ref === component.ref && label.kind === 'ref');
@@ -982,7 +1014,9 @@ function App() {
   const prompt = activeChat?.draft || '';
   const result = activeChat?.result || null;
   const editableSpice = activeChat?.editableSpice || '';
+  const pendingSpiceChange = activeChat?.pendingSpiceChange || null;
   const editableKicadNetlist = activeChat?.editableKicadNetlist || '';
+  const pendingKicadChange = activeChat?.pendingKicadChange || null;
   const editedDiagram = activeChat?.editedDiagram || null;
   const simulationRun = activeChat?.simulationRun || null;
   const error = activeChat?.error || '';
@@ -994,6 +1028,12 @@ function App() {
   const sortedChats = useMemo(
     () => [...chatStore.chats].sort((a, b) => b.updatedAt - a.updatedAt),
     [chatStore.chats],
+  );
+  const pendingSpiceChangedLines = useMemo(
+    () => pendingSpiceChange
+      ? changedLineIndexes(pendingSpiceChange.previous, pendingSpiceChange.proposed)
+      : new Set(),
+    [pendingSpiceChange],
   );
 
   const updateChat = (chatId, updater) => {
@@ -1012,7 +1052,6 @@ function App() {
   };
   const setPrompt = (value) => setChatField('draft', value);
   const setEditableSpice = (value) => setChatField('editableSpice', value);
-  const setEditableKicadNetlist = (value) => setChatField('editableKicadNetlist', value);
   const setEditedDiagram = (value) => setChatField('editedDiagram', value);
   const setSimulationRun = (value) => setChatField('simulationRun', value);
   const setError = (value) => setChatField('error', value);
@@ -1098,6 +1137,7 @@ function App() {
 
   useEffect(() => {
     if (!result || isGenerating || !activeChat) return undefined;
+    if (pendingSpiceChange) return undefined;
     if (editableSpice === result.spice) {
       if (spiceSyncError) setChatField('spiceSyncError', '');
       return undefined;
@@ -1140,10 +1180,11 @@ function App() {
     }, 400);
 
     return () => window.clearTimeout(timer);
-  }, [activeChat?.id, editableSpice, isGenerating, result?.spice]);
+  }, [activeChat?.id, editableSpice, isGenerating, result?.spice, pendingSpiceChange]);
 
   useEffect(() => {
     if (!result || isGenerating || !activeChat) return undefined;
+    if (pendingKicadChange) return undefined;
     if (editableKicadNetlist === result.kicadNetlist) {
       if (kicadSyncError) setChatField('kicadSyncError', '');
       return undefined;
@@ -1189,7 +1230,7 @@ function App() {
     }, 400);
 
     return () => window.clearTimeout(timer);
-  }, [activeChat?.id, editableKicadNetlist, isGenerating, result?.kicadNetlist]);
+  }, [activeChat?.id, editableKicadNetlist, isGenerating, result?.kicadNetlist, pendingKicadChange]);
 
   const manifest = useMemo(
     () =>
@@ -1198,8 +1239,7 @@ function App() {
           name: result?.circuit.title,
           sourcePrompt: result?.intent.rawPrompt,
           generatedAt: new Date().toISOString(),
-          files: ['generated.cir', 'generated.net', 'generated.svg', 'circuit.json'],
-          kicad: 'Import generated.net into KiCad schematic/PCB tools, then assign or adjust footprints before routing.',
+          files: ['generated.cir', 'generated.svg', 'circuit.json'],
           ngspice: result?.simulation.command,
         },
         null,
@@ -1300,6 +1340,7 @@ function App() {
           prompt: submittedPrompt,
           messages: buildConversationContext(priorMessages),
           currentDesign,
+          memory: activeChat.memory,
         }),
       });
 
@@ -1332,9 +1373,16 @@ function App() {
         ...chat,
         updatedAt: Date.now(),
         messages: [...chat.messages, assistantMessage],
+        memory: data.memory || chat.memory,
         result: data,
         editableSpice: data.spice || '',
+        pendingSpiceChange: currentDesign && currentDesign.spice !== data.spice
+          ? { previous: currentDesign.spice, proposed: data.spice || '' }
+          : null,
         editableKicadNetlist: data.kicadNetlist || '',
+        pendingKicadChange: currentDesign && currentDesign.kicadNetlist !== data.kicadNetlist
+          ? { previous: currentDesign.kicadNetlist, proposed: data.kicadNetlist || '' }
+          : null,
         editedDiagram: cloneDiagram(data.diagram),
         simulationRun: null,
         simulationError: '',
@@ -1394,7 +1442,6 @@ function App() {
   const exportAll = () => {
     if (!result) return;
     downloadText('generated.cir', editableSpice);
-    downloadText('generated.net', editableKicadNetlist, 'application/xml');
     downloadText('generated.svg', toDiagramSvg(editedDiagram || result.diagram), 'image/svg+xml');
     downloadText('circuit.json', JSON.stringify(result.circuit, null, 2), 'application/json');
     downloadText('README-export.json', manifest, 'application/json');
@@ -1497,6 +1544,100 @@ function App() {
     }
   };
 
+  const acceptCircuitRevision = () => {
+    updateActiveChat((chat) => ({
+      ...chat,
+      pendingSpiceChange: null,
+      pendingKicadChange: null,
+    }));
+  };
+
+  const rejectCircuitRevision = () => {
+    updateActiveChat((chat) => {
+      const previousSpice = chat.pendingSpiceChange?.previous;
+      const previousKicad = chat.pendingKicadChange?.previous;
+      if (!chat.result || (!previousSpice && !previousKicad)) {
+        return { ...chat, pendingSpiceChange: null, pendingKicadChange: null };
+      }
+
+      const parsed = previousSpice
+        ? parseSpiceNetlist(previousSpice, chat.result.circuit)
+        : parseKiCadNetlist(previousKicad, chat.result.circuit);
+      if (!parsed.ok) {
+        return {
+          ...chat,
+          editableSpice: previousSpice || chat.editableSpice,
+          editableKicadNetlist: previousKicad || chat.editableKicadNetlist,
+          pendingSpiceChange: null,
+          pendingKicadChange: null,
+        };
+      }
+
+      const synchronized = synchronizeResult(
+        chat.result,
+        parsed.circuit,
+        chat.editedDiagram || chat.result.diagram,
+        {
+          ...(previousSpice ? { spice: previousSpice } : {}),
+          ...(previousKicad ? { kicadNetlist: previousKicad } : {}),
+        },
+      );
+      return {
+        ...chat,
+        result: synchronized,
+        editableSpice: previousSpice || synchronized.spice,
+        editableKicadNetlist: previousKicad || synchronized.kicadNetlist,
+        editedDiagram: synchronized.diagram,
+        pendingSpiceChange: null,
+        pendingKicadChange: null,
+        simulationRun: null,
+        simulationError: '',
+        spiceSyncError: '',
+        kicadSyncError: '',
+      };
+    });
+  };
+
+  const renderReviewActions = (label) => (
+    <span className="netlist-review-actions" aria-label={`Review AI ${label} changes`}>
+      <button
+        className="netlist-review-button accept"
+        onClick={acceptCircuitRevision}
+        type="button"
+        aria-label={`Accept ${label} changes`}
+        title="Accept changes"
+      >
+        &#10003;
+      </button>
+      <button
+        className="netlist-review-button reject"
+        onClick={rejectCircuitRevision}
+        type="button"
+        aria-label={`Reject ${label} changes`}
+        title="Reject changes"
+      >
+        &times;
+      </button>
+    </span>
+  );
+
+  const renderChangedCode = (text, changedLines, label) => {
+    const lastChangedLine = Math.max(...changedLines);
+    return (
+      <pre className="code-editor editor-window-code netlist-diff" aria-label={`Pending ${label} changes`}>
+        {text.split('\n').map((line, index) => {
+          const changed = changedLines.has(index);
+          return (
+            <span className={`diff-line ${changed ? 'changed' : ''}`} key={`${index}-${line}`}>
+              <code>{line || ' '}</code>
+              {index === lastChangedLine && renderReviewActions(label)}
+            </span>
+          );
+        })}
+      </pre>
+    );
+  };
+
   const selectedDiagramComponent = diagramSelection?.type === 'component'
     ? (editedDiagram || result?.diagram)?.components.find((component) => component.ref === diagramSelection.ref)
     : null;
@@ -1510,7 +1651,7 @@ function App() {
             {isGenerating
               ? 'AI is updating this deck in real time.'
               : result
-                ? 'Valid component edits update the canvas and KiCad netlist automatically.'
+                ? 'Valid component edits update the circuit canvas automatically.'
                 : 'The live deck will appear here while the AI generates the circuit.'}
           </p>
         </div>
@@ -1525,25 +1666,29 @@ function App() {
           >
             <span aria-hidden="true">{isSimulating ? '...' : '\u25B6'}</span>
           </button>
-          <button onClick={() => setEditableSpice(result?.spice || '')} disabled={!result || isGenerating}>Reset</button>
+          <button onClick={() => setEditableSpice(result?.spice || '')} disabled={!result || isGenerating || Boolean(pendingSpiceChange)}>Reset</button>
           <button onClick={() => downloadText('generated.cir', editableSpice)} disabled={!editableSpice || isGenerating}>Download</button>
         </div>
       </div>
-      <textarea
-        ref={spiceEditorRef}
-        className={`code-editor editor-window-code ${isGenerating ? 'live-code-editor' : ''}`}
-        value={editableSpice}
-        readOnly={isGenerating}
-        onChange={(event) => {
-          setEditableSpice(event.target.value);
-          setSimulationRun(null);
-          setSimulationError('');
-        }}
-        spellCheck="false"
-        rows={24}
-        aria-label="Editable SPICE deck"
-        placeholder="Generate a circuit to create a SPICE deck."
-      />
+      {pendingSpiceChange
+        ? renderChangedCode(editableSpice, pendingSpiceChangedLines, 'SPICE')
+        : (
+          <textarea
+            ref={spiceEditorRef}
+            className={`code-editor editor-window-code ${isGenerating ? 'live-code-editor' : ''}`}
+            value={editableSpice}
+            readOnly={isGenerating}
+            onChange={(event) => {
+              setEditableSpice(event.target.value);
+              setSimulationRun(null);
+              setSimulationError('');
+            }}
+            spellCheck="false"
+            rows={24}
+            aria-label="Editable SPICE deck"
+            placeholder="Generate a circuit to create a SPICE deck."
+          />
+        )}
       <div className="spice-simulation-results">
         {spiceSyncError && <p className="inline-error simulation-message">Canvas sync paused: {spiceSyncError}</p>}
         {simulationError && <p className="inline-error simulation-message">{simulationError}</p>}
@@ -1624,32 +1769,6 @@ function App() {
     </div>
   );
 
-  const renderKicadView = () => (
-    <div className="editor-window-body code-window-body">
-      <div className="editor-header">
-        <div>
-          <h3>KiCad netlist</h3>
-          <p>Valid component and net edits update the schematic automatically.</p>
-        </div>
-        <div className="button-row">
-          <button onClick={() => setEditableKicadNetlist(result?.kicadNetlist || '')} disabled={!result}>Reset</button>
-          <button onClick={() => downloadText('generated.net', editableKicadNetlist, 'application/xml')} disabled={!editableKicadNetlist}>Download</button>
-          <button onClick={() => downloadText('README-export.json', manifest, 'application/json')} disabled={!result}>Manifest</button>
-        </div>
-      </div>
-      <textarea
-        className="code-editor editor-window-code"
-        value={editableKicadNetlist}
-        onChange={(event) => setEditableKicadNetlist(event.target.value)}
-        spellCheck="false"
-        rows={24}
-        aria-label="Editable KiCad netlist"
-        placeholder="Generate a circuit to create a KiCad netlist."
-      />
-      {kicadSyncError && <p className="inline-error simulation-message">Schematic sync paused: {kicadSyncError}</p>}
-    </div>
-  );
-
   const renderEditorWindow = (view) => (
     <article
       className={`editor-window ${activeEditorView === view ? 'active' : ''}`}
@@ -1671,7 +1790,6 @@ function App() {
       </header>
       {view === 'spice' && renderSpiceView()}
       {view === 'canvas' && renderCanvasView()}
-      {view === 'kicad' && renderKicadView()}
     </article>
   );
 
@@ -1902,9 +2020,6 @@ function App() {
         <section className="main-panel editor-workbench">
           <header className="result-header workbench-header">
             <div>
-              <p className="eyebrow">
-                {isGenerating ? 'Live AI generation' : result ? result.circuit.type.replaceAll('_', ' ') : 'Editor workspace'}
-              </p>
               <h2>{isGenerating ? 'Writing SPICE deck' : result?.circuit.title || 'Open an editor window'}</h2>
             </div>
             <div className="result-actions">
@@ -1937,7 +2052,7 @@ function App() {
           {openEditorViews.length === 0 ? (
             <section className="workbench-empty">
               <h3>All editor windows are closed</h3>
-              <p>Open Spice, Canvas, or KiCad from the bar above.</p>
+              <p>Open Spice or Canvas from the bar above.</p>
             </section>
           ) : (
             renderEditorLayout()

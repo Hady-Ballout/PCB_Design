@@ -1268,3 +1268,51 @@ pre {
     display: grid;
   }
 }
+
+.netlist-review-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  margin-left: 10px;
+  vertical-align: middle;
+}
+
+.netlist-review-button {
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 800;
+  height: 24px;
+  min-width: 24px;
+  padding: 0;
+}
+
+.netlist-review-button.accept {
+  background: #237a43;
+  border-color: #237a43;
+}
+
+.netlist-review-button.reject {
+  background: #b63b31;
+  border-color: #b63b31;
+}
+
+.netlist-diff {
+  padding: 12px;
+}
+
+.netlist-diff .diff-line {
+  align-items: center;
+  display: flex;
+  min-height: 1.45em;
+  width: max-content;
+}
+
+.netlist-diff .diff-line code {
+  font: inherit;
+  white-space: pre;
+}
+
+.netlist-diff .diff-line.changed {
+  background: #ffe58a;
+  box-shadow: -12px 0 #ffe58a, 12px 0 #ffe58a;
+}
