@@ -1,0 +1,9 @@
+node_modules
+.env*
+!.env.example
+dist
+.git
+*.md
+scripts/
+index.html
+vite.config.js

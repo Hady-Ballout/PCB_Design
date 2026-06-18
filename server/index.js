@@ -8,12 +8,14 @@ import { buildStreamingSpice } from './streamingCircuit.js';
 
 loadEnv();
 
-const port = Number(process.env.API_PORT || 8787);
+const port = Number(process.env.PORT || process.env.API_PORT || 8787);
+const host = process.env.HOST || '127.0.0.1';
+const corsOrigin = process.env.CORS_ORIGIN || 'http://127.0.0.1:5173';
 
 const sendJson = (response, status, body) => {
   response.writeHead(status, {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': 'http://127.0.0.1:5173',
+    'Access-Control-Allow-Origin': corsOrigin,
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
   });
@@ -31,7 +33,7 @@ const startJsonStream = (response) => {
   response.writeHead(200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
-    'Access-Control-Allow-Origin': 'http://127.0.0.1:5173',
+    'Access-Control-Allow-Origin': corsOrigin,
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
   });
@@ -147,6 +149,6 @@ const server = createServer(async (request, response) => {
   sendJson(response, 404, { error: 'Not found.' });
 });
 
-server.listen(port, '127.0.0.1', () => {
-  console.log(`Prompt-to-PCB API listening on http://127.0.0.1:${port}`);
+server.listen(port, host, () => {
+  console.log(`Prompt-to-PCB API listening on http://${host}:${port}`);
 });

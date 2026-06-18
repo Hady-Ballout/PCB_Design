@@ -22,6 +22,8 @@ import {
   routeDiagramWire,
 } from './lib/schematicLayout.js';
 
+const API_BASE = import.meta.env.VITE_API_URL || '';
+
 const downloadText = (filename, text, mime = 'text/plain') => {
   const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -1333,7 +1335,7 @@ function App() {
     }));
 
     try {
-      const response = await fetch('/api/generate-circuit', {
+      const response = await fetch(`${API_BASE}/api/generate-circuit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
