@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { loadEnv } from './env.js';
 import { buildCircuitResponse, normalizeAiCircuit } from './circuitResponse.js';
-import { generateCircuitWithOllama } from './ollamaProvider.js';
+import { generateCircuit } from './aiProvider.js';
 import { runNgspiceSimulation } from './simulator.js';
 
 loadEnv();
@@ -9,6 +9,9 @@ loadEnv();
 const port = Number(process.env.PORT || process.env.API_PORT || 8787);
 const host = process.env.HOST || '127.0.0.1';
 const corsOrigin = process.env.CORS_ORIGIN || 'http://127.0.0.1:5173';
+
+const provider = process.env.AI_PROVIDER || 'ollama';
+const model = process.env.AI_MODEL || process.env.OLLAMA_MODEL || 'llama3.2:latest';
 
 const sendJson = (response, status, body) => {
   response.writeHead(status, {
@@ -36,8 +39,8 @@ const server = createServer(async (request, response) => {
   if (request.url === '/api/health') {
     sendJson(response, 200, {
       ok: true,
-      provider: 'ollama',
-      model: process.env.OLLAMA_MODEL || 'llama3.2:latest',
+      provider,
+      model,
     });
     return;
   }
@@ -51,9 +54,9 @@ const server = createServer(async (request, response) => {
         return;
       }
 
-      const aiCircuit = await generateCircuitWithOllama(prompt);
+      const aiCircuit = await generateCircuit(prompt);
       const circuit = normalizeAiCircuit(aiCircuit, prompt);
-      sendJson(response, 200, buildCircuitResponse(circuit, { rawPrompt: prompt, type: circuit.type }, 'ollama'));
+      sendJson(response, 200, buildCircuitResponse(circuit, { rawPrompt: prompt, type: circuit.type }, provider));
     } catch (error) {
       sendJson(response, 500, { error: error.message });
     }
