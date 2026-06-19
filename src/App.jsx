@@ -57,6 +57,70 @@ const EDITOR_VIEW_LABELS = {
   canvas: 'Canvas',
 };
 
+const ADD_COMPONENT_TOOLS = [
+  { type: 'resistor', label: 'Add resistor' },
+  { type: 'capacitor', label: 'Add capacitor' },
+  { type: 'source', label: 'Add voltage source' },
+  { type: 'led', label: 'Add LED' },
+  { type: 'bjt', label: 'Add BJT' },
+  { type: 'opamp', label: 'Add op amp' },
+  { type: 'ground', label: 'Add ground' },
+];
+
+function ComponentToolIcon({ type }) {
+  if (type === 'resistor') {
+    return (
+      <svg viewBox="0 0 64 32" aria-hidden="true" focusable="false">
+        <path d="M4 16H16L20 8L28 24L36 8L44 24L48 16H60" />
+      </svg>
+    );
+  }
+  if (type === 'capacitor') {
+    return (
+      <svg viewBox="0 0 64 32" aria-hidden="true" focusable="false">
+        <path d="M4 16H25M39 16H60M25 6V26M39 6V26" />
+      </svg>
+    );
+  }
+  if (type === 'source') {
+    return (
+      <svg viewBox="0 0 64 32" aria-hidden="true" focusable="false">
+        <path d="M4 16H18M46 16H60" />
+        <circle cx="32" cy="16" r="14" />
+        <path d="M32 8V14M32 18V24M27 11H37M27 21H37" />
+      </svg>
+    );
+  }
+  if (type === 'led') {
+    return (
+      <svg viewBox="0 0 64 32" aria-hidden="true" focusable="false">
+        <path d="M4 16H20M44 16H60M20 6L44 16L20 26Z" />
+        <path d="M44 7V25M43 5L51 1M48 10L56 6" />
+      </svg>
+    );
+  }
+  if (type === 'bjt') {
+    return (
+      <svg viewBox="0 0 64 32" aria-hidden="true" focusable="false">
+        <path d="M10 16H26M26 7V25M26 10L50 4M26 22L50 28M44 24L50 28L48 21" />
+      </svg>
+    );
+  }
+  if (type === 'ground') {
+    return (
+      <svg viewBox="0 0 64 32" aria-hidden="true" focusable="false">
+        <path d="M32 4V13M14 13H50M20 20H44M26 27H38" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 64 32" aria-hidden="true" focusable="false">
+      <path d="M8 16H22M42 16H58M22 5L22 27L46 16Z" />
+      <path d="M14 9H20M17 6V12M14 23H20" />
+    </svg>
+  );
+}
+
 const EDITOR_SPLIT_STORAGE_KEY = 'prompt-to-pcb-editor-split-v1';
 
 const clampEditorSplit = (value, minimum, maximum, fallback) => {
@@ -336,6 +400,7 @@ const symbolDefaults = {
   source: { kind: 'voltage_source', symbolType: 'voltage_source', width: 98, height: 112, orientation: 'vertical', value: '5V', prefix: 'V', nodes: 2 },
   bjt: { kind: 'bjt_npn', symbolType: 'bjt_npn', width: 118, height: 100, orientation: 'horizontal', value: '2N2222', prefix: 'Q', nodes: 3 },
   opamp: { kind: 'opamp', symbolType: 'opamp', width: 150, height: 110, orientation: 'horizontal', value: 'LM358', prefix: 'XU', nodes: 5 },
+  ground: { kind: 'ground', symbolType: 'ground', width: 72, height: 62, orientation: 'vertical', value: '0', prefix: 'GND', nodes: 1 },
 };
 
 const svgPointer = (event, diagram) => {
@@ -411,6 +476,10 @@ const componentPinPoint = (component, pinIndex) => {
     if (pinIndex === 5) return { x: component.x, y: bottom };
   }
 
+  if (component.symbolType === 'ground') {
+    return { x: component.x, y: component.y - component.height / 2 };
+  }
+
   if (component.pinCount <= 2) {
     if (component.orientation === 'vertical') {
       return {
@@ -447,10 +516,12 @@ const addedComponent = (diagram, type) => {
   while (existingRefs.has(`${defaults.prefix}${nextRefNumber}`)) nextRefNumber += 1;
   const column = diagram.components.length % 3;
   const row = Math.floor(diagram.components.length / 3);
-  const nodes = Array.from(
-    { length: defaults.nodes },
-    (_, index) => `NC_${defaults.prefix}${nextRefNumber}_${index + 1}`,
-  );
+  const nodes = defaults.kind === 'ground'
+    ? ['0']
+    : Array.from(
+      { length: defaults.nodes },
+      (_, index) => `NC_${defaults.prefix}${nextRefNumber}_${index + 1}`,
+    );
   const component = {
     ref: `${defaults.prefix}${nextRefNumber}`,
     kind: defaults.kind,
@@ -485,6 +556,17 @@ function DiagramSymbol({ component }) {
   const right = x + width / 2;
   const top = y - height / 2;
   const bottom = y + height / 2;
+
+  if (symbolType === 'ground') {
+    return (
+      <>
+        <line className="diagram-symbol" x1={x} y1={top} x2={x} y2={y - 7} />
+        <line className="diagram-symbol" x1={x - 22} y1={y - 7} x2={x + 22} y2={y - 7} />
+        <line className="diagram-symbol" x1={x - 14} y1={y + 3} x2={x + 14} y2={y + 3} />
+        <line className="diagram-symbol" x1={x - 7} y1={y + 13} x2={x + 7} y2={y + 13} />
+      </>
+    );
+  }
 
   if (orientation === 'vertical') {
     if (symbolType === 'resistor') {
@@ -664,6 +746,18 @@ function DiagramSymbol({ component }) {
       <rect className="diagram-symbol" x={left} y={top} width={width} height={height} rx="6" />
       <text className="diagram-small" x={x} y={y + 5} textAnchor="middle">{component.kind.replaceAll('_', ' ')}</text>
     </>
+  );
+}
+
+function GroundSymbol({ x, y }) {
+  return (
+    <g className="diagram-ground" aria-label="Ground">
+      <circle className="diagram-node" cx={x} cy={y} r="4" />
+      <line x1={x} y1={y} x2={x} y2={y + 16} />
+      <line x1={x - 18} y1={y + 16} x2={x + 18} y2={y + 16} />
+      <line x1={x - 12} y1={y + 22} x2={x + 12} y2={y + 22} />
+      <line x1={x - 6} y1={y + 28} x2={x + 6} y2={y + 28} />
+    </g>
   );
 }
 
@@ -882,6 +976,16 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
     (wire) => wire.manual || !isUnconnectedTerminal(wire.node, wire.ref, wire.pin),
   );
   const visibleNets = diagram.netLabels || [];
+  const visibleGroundLabelIds = new Set(visibleNets.filter((net) => net.name === '0').map((net) => net.id));
+  const fallbackGroundSymbols = [
+    ...new Map(visibleWires
+      .filter((wire) => !wire.manual && wire.node === '0' && !visibleGroundLabelIds.has(wire.labelId))
+      .map((wire) => {
+        const point = wirePoints(diagram, wire).at(-1);
+        return point ? [`${point.x}:${point.y}`, point] : null;
+      })
+      .filter(Boolean)).values(),
+  ];
 
   return (
     <div className="diagram-card">
@@ -930,13 +1034,7 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
             onPointerDown={(event) => beginNetDrag(event, net)}
           >
             {net.name === '0' ? (
-              <g className="diagram-ground" aria-label="Ground">
-                <circle className="diagram-node" cx={net.x} cy={net.y} r="4" />
-                <line x1={net.x} y1={net.y} x2={net.x} y2={net.y + 16} />
-                <line x1={net.x - 18} y1={net.y + 16} x2={net.x + 18} y2={net.y + 16} />
-                <line x1={net.x - 12} y1={net.y + 22} x2={net.x + 12} y2={net.y + 22} />
-                <line x1={net.x - 6} y1={net.y + 28} x2={net.x + 6} y2={net.y + 28} />
-              </g>
+              <GroundSymbol x={net.x} y={net.y} />
             ) : (
               <>
                 <rect className="diagram-net" x={net.labelX} y={net.labelY} width={net.labelWidth} height="26" rx="13" />
@@ -944,6 +1042,9 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
               </>
             )}
           </g>
+        ))}
+        {fallbackGroundSymbols.map((point) => (
+          <GroundSymbol key={`fallback-ground-${point.x}-${point.y}`} x={point.x} y={point.y} />
         ))}
         {(diagram.junctions || []).map((junction) => (
           <circle
@@ -958,6 +1059,7 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
         {diagram.components.map((component) => {
           const refLabel = diagram.labels?.find((label) => label.ref === component.ref && label.kind === 'ref');
           const valueLabel = diagram.labels?.find((label) => label.ref === component.ref && label.kind === 'value');
+          const isGroundComponent = component.symbolType === 'ground';
           return (
           <g
             key={component.ref}
@@ -965,12 +1067,16 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
             onPointerDown={(event) => beginComponentDrag(event, component)}
           >
             <DiagramSymbol component={component} />
-            <text className="diagram-text" x={refLabel?.x || component.x} y={refLabel?.y || component.y - component.height / 2 - 12} textAnchor="middle">
-              {component.ref}
-            </text>
-            <text className="diagram-small" x={valueLabel?.x || component.x} y={valueLabel?.y || component.y + component.height / 2 + 20} textAnchor="middle">
-              {component.value}
-            </text>
+            {!isGroundComponent && (
+              <>
+                <text className="diagram-text" x={refLabel?.x || component.x} y={refLabel?.y || component.y - component.height / 2 - 12} textAnchor="middle">
+                  {component.ref}
+                </text>
+                <text className="diagram-small" x={valueLabel?.x || component.x} y={valueLabel?.y || component.y + component.height / 2 + 20} textAnchor="middle">
+                  {component.value}
+                </text>
+              </>
+            )}
             {component.pins.map((pin) => (
               <g key={`${component.ref}-${pin.pinIndex}`} className="diagram-terminal" onPointerDown={(event) => handleTerminalPointerDown(event, component, pin)}>
                 <circle className="terminal-hit" cx={pin.x} cy={pin.y} r="14" />
@@ -980,9 +1086,11 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
                   cy={pin.y}
                   r="6"
                 />
-                <text className="diagram-small" x={pin.x} y={pin.y - 8} textAnchor="middle">
-                  {pin.pinIndex}
-                </text>
+                {!isGroundComponent && (
+                  <text className="diagram-small" x={pin.x} y={pin.y - 8} textAnchor="middle">
+                    {pin.pinIndex}
+                  </text>
+                )}
               </g>
             ))}
           </g>
@@ -1092,7 +1200,10 @@ function App() {
   };
 
   useEffect(() => {
-    saveChatStore(chatStore);
+    const timer = window.setTimeout(() => {
+      saveChatStore(chatStore);
+    }, 300);
+    return () => window.clearTimeout(timer);
   }, [chatStore]);
 
   useEffect(() => {
@@ -1643,6 +1754,9 @@ function App() {
   const selectedDiagramComponent = diagramSelection?.type === 'component'
     ? (editedDiagram || result?.diagram)?.components.find((component) => component.ref === diagramSelection.ref)
     : null;
+  const selectedEditableComponent = selectedDiagramComponent?.symbolType === 'ground'
+    ? null
+    : selectedDiagramComponent;
 
   const renderSpiceView = () => (
     <div className="editor-window-body code-window-body">
@@ -1723,20 +1837,26 @@ function App() {
               <div className="diagram-editbar" aria-label="Diagram tools">
                 <button className={diagramTool === 'select' ? 'active-tool' : ''} onClick={() => { setDiagramTool('select'); setPendingTerminal(null); }}>Select</button>
                 <button className={diagramTool === 'wire' ? 'active-tool' : ''} onClick={() => { setDiagramTool('wire'); setPendingTerminal(null); }}>Wire</button>
-                <button onClick={() => addDiagramComponent('resistor')}>+ R</button>
-                <button onClick={() => addDiagramComponent('capacitor')}>+ C</button>
-                <button onClick={() => addDiagramComponent('source')}>+ Source</button>
-                <button onClick={() => addDiagramComponent('led')}>+ LED</button>
-                <button onClick={() => addDiagramComponent('bjt')}>+ BJT</button>
-                <button onClick={() => addDiagramComponent('opamp')}>+ Op amp</button>
+                {ADD_COMPONENT_TOOLS.map((tool) => (
+                  <button
+                    className="component-symbol-button"
+                    key={tool.type}
+                    onClick={() => addDiagramComponent(tool.type)}
+                    title={tool.label}
+                    type="button"
+                    aria-label={tool.label}
+                  >
+                    <ComponentToolIcon type={tool.type} />
+                  </button>
+                ))}
                 <button onClick={deleteDiagramSelection} disabled={!diagramSelection}>Delete</button>
               </div>
-              {selectedDiagramComponent && (
+              {selectedEditableComponent && (
                 <label className="component-value-editor">
-                  <span>{selectedDiagramComponent.ref} value</span>
+                  <span>{selectedEditableComponent.ref} value</span>
                   <input
                     type="text"
-                    value={selectedDiagramComponent.value}
+                    value={selectedEditableComponent.value}
                     onChange={(event) => updateSelectedComponentValue(event.target.value)}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') {
@@ -1745,7 +1865,7 @@ function App() {
                         setDiagramSelection(null);
                       }
                     }}
-                    aria-label={`Value for ${selectedDiagramComponent.ref}`}
+                    aria-label={`Value for ${selectedEditableComponent.ref}`}
                     spellCheck="false"
                   />
                 </label>

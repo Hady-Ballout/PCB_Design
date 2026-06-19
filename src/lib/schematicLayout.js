@@ -39,6 +39,9 @@ const isSourceKind = (kind) => kind === 'voltage_source' || kind === 'signal_sou
 const isOutputNode = (node) => /(^|_)(v?out|out|load|filtered)(_|$)/i.test(String(node));
 const isUnconnectedTerminal = (node, ref, pin) =>
   /^NC_/i.test(String(node)) || String(node) === `${ref}_${pin}`;
+const labelIdForWire = (wire) => (wire.node === '0'
+  ? `ground-label:${wire.ref}:${wire.pin}`
+  : `net-label:${wire.ref}:${wire.pin}`);
 const textWidth = (text, minimum = 54, maximum = 150) =>
   Math.max(minimum, Math.min(maximum, String(text || '').length * 8 + 20));
 
@@ -184,7 +187,7 @@ const rankComponents = (circuit) => {
 };
 
 const nearestFreePosition = (component, placed, preferred, bounds) => {
-  const origin = { x: snap(preferred.x), y: snap(preferred.y) };
+  const origin = { x: preferred.x, y: preferred.y };
   const legal = (position) => {
     const candidate = moveComponent(component, position.x, position.y);
     const box = componentBounds(candidate);
@@ -200,12 +203,12 @@ const nearestFreePosition = (component, placed, preferred, bounds) => {
   for (let radius = 1; radius <= 40; radius += 1) {
     const candidates = [];
     for (let dx = -radius; dx <= radius; dx += 1) {
-      candidates.push({ x: origin.x + dx * GRID_SIZE, y: origin.y - radius * GRID_SIZE });
-      candidates.push({ x: origin.x + dx * GRID_SIZE, y: origin.y + radius * GRID_SIZE });
+      candidates.push({ x: snap(origin.x + dx * GRID_SIZE), y: snap(origin.y - radius * GRID_SIZE) });
+      candidates.push({ x: snap(origin.x + dx * GRID_SIZE), y: snap(origin.y + radius * GRID_SIZE) });
     }
     for (let dy = -radius + 1; dy < radius; dy += 1) {
-      candidates.push({ x: origin.x - radius * GRID_SIZE, y: origin.y + dy * GRID_SIZE });
-      candidates.push({ x: origin.x + radius * GRID_SIZE, y: origin.y + dy * GRID_SIZE });
+      candidates.push({ x: snap(origin.x - radius * GRID_SIZE), y: snap(origin.y + dy * GRID_SIZE) });
+      candidates.push({ x: snap(origin.x + radius * GRID_SIZE), y: snap(origin.y + dy * GRID_SIZE) });
     }
     const found = candidates.find(legal);
     if (found) return found;
@@ -389,6 +392,9 @@ const routeObstacles = (diagram, wire) => {
     ...diagram.components
       .filter((component) => !endpointRefs.has(component.ref))
       .map((component) => componentBounds(component, WIRE_CLEARANCE)),
+    ...(diagram.netLabels || [])
+      .filter((label) => label.id !== wire.labelId)
+      .map((label) => netLabelBounds(label, WIRE_CLEARANCE)),
   ];
 };
 
@@ -587,7 +593,7 @@ const routeOneWire = (diagram, wire, routedWires, target = null) => {
   const start = endpoints.start;
   const componentPins = new Set(diagram.components.flatMap((component) =>
     (component.pins || []).map((pin) => pointKey(pin))));
-  const sameNetWires = wire.node && wire.node !== '0'
+  const sameNetWires = !wire.labelId && wire.node && wire.node !== '0'
     ? routedWires.filter((item) => item.node === wire.node)
     : [];
   const sameNetPoints = sameNetWires.flatMap((item) => [
@@ -769,31 +775,36 @@ const placeNetLabels = (diagram, preferredLabels = new Map()) => {
     labels.push(placed);
   }
 
-  const signalNets = (diagram.nets || []).filter((net) => net.name !== '0' && net.connections.length);
-  for (const net of signalNets) {
-    const id = `net-label:${net.name}`;
-    const preferred = preferredLabels.get(id);
-    const center = {
-      x: snap(net.connections.reduce((sum, connection) => sum + connection.x, 0) / net.connections.length),
-      y: snap(net.connections.reduce((sum, connection) => sum + connection.y, 0) / net.connections.length),
-    };
+  const signalWires = diagram.wires.filter((wire) => !wire.manual && wire.node !== '0');
+  for (const wire of signalWires) {
+    const component = diagram.components.find((item) => item.ref === wire.ref);
+    const pin = component?.pins.find((item) => item.pinIndex === wire.pin);
+    if (!component || !pin) continue;
+    const preferred = preferredLabels.get(wire.labelId);
     let placed = preferred
-      ? connectionLabel(id, net.name, preferred, preferred.direction || 'up')
+      ? connectionLabel(wire.labelId, wire.node, preferred, preferred.direction || pinSide(component, pin), {
+          ref: wire.ref,
+          pin: wire.pin,
+        })
       : null;
     if (!placed || !legal(placed)) {
       placed = null;
-      for (let radius = 0; radius <= 36 && !placed; radius += 1) {
-        const candidates = radius === 0
-          ? [center]
-          : [
-              { x: center.x + radius * GRID_SIZE, y: center.y },
-              { x: center.x - radius * GRID_SIZE, y: center.y },
-              { x: center.x, y: center.y + radius * GRID_SIZE },
-              { x: center.x, y: center.y - radius * GRID_SIZE },
-            ];
-        for (const anchor of candidates) {
-          for (const direction of ['up', 'right', 'left', 'down']) {
-            const candidate = connectionLabel(id, net.name, anchor, direction);
+      const outward = pinSide(component, pin);
+      const directions = [...new Set([outward, 'up', 'right', 'left', 'down'])];
+      for (let radius = 2; radius <= 36 && !placed; radius += 1) {
+        const distance = radius * GRID_SIZE;
+        for (const direction of directions) {
+          for (const tangent of [0, -1, 1, -2, 2, -3, 3]) {
+            const delta = {
+              left: { x: -distance, y: tangent * GRID_SIZE },
+              right: { x: distance, y: tangent * GRID_SIZE },
+              up: { x: tangent * GRID_SIZE, y: -distance },
+              down: { x: tangent * GRID_SIZE, y: distance },
+            }[direction];
+            const candidate = connectionLabel(wire.labelId, wire.node, {
+              x: snap(pin.x + delta.x),
+              y: snap(pin.y + delta.y),
+            }, direction, { ref: wire.ref, pin: wire.pin });
             if (legal(candidate)) {
               placed = candidate;
               break;
@@ -804,8 +815,8 @@ const placeNetLabels = (diagram, preferredLabels = new Map()) => {
       }
     }
     if (!placed) {
-      throw new DiagramLayoutError(`No legal label position is available for net ${net.name}.`, [
-        { type: 'net_label_placement_failed', node: net.name },
+      throw new DiagramLayoutError(`No legal label position is available for ${wire.ref} pin ${wire.pin}.`, [
+        { type: 'net_label_placement_failed', wire: wire.id, node: wire.node },
       ]);
     }
     labels.push(placed);
@@ -894,12 +905,10 @@ const buildDraft = (circuit, options = {}) => {
     .filter((pin) => !isUnconnectedTerminal(pin.node, component.ref, pin.pinIndex))
     .map((pin) => ({
       id: `${component.ref}-${pin.pinIndex}-${pin.node}`,
-      labelId: pin.node === '0'
-        ? `ground-label:${component.ref}:${pin.pinIndex}`
-        : `net-label:${pin.node}`,
       ref: component.ref,
       pin: pin.pinIndex,
       node: pin.node,
+      labelId: labelIdForWire({ ref: component.ref, pin: pin.pinIndex, node: pin.node }),
       routingMode: 'auto',
       preferredWaypoints: [],
       points: [],
@@ -928,7 +937,7 @@ const routeOrders = (diagram) => {
   };
   const groups = new Map();
   for (const wire of diagram.wires) {
-    const key = wire.manual || wire.node === '0' ? `wire:${wire.id}` : `net:${wire.node}`;
+    const key = `wire:${wire.id}`;
     groups.set(key, [...(groups.get(key) || []), wire]);
   }
   const grouped = [...groups.values()].map((wires) => [...wires].sort((first, second) =>
@@ -1087,9 +1096,7 @@ const routeWithExpansion = (diagram) => {
   current.wires = (current.wires || []).map((wire) => ({
     ...wire,
     id: wire.id || `${wire.ref || wire.from?.ref}-${wire.pin || wire.from?.pin}-${wire.node || wire.to?.ref}`,
-    labelId: wire.manual ? undefined : wire.labelId || (wire.node === '0'
-      ? `ground-label:${wire.ref}:${wire.pin}`
-      : `net-label:${wire.node}`),
+    labelId: wire.manual ? undefined : labelIdForWire(wire),
     stub: false,
     points: [],
   }));
@@ -1273,6 +1280,11 @@ export const validateDiagramLayout = (diagram) => {
         && segmentIntersectsRect(segment.from, segment.to, componentBounds(component, WIRE_CLEARANCE)))) {
         violations.push({ type: 'wire_component_clearance', wire: wire.id });
       }
+      for (const label of netLabels) {
+        if (label.id !== wire.labelId && segmentIntersectsRect(segment.from, segment.to, netLabelBounds(label))) {
+          violations.push({ type: 'wire_label_overlap', wire: wire.id, label: label.id });
+        }
+      }
       for (const other of diagram.wires.slice(0, index)) {
         for (const otherSegment of pathSegments(other.points || [])) {
           const sameNet = Boolean(wire.node) && wire.node !== '0' && wire.node === other.node;
@@ -1312,9 +1324,7 @@ export const repairDiagramLayout = (diagram, options = {}) => {
     return {
       ...wire,
       id: wire.id || `${wire.ref || wire.from?.ref}-${wire.pin || wire.from?.pin}-${wire.node || wire.to?.ref}`,
-      labelId: wire.manual ? undefined : wire.labelId || (wire.node === '0'
-        ? `ground-label:${wire.ref}:${wire.pin}`
-        : `net-label:${wire.node}`),
+      labelId: wire.manual ? undefined : labelIdForWire(wire),
       routingMode: wire.manual ? 'manual' : wire.routingMode || 'auto',
       preferredWaypoints,
       points: [],

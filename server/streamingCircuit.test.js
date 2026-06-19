@@ -22,6 +22,16 @@ describe('streaming circuit helpers', () => {
     expect(buildStreamingSpice(second).spice).toContain('R1 IN OUT 1k');
   });
 
+  it('builds a progressive SPICE deck from the AI response envelope', () => {
+    const first = '{"circuit":{"title":"RC Filter","type":"low_pass","supplyVoltage":5,"components":['
+      + '{"ref":"V1","kind":"signal_source","value":"SINE(0 1 1k)","nodes":["IN","0"],"footprint":""}';
+    const second = `${first},{"ref":"R1","kind":"resistor","value":"1k","nodes":["IN","OUT"],"footprint":""}`;
+
+    expect(buildStreamingSpice(first).spice).toContain('V1 IN 0 SINE(0 1 1k)');
+    expect(buildStreamingSpice(second)).toMatchObject({ componentCount: 2, title: 'RC Filter' });
+    expect(buildStreamingSpice(second).spice).toContain('R1 IN OUT 1k');
+  });
+
   it('edits an existing streamed circuit instead of starting from an empty deck', () => {
     const existing = {
       title: 'Existing filter',

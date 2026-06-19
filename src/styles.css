@@ -1024,6 +1024,29 @@ pre {
   padding: 0 10px;
 }
 
+.diagram-editbar .component-symbol-button {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-width: 46px;
+  padding: 0 8px;
+}
+
+.component-symbol-button svg {
+  display: block;
+  fill: none;
+  height: 24px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.2;
+  width: 42px;
+}
+
+.component-symbol-button:hover {
+  background: #f7faf5;
+}
+
 .active-tool {
   background: #e3f3e7;
   border-color: #23533a;

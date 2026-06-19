@@ -1,7 +1,12 @@
 import { normalizeChatMemory, sanitizeConversationHistory } from './chatMemory.js';
+import { circuitKnowledgePrompt } from './circuitKnowledge.js';
+import { parseSpiceNetlist } from '../src/lib/circuitSync.js';
 
 const SYSTEM_PROMPT = `You are a JSON API for beginner-safe electronics circuit generation.
 Return exactly one valid JSON object and no other text.
+The top-level object must contain "circuit" and "spice".
+The "circuit" field is the canonical structured circuit.
+The "spice" field is a SPICE netlist generated from the same circuit.
 Use node "0" for ground.
 Every component needs ref, kind, value, nodes, and footprint.
 Allowed component kinds: resistor, capacitor, inductor, diode, led, bjt_npn, bjt_pnp, mosfet_n, mosfet_p, opamp, regulator, voltage_source, signal_source, load.
@@ -16,7 +21,8 @@ Component refs must be SPICE-compatible because the program will simulate them w
 - opamp/subcircuit refs start with X, e.g. XU1
 - load refs should be modeled as resistors and start with R, e.g. RLOAD
 - regulator refs may use U in the JSON, but include enough surrounding passives/load nodes for simulation.
-Use simple Ngspice-friendly values such as 1k, 100nF, 10uF, 5V, and SINE(0 1 1k).`;
+Use simple Ngspice-friendly values such as 1k, 100nF, 10uF, 5V, and SINE(0 1 1k).
+The SPICE netlist must use the exact same component refs, values, and node names as circuit.components.`;
 
 export const CIRCUIT_SCHEMA = {
   type: 'object',
@@ -61,6 +67,15 @@ export const CIRCUIT_SCHEMA = {
     notes: { type: 'array', items: { type: 'string' } },
   },
   required: ['title', 'type', 'supplyVoltage', 'nodes', 'components', 'notes'],
+};
+
+export const AI_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    circuit: CIRCUIT_SCHEMA,
+    spice: { type: 'string' },
+  },
+  required: ['circuit', 'spice'],
 };
 
 function findBalancedJson(text) {
@@ -138,6 +153,62 @@ export function validateCircuitResponse(circuit) {
   return errors;
 }
 
+const normalizeSignatureValue = (value) => String(value || '').trim().toUpperCase();
+
+const electricalSignature = (circuit) => (
+  circuit?.components || []
+).map((component) => ({
+  ref: String(component.ref || '').toUpperCase(),
+  kind: String(component.kind || ''),
+  value: normalizeSignatureValue(component.value),
+  nodes: (component.nodes || []).map((node) => String(node)),
+})).sort((a, b) => a.ref.localeCompare(b.ref));
+
+const describeSignatureMismatch = (expected, actual) => {
+  const expectedByRef = new Map(expected.map((component) => [component.ref, component]));
+  const actualByRef = new Map(actual.map((component) => [component.ref, component]));
+  const missing = expected.filter((component) => !actualByRef.has(component.ref)).map((component) => component.ref);
+  const extra = actual.filter((component) => !expectedByRef.has(component.ref)).map((component) => component.ref);
+  if (missing.length) return `SPICE is missing component ${missing[0]}.`;
+  if (extra.length) return `SPICE includes unexpected component ${extra[0]}.`;
+
+  for (const expectedComponent of expected) {
+    const actualComponent = actualByRef.get(expectedComponent.ref);
+    if (!actualComponent) continue;
+    if (actualComponent.kind !== expectedComponent.kind) {
+      return `${expectedComponent.ref} has kind ${actualComponent.kind} in SPICE but ${expectedComponent.kind} in JSON.`;
+    }
+    if (actualComponent.value !== expectedComponent.value) {
+      return `${expectedComponent.ref} has value ${actualComponent.value} in SPICE but ${expectedComponent.value} in JSON.`;
+    }
+    if (JSON.stringify(actualComponent.nodes) !== JSON.stringify(expectedComponent.nodes)) {
+      return `${expectedComponent.ref} has nodes ${actualComponent.nodes.join(', ')} in SPICE but ${expectedComponent.nodes.join(', ')} in JSON.`;
+    }
+  }
+
+  return 'SPICE does not match the JSON circuit.';
+};
+
+export function validateAiSpice(spice, circuit) {
+  if (typeof spice !== 'string' || !spice.trim()) {
+    throw new CircuitGenerationError('spice_validation', 'AI response must include a non-empty spice string.');
+  }
+
+  const parsed = parseSpiceNetlist(spice, circuit);
+  if (!parsed.ok) {
+    throw new CircuitGenerationError(
+      'spice_validation',
+      `AI SPICE netlist could not be parsed: ${parsed.errors.slice(0, 3).join('; ')}.`,
+    );
+  }
+
+  const expected = electricalSignature(circuit);
+  const actual = electricalSignature(parsed.circuit);
+  if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+    throw new CircuitGenerationError('spice_validation', describeSignatureMismatch(expected, actual));
+  }
+}
+
 export function parseCircuitResponse(text) {
   const trimmed = text.trim();
   const { jsonText, balanced } = findBalancedJson(trimmed);
@@ -148,13 +219,21 @@ export function parseCircuitResponse(text) {
     throw new CircuitGenerationError('json_truncated', 'AI response ended before the JSON object was complete.');
   }
 
-  let circuit;
+  let responseObject;
   try {
-    circuit = JSON.parse(jsonText);
+    responseObject = JSON.parse(jsonText);
   } catch (error) {
     throw new CircuitGenerationError('json_syntax', `AI returned malformed JSON: ${error.message}`, error);
   }
 
+  if (!isPlainObject(responseObject)) {
+    throw new CircuitGenerationError('schema_validation', 'AI response must be a JSON object.');
+  }
+  if (!isPlainObject(responseObject.circuit)) {
+    throw new CircuitGenerationError('schema_validation', 'AI response must include a circuit object.');
+  }
+
+  const circuit = responseObject.circuit;
   const validationErrors = validateCircuitResponse(circuit);
   if (validationErrors.length) {
     throw new CircuitGenerationError(
@@ -162,6 +241,7 @@ export function parseCircuitResponse(text) {
       `AI circuit did not match the required schema: ${validationErrors.slice(0, 4).join('; ')}.`,
     );
   }
+  validateAiSpice(responseObject.spice, circuit);
 
   return circuit;
 }
@@ -203,15 +283,16 @@ export const buildOllamaRequestBody = (
         { role: 'assistant', content: String(correction.content || '').slice(0, 8000) },
         {
           role: 'user',
-          content: `Your previous response was rejected: ${correction.error}. Return the complete circuit again as one valid JSON object matching the required schema. Do not explain the correction and do not use Markdown.`,
+          content: `Your previous response was rejected: ${correction.error}. Return the complete response again as one valid JSON object with top-level "circuit" and "spice". The SPICE must exactly match the JSON circuit refs, values, and node names. Do not explain the correction and do not use Markdown.`,
         },
       ]
     : [];
+  const knowledgePrompt = circuitKnowledgePrompt();
 
   return {
     model: process.env.OLLAMA_MODEL || 'llama3.2:latest',
     stream,
-    format: CIRCUIT_SCHEMA,
+    format: AI_RESPONSE_SCHEMA,
     options: {
       num_ctx: positiveIntegerOption(process.env.OLLAMA_NUM_CTX, 8192),
       num_predict: positiveIntegerOption(process.env.OLLAMA_NUM_PREDICT, 2400),
@@ -219,14 +300,16 @@ export const buildOllamaRequestBody = (
     },
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },
+      ...(knowledgePrompt ? [{ role: 'system', content: knowledgePrompt }] : []),
       ...memoryContext,
       ...revisionContext,
       ...conversation,
       {
         role: 'user',
         content: `Return this exact JSON shape with real circuit values:
-{"title":"...","type":"...","supplyVoltage":5,"nodes":["0"],"components":[{"ref":"R1","kind":"resistor","value":"1k","nodes":["A","0"],"footprint":"Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"}],"notes":["..."]}
+{"circuit":{"title":"...","type":"...","supplyVoltage":5,"nodes":["0"],"components":[{"ref":"R1","kind":"resistor","value":"1k","nodes":["A","0"],"footprint":"Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"}],"notes":["..."]},"spice":"* Example\\nR1 A 0 1k\\n.end"}
 Use SPICE-safe component refs. For example, an LED must be {"ref":"DLED1","kind":"led",...}, not {"ref":"LED1",...}.
+The SPICE field must describe the same circuit.components entries using the same refs, values, and node names.
 Circuit prompt: ${prompt}
 This is a follow-up whenever canonical design context is present. Preserve all prior requirements and unchanged design details. Replace the whole circuit only when this request explicitly asks to start over, replace it, or create a different circuit.`,
       },
@@ -241,7 +324,13 @@ const ollamaHeaders = () => {
   return headers;
 };
 
-const retryableOutputCodes = new Set(['json_missing', 'json_truncated', 'json_syntax', 'schema_validation']);
+const retryableOutputCodes = new Set([
+  'json_missing',
+  'json_truncated',
+  'json_syntax',
+  'schema_validation',
+  'spice_validation',
+]);
 
 const finalOutputError = (error) => new CircuitGenerationError(
   error.code || 'invalid_output',

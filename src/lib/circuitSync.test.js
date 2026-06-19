@@ -259,6 +259,48 @@ V2 IN 0 DC 5
     expect(afterRestore.diagram.wires.filter((wire) => wire.ref === 'C1').every((wire) => wire.points.length >= 2)).toBe(true);
   });
 
+  it('keeps op amp canvas placement stable when SPICE lines are deleted and restored', () => {
+    const amplifier = {
+      title: 'Op amp buffer',
+      type: 'opamp',
+      supplyVoltage: 12,
+      components: [
+        { ref: 'XU1', kind: 'opamp', value: 'LM358', footprint: '', nodes: ['VINP', 'VINN', 'VOUT', 'VCC', '0'] },
+        { ref: 'V1', kind: 'voltage_source', value: '12V', footprint: '', nodes: ['VCC', '0'] },
+      ],
+      notes: [],
+    };
+    const originalDiagram = buildCircuitDiagram(amplifier);
+    const opamp = originalDiagram.components.find((part) => part.ref === 'XU1');
+    opamp.x += 90;
+    opamp.y += 40;
+    opamp.pins = opamp.pins.map((pin) => ({ ...pin, x: pin.x + 90, y: pin.y + 40 }));
+    const previousPositions = new Map(originalDiagram.components.map((part) => [part.ref, { x: part.x, y: part.y }]));
+    const originalDeck = toSpice(amplifier);
+    const deletedDeck = originalDeck.replace(/^V1 .*\r?\n/m, '');
+    const deleted = parseSpiceNetlist(deletedDeck, amplifier);
+
+    expect(deleted.ok).toBe(true);
+    const afterDeletion = synchronizeResult({ intent: {} }, deleted.circuit, originalDiagram, { spice: deletedDeck });
+    expect(afterDeletion.diagram.components.map((part) => part.ref)).toEqual(['XU1']);
+    for (const part of afterDeletion.diagram.components) {
+      expect({ x: part.x, y: part.y }).toEqual(previousPositions.get(part.ref));
+    }
+
+    const restored = parseSpiceNetlist(originalDeck, afterDeletion.circuit);
+    expect(restored.ok).toBe(true);
+    const afterRestore = synchronizeResult(afterDeletion, restored.circuit, afterDeletion.diagram, {
+      spice: originalDeck,
+    });
+
+    expect(afterRestore.diagram.components.map((part) => part.ref)).toEqual(['XU1', 'V1']);
+    for (const ref of ['XU1']) {
+      const part = afterRestore.diagram.components.find((component) => component.ref === ref);
+      expect({ x: part.x, y: part.y }).toEqual(previousPositions.get(ref));
+    }
+    expect(afterRestore.diagram.components.some((part) => part.ref === 'V1')).toBe(true);
+  });
+
   it('repairs missing visual connections when a netlist component is restored', () => {
     const originalDeck = toSpice(circuit);
     const deletedDeck = originalDeck.replace(/^C1 .*\r?\n/m, '');

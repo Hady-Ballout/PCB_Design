@@ -1,6 +1,7 @@
 import {
   DiagramLayoutError,
   buildCircuitDiagram,
+  findNearestLegalPlacement,
   layoutCircuitDiagram,
   repairDiagramLayout,
   simulateCircuit,
@@ -219,6 +220,9 @@ export const parseSpiceNetlist = (source, baseCircuit) => {
 const terminalKey = (ref, pin) => `${ref}:${pin}`;
 const isUnconnectedTerminal = (node, ref, pin) =>
   /^NC_/i.test(String(node)) || String(node) === `${ref}_${pin}`;
+const labelIdForTerminal = (ref, pin, node) => (node === '0'
+  ? `ground-label:${ref}:${pin}`
+  : `net-label:${ref}:${pin}`);
 
 class TerminalGroups {
   constructor(keys) {
@@ -262,6 +266,7 @@ const diagramHasCompleteConnectivity = (diagram, circuit) => {
     const pin = index + 1;
     if (isUnconnectedTerminal(node, component.ref, pin)) return true;
     const wire = automaticWires.get(`${component.ref}:${pin}:${node}`);
+    if (node === '0') return Boolean(wire && wire.points?.length >= 2);
     return Boolean(
       wire
       && wire.points?.length >= 2
@@ -284,6 +289,7 @@ export const circuitElectricalSignature = (circuit) =>
 
 export const circuitFromDiagram = (diagram, baseCircuit) => {
   const components = diagram?.components || [];
+  const electricalComponents = components.filter((component) => component.kind !== 'ground' && component.symbolType !== 'ground');
   const baseByRef = new Map((baseCircuit?.components || []).map((component) => [component.ref, component]));
   const keys = components.flatMap((component) =>
     component.pins.map((pin) => terminalKey(component.ref, pin.pinIndex)),
@@ -298,6 +304,13 @@ export const circuitFromDiagram = (diagram, baseCircuit) => {
   }
 
   const namedByRoot = new Map();
+  for (const component of components) {
+    if (component.kind !== 'ground' && component.symbolType !== 'ground') continue;
+    for (const pin of component.pins || []) {
+      const root = groups.find(terminalKey(component.ref, pin.pinIndex));
+      if (root) namedByRoot.set(root, [...(namedByRoot.get(root) || []), '0']);
+    }
+  }
   for (const wire of diagram?.wires || []) {
     if (wire.manual) continue;
     if (isUnconnectedTerminal(wire.node, wire.ref, wire.pin)) continue;
@@ -336,7 +349,7 @@ export const circuitFromDiagram = (diagram, baseCircuit) => {
     );
   }
 
-  const synchronizedComponents = components.map((component) => {
+  const synchronizedComponents = electricalComponents.map((component) => {
     const base = baseByRef.get(component.ref);
     const sortedPins = [...component.pins].sort((a, b) => a.pinIndex - b.pinIndex);
     return {
@@ -448,6 +461,162 @@ export const parseKiCadNetlist = (source, baseCircuit) => {
   };
 };
 
+const symbolTypeByKind = {
+  voltage_source: 'voltage_source',
+  signal_source: 'voltage_source',
+  resistor: 'resistor',
+  load: 'resistor',
+  capacitor: 'capacitor',
+  inductor: 'inductor',
+  diode: 'diode',
+  led: 'led',
+  bjt_npn: 'bjt_npn',
+  bjt_pnp: 'bjt_pnp',
+  opamp: 'opamp',
+};
+
+const defaultShapeForPart = (part) => {
+  const symbolType = symbolTypeByKind[part.kind] || 'generic';
+  if (symbolType === 'opamp') return { width: 150, height: 110, symbolType, orientation: 'horizontal' };
+  if (symbolType === 'bjt_npn' || symbolType === 'bjt_pnp') return { width: 118, height: 100, symbolType, orientation: 'horizontal' };
+  if (symbolType === 'voltage_source' || symbolType === 'capacitor' || symbolType === 'diode' || symbolType === 'led') {
+    return { width: 98, height: 112, symbolType, orientation: 'vertical' };
+  }
+  return { width: 108, height: 58, symbolType, orientation: 'horizontal' };
+};
+
+const pinPointForComponent = (component, pinIndex, node) => {
+  if (component.symbolType === 'bjt_npn' || component.symbolType === 'bjt_pnp') {
+    if (pinIndex === 1) return { x: component.x + component.width / 2, y: component.y - component.height / 2 + 18 };
+    if (pinIndex === 2) return { x: component.x - component.width / 2, y: component.y };
+    if (pinIndex === 3) return { x: component.x + component.width / 2, y: component.y + component.height / 2 - 18 };
+  }
+  if (component.symbolType === 'opamp') {
+    if (pinIndex === 1) return { x: component.x - component.width / 2, y: component.y + component.height * 0.22 };
+    if (pinIndex === 2) return { x: component.x - component.width / 2, y: component.y - component.height * 0.22 };
+    if (pinIndex === 3) return { x: component.x + component.width / 2, y: component.y };
+    if (pinIndex === 4) return { x: component.x, y: component.y - component.height / 2 };
+    if (pinIndex === 5) return { x: component.x, y: component.y + component.height / 2 };
+  }
+  if (component.pinCount <= 2) {
+    if (component.orientation === 'vertical') {
+      return { x: component.x, y: node === '0' ? component.y + component.height / 2 : component.y - component.height / 2 };
+    }
+    return {
+      x: component.x + (pinIndex === 1 ? -1 : 1) * component.width / 2,
+      y: component.y,
+    };
+  }
+  const side = pinIndex % 2 === 1 ? -1 : 1;
+  const row = Math.floor((pinIndex - 1) / 2);
+  const rows = Math.ceil(component.pinCount / 2);
+  return {
+    x: component.x + side * component.width / 2,
+    y: component.y - ((rows - 1) * 14) / 2 + row * 28,
+  };
+};
+
+const componentFromPart = (part, previous, index) => {
+  const shape = previous || defaultShapeForPart(part);
+  const component = {
+    ...shape,
+    ref: part.ref,
+    kind: part.kind,
+    value: part.value,
+    footprint: part.footprint || '',
+    nodes: part.nodes.map(String),
+    x: previous?.x ?? 180 + (index % 4) * 180,
+    y: previous?.y ?? 220 + Math.floor(index / 4) * 150,
+    pinCount: Math.max(part.nodes.length, previous?.pinCount || defaultPinCount(part.kind)),
+    order: index,
+  };
+  return {
+    ...component,
+    pins: component.nodes.map((node, pinIndex) => ({
+      node,
+      pinIndex: pinIndex + 1,
+      ...pinPointForComponent(component, pinIndex + 1, node),
+    })),
+  };
+};
+
+const refreshIncrementalDiagram = (diagram, circuit) => {
+  const previousByRef = new Map((diagram.components || []).map((component) => [component.ref, component]));
+  const components = circuit.components.map((part, index) => componentFromPart(part, previousByRef.get(part.ref), index));
+  const nextRefs = new Set(components.map((component) => component.ref));
+  const placed = [];
+  const positioned = components.map((component) => {
+    if (previousByRef.has(component.ref)) {
+      placed.push(component);
+      return component;
+    }
+    const placementBase = {
+      ...diagram,
+      components: [...placed, component],
+      width: Math.max(diagram.width || 1100, component.x + component.width / 2 + 120),
+      height: Math.max(diagram.height || 720, component.y + component.height / 2 + 120),
+    };
+    const placement = findNearestLegalPlacement(placementBase, component.ref, component);
+    const moved = placement
+      ? componentFromPart(
+        { ...circuit.components.find((part) => part.ref === component.ref), nodes: component.nodes },
+        { ...component, x: placement.x, y: placement.y },
+        component.order,
+      )
+      : component;
+    placed.push(moved);
+    return moved;
+  });
+  const nets = [...new Set(circuit.components.flatMap((part) =>
+    part.nodes.filter((node, index) => !isUnconnectedTerminal(node, part.ref, index + 1)).map(String),
+  ))].map((name) => ({
+    name,
+    connections: positioned.flatMap((component) => component.pins
+      .filter((pin) => pin.node === name)
+      .map((pin) => ({ ref: component.ref, pin: pin.pinIndex, x: pin.x, y: pin.y }))),
+  }));
+  const wires = positioned.flatMap((component) => component.pins
+    .filter((pin) => !isUnconnectedTerminal(pin.node, component.ref, pin.pinIndex))
+    .map((pin) => {
+      const id = `${component.ref}-${pin.pinIndex}-${pin.node}`;
+      const previous = (diagram.wires || []).find((wire) => (wire.id || `${wire.ref}-${wire.pin}-${wire.node}`) === id);
+      return {
+        ...(previous || {}),
+        id,
+        ref: component.ref,
+        pin: pin.pinIndex,
+        node: pin.node,
+        labelId: labelIdForTerminal(component.ref, pin.pinIndex, pin.node),
+        routingMode: previous?.routingMode || 'auto',
+        preferredWaypoints: previous?.preferredWaypoints || [],
+        points: [],
+      };
+    }));
+
+  return {
+    ...diagram,
+    title: circuit.title,
+    width: Math.max(diagram.width || 1100, ...positioned.map((component) => component.x + component.width / 2 + 120)),
+    height: Math.max(diagram.height || 720, ...positioned.map((component) => component.y + component.height / 2 + 120)),
+    components: positioned,
+    labels: (diagram.labels || []).filter((label) => nextRefs.has(label.ref)),
+    netLabels: (diagram.netLabels || []).filter((label) => wires.some((wire) => wire.labelId === label.id)),
+    nets,
+    wires,
+    junctions: [],
+    bridges: [],
+  };
+};
+
+const buildSyncDiagram = (circuit, previousDiagram) => {
+  try {
+    return buildCircuitDiagram(circuit);
+  } catch (error) {
+    if (!previousDiagram || !(error instanceof DiagramLayoutError)) throw error;
+    return refreshIncrementalDiagram(previousDiagram, circuit);
+  }
+};
+
 export const preserveDiagramLayout = (diagram, previousDiagram, circuit = null) => {
   if (!previousDiagram) return diagram;
   const previousComponents = new Map(previousDiagram.components.map((component) => [component.ref, component]));
@@ -529,13 +698,11 @@ export const preserveDiagramLayout = (diagram, previousDiagram, circuit = null) 
     }
   }
 
-  return circuit && !diagramHasCompleteConnectivity(diagram, circuit)
-    ? layoutCircuitDiagram(circuit)
-    : diagram;
+  return preserved;
 };
 
 export const synchronizeResult = (previousResult, circuit, previousDiagram, options = {}) => {
-  const diagram = preserveDiagramLayout(buildCircuitDiagram(circuit), previousDiagram, circuit);
+  const diagram = preserveDiagramLayout(buildSyncDiagram(circuit, previousDiagram), previousDiagram, circuit);
   const spice = options.spice ?? toSpice(circuit);
   const kicadNetlist = options.kicadNetlist ?? toKiCadNetlist(circuit);
   return {

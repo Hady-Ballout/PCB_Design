@@ -461,12 +461,18 @@ const diagramWirePoints = (diagram, wire) => {
 
 export const buildCircuitDiagram = (circuit) => layoutCircuitDiagram(circuit);
 
+const renderGroundSvg = (x, y) =>
+  `<g class="diagram-ground" aria-label="Ground"><circle class="diagram-node" cx="${x}" cy="${y}" r="4" /><line class="diagram-symbol" x1="${x}" y1="${y}" x2="${x}" y2="${y + 16}" /><line class="diagram-symbol" x1="${x - 18}" y1="${y + 16}" x2="${x + 18}" y2="${y + 16}" /><line class="diagram-symbol" x1="${x - 12}" y1="${y + 22}" x2="${x + 12}" y2="${y + 22}" /><line class="diagram-symbol" x1="${x - 6}" y1="${y + 28}" x2="${x + 6}" y2="${y + 28}" /></g>`;
+
 const renderSymbolSvg = (component) => {
   const { x, y, width, height, symbolType, orientation } = component;
   const left = x - width / 2;
   const right = x + width / 2;
   const top = y - height / 2;
   const bottom = y + height / 2;
+  if (symbolType === 'ground') {
+    return `<line class="diagram-symbol" x1="${x}" y1="${top}" x2="${x}" y2="${y - 7}" /><line class="diagram-symbol" x1="${x - 22}" y1="${y - 7}" x2="${x + 22}" y2="${y - 7}" /><line class="diagram-symbol" x1="${x - 14}" y1="${y + 3}" x2="${x + 14}" y2="${y + 3}" /><line class="diagram-symbol" x1="${x - 7}" y1="${y + 13}" x2="${x + 7}" y2="${y + 13}" />`;
+  }
   if (orientation === 'vertical') {
     if (symbolType === 'resistor') {
       return `<polyline class="diagram-symbol" points="${x},${top} ${x},${top + 18} ${x - 18},${top + 28} ${x + 18},${top + 44} ${x - 18},${top + 60} ${x + 18},${top + 76} ${x},${bottom - 18} ${x},${bottom}" />`;
@@ -542,13 +548,25 @@ export const toDiagramSvg = (diagram) => `<?xml version="1.0" encoding="UTF-8"?>
     return `<polyline class="diagram-wire" points="${svgPolyline(points)}" />`;
   }).join('\n  ')}
   ${(diagram.netLabels || []).map((label) => label.name === '0'
-    ? `<g class="diagram-ground" aria-label="Ground"><circle class="diagram-node" cx="${label.x}" cy="${label.y}" r="4" /><line class="diagram-symbol" x1="${label.x}" y1="${label.y}" x2="${label.x}" y2="${label.y + 16}" /><line class="diagram-symbol" x1="${label.x - 18}" y1="${label.y + 16}" x2="${label.x + 18}" y2="${label.y + 16}" /><line class="diagram-symbol" x1="${label.x - 12}" y1="${label.y + 22}" x2="${label.x + 12}" y2="${label.y + 22}" /><line class="diagram-symbol" x1="${label.x - 6}" y1="${label.y + 28}" x2="${label.x + 6}" y2="${label.y + 28}" /></g>`
+    ? renderGroundSvg(label.x, label.y)
     : `<g><rect class="diagram-net" x="${label.labelX}" y="${label.labelY}" width="${label.labelWidth}" height="26" rx="13" /><text class="diagram-small" x="${label.labelX + label.labelWidth / 2}" y="${label.labelY + 17}" text-anchor="middle">${escapeXml(label.name)}</text></g>`).join('\n  ')}
+  ${[...new Map((diagram.wires || [])
+    .filter((wire) => !wire.manual && wire.node === '0' && !(diagram.netLabels || []).some((label) => label.id === wire.labelId && label.name === '0'))
+    .map((wire) => diagramWirePoints(diagram, wire).at(-1))
+    .filter(Boolean)
+    .map((point) => [`${point.x}:${point.y}`, point])).values()]
+    .map((point) => renderGroundSvg(point.x, point.y)).join('\n  ')}
   ${(diagram.junctions || []).map((junction) => `<circle class="diagram-node" cx="${junction.x}" cy="${junction.y}" r="4" />`).join('\n  ')}
   ${diagram.components.map((component) => {
     const refLabel = diagram.labels?.find((label) => label.ref === component.ref && label.kind === 'ref');
     const valueLabel = diagram.labels?.find((label) => label.ref === component.ref && label.kind === 'value');
-    return `<g>${renderSymbolSvg(component)}<text class="diagram-text" x="${refLabel?.x || component.x}" y="${refLabel?.y || component.y - component.height / 2 - 12}" text-anchor="middle">${escapeXml(component.ref)}</text><text class="diagram-small" x="${valueLabel?.x || component.x}" y="${valueLabel?.y || component.y + component.height / 2 + 20}" text-anchor="middle">${escapeXml(component.value)}</text>${component.pins.map((pin) => `<text class="diagram-small" x="${pin.x}" y="${pin.y - 8}" text-anchor="middle">${pin.pinIndex}</text>`).join('')}</g>`;
+    const labels = component.symbolType === 'ground'
+      ? ''
+      : `<text class="diagram-text" x="${refLabel?.x || component.x}" y="${refLabel?.y || component.y - component.height / 2 - 12}" text-anchor="middle">${escapeXml(component.ref)}</text><text class="diagram-small" x="${valueLabel?.x || component.x}" y="${valueLabel?.y || component.y + component.height / 2 + 20}" text-anchor="middle">${escapeXml(component.value)}</text>`;
+    const pinLabels = component.symbolType === 'ground'
+      ? ''
+      : component.pins.map((pin) => `<text class="diagram-small" x="${pin.x}" y="${pin.y - 8}" text-anchor="middle">${pin.pinIndex}</text>`).join('');
+    return `<g>${renderSymbolSvg(component)}${labels}${pinLabels}</g>`;
   }).join('\n  ')}
 </svg>`;
 

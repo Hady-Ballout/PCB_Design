@@ -2,6 +2,20 @@ import { LAYOUT_VERSION, layoutCircuitDiagram, repairDiagramLayout } from './sch
 
 export const CHAT_STORAGE_KEY = 'prompt-to-pcb-chats-v1';
 
+const shouldResetStoredChats = () => {
+  try {
+    const params = new URLSearchParams(globalThis.location?.search || '');
+    if (params.get('reset') !== '1') return false;
+    params.delete('reset');
+    const nextSearch = params.toString();
+    const nextUrl = `${globalThis.location?.pathname || '/'}${nextSearch ? `?${nextSearch}` : ''}${globalThis.location?.hash || ''}`;
+    globalThis.history?.replaceState?.(null, '', nextUrl);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const createId = () => {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -104,6 +118,12 @@ const normalizeChat = (chat) => {
 
 export const loadChatStore = (storage = globalThis.localStorage) => {
   try {
+    if (shouldResetStoredChats()) {
+      storage?.removeItem(CHAT_STORAGE_KEY);
+      const chat = createChat();
+      return { chats: [chat], activeChatId: chat.id };
+    }
+
     const saved = JSON.parse(storage?.getItem(CHAT_STORAGE_KEY) || 'null');
     const chats = Array.isArray(saved?.chats) ? saved.chats.map(normalizeChat).filter(Boolean) : [];
     if (chats.length === 0) {

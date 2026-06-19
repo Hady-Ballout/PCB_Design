@@ -1,5 +1,11 @@
+import { circuitKnowledgePrompt } from './circuitKnowledge.js';
+import { AI_RESPONSE_SCHEMA, parseCircuitResponse } from './ollamaProvider.js';
+
 const SYSTEM_PROMPT = `You are a JSON API for beginner-safe electronics circuit generation.
 Return exactly one valid JSON object and no other text.
+The top-level object must contain "circuit" and "spice".
+The "circuit" field is the canonical structured circuit.
+The "spice" field is a SPICE netlist generated from the same circuit.
 Use node "0" for ground.
 Every component needs ref, kind, value, nodes, and footprint.
 Allowed component kinds: resistor, capacitor, inductor, diode, led, bjt_npn, bjt_pnp, mosfet_n, mosfet_p, opamp, regulator, voltage_source, signal_source, load.
@@ -14,13 +20,24 @@ Component refs must be SPICE-compatible because the program will simulate them w
 - opamp/subcircuit refs start with X, e.g. XU1
 - load refs should be modeled as resistors and start with R, e.g. RLOAD
 - regulator refs may use U in the JSON, but include enough surrounding passives/load nodes for simulation.
-Use simple Ngspice-friendly values such as 1k, 100nF, 10uF, 5V, and SINE(0 1 1k).`;
+Use simple Ngspice-friendly values such as 1k, 100nF, 10uF, 5V, and SINE(0 1 1k).
+The SPICE netlist must use the exact same component refs, values, and node names as circuit.components.`;
 
 const USER_PROMPT_TEMPLATE = (prompt) =>
   `Return this exact JSON shape with real circuit values:
-{"title":"...","type":"...","supplyVoltage":0,"nodes":["0"],"components":[{"ref":"R1","kind":"resistor","value":"1k","nodes":["A","0"],"footprint":"Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"}],"notes":["..."]}
+{"circuit":{"title":"...","type":"...","supplyVoltage":5,"nodes":["0"],"components":[{"ref":"R1","kind":"resistor","value":"1k","nodes":["A","0"],"footprint":"Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"}],"notes":["..."]},"spice":"* Example\\nR1 A 0 1k\\n.end"}
 Use SPICE-safe component refs. For example, an LED must be {"ref":"DLED1","kind":"led",...}, not {"ref":"LED1",...}.
+The SPICE field must describe the same circuit.components entries using the same refs, values, and node names.
 Circuit prompt: ${prompt}`;
+
+const buildMessages = (prompt) => {
+  const knowledgePrompt = circuitKnowledgePrompt();
+  return [
+    { role: 'system', content: SYSTEM_PROMPT },
+    ...(knowledgePrompt ? [{ role: 'system', content: knowledgePrompt }] : []),
+    { role: 'user', content: USER_PROMPT_TEMPLATE(prompt) },
+  ];
+};
 
 // ── JSON repair helpers (unchanged) ──
 
@@ -148,16 +165,13 @@ async function callOllama(prompt, config) {
     body: JSON.stringify({
       model: config.model,
       stream: false,
-      format: 'json',
+      format: AI_RESPONSE_SCHEMA,
       options: {
         num_ctx: 2048,
         num_predict: 1400,
         temperature: 0.2,
       },
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: USER_PROMPT_TEMPLATE(prompt) },
-      ],
+      messages: buildMessages(prompt),
     }),
   });
 
@@ -194,10 +208,7 @@ async function callOpenAICompatible(prompt, config) {
       temperature: 0.2,
       max_tokens: 1400,
       response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: USER_PROMPT_TEMPLATE(prompt) },
-      ],
+      messages: buildMessages(prompt),
     }),
   });
 
@@ -218,7 +229,7 @@ export async function generateCircuit(prompt) {
       ? await callOllama(prompt, config)
       : await callOpenAICompatible(prompt, config);
 
-  return extractJson(raw);
+  return parseCircuitResponse(JSON.stringify(extractJson(raw)));
 }
 
 // Keep backward-compatible export name
