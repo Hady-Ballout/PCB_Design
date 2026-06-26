@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { toDiagramSvg } from './lib/pcbGenerator.js';
+import { AuthProvider, useAuth, HomePage, LoginPage, SignupPage, VerifyPage } from './auth.jsx';
+import './auth.css';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -58,7 +60,7 @@ function WaveformChart({ waveform }) {
   const margin = { top: 18, right: 20, bottom: 42, left: 62 };
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
-  const colors = ['#4cc38a', '#5a9bd5', '#d4943a', '#b87fd5'];
+  const colors = ['#23533a', '#275f85', '#9a5b20', '#7b3f7a'];
   const scaleX = (x) => margin.left + ((x - xMin) / Math.max(xMax - xMin, Number.EPSILON)) * plotWidth;
   const scaleY = (y) => margin.top + plotHeight - ((y - yMin) / Math.max(yMax - yMin, Number.EPSILON)) * plotHeight;
   const xTicks = [xMin, xMin + (xMax - xMin) / 2, xMax];
@@ -516,7 +518,7 @@ function DiagramSymbol({ component }) {
         <line className="diagram-symbol" x1={collectorJoin.x} y1={collectorJoin.y} x2={collector.x} y2={collector.y} />
         <line className="diagram-symbol" x1={baseX} y1={y + 18} x2={emitterJoin.x} y2={emitterJoin.y} />
         <line className="diagram-symbol" x1={emitterJoin.x} y1={emitterJoin.y} x2={emitter.x} y2={emitter.y} />
-        <polygon points={arrowPoints} className="diagram-arrow" />
+        <polygon points={arrowPoints} fill="#17201a" />
         <text className="diagram-small" x={collector.x - 10} y={collector.y - 8} textAnchor="middle">C</text>
         <text className="diagram-small" x={base.x + 10} y={base.y - 8} textAnchor="middle">B</text>
         <text className="diagram-small" x={emitter.x - 10} y={emitter.y + 18} textAnchor="middle">E</text>
@@ -789,7 +791,7 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
             <text className="diagram-text" x={component.x} y={component.y - component.height / 2 - 12} textAnchor="middle">
               {component.ref}
             </text>
-            <text className="diagram-small diagram-value" x={component.x} y={component.y + component.height / 2 + 20} textAnchor="middle">
+            <text className="diagram-small" x={component.x} y={component.y + component.height / 2 + 20} textAnchor="middle">
               {component.value}
             </text>
             {component.pins.map((pin) => (
@@ -814,6 +816,8 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
 }
 
 function App() {
+  const { user, loading, logout } = useAuth();
+
   const [prompt, setPrompt] = useState('');
   const [result, setResult] = useState(null);
   const [editableSpice, setEditableSpice] = useState('');
@@ -825,26 +829,35 @@ function App() {
   const [simulationRun, setSimulationRun] = useState(null);
   const [activeTab, setActiveTab] = useState('summary');
   const [page, setPage] = useState(() => {
-    if (window.location.hash === '#waveform') return 'waveform';
-    if (window.location.hash === '#diagram') return 'diagram';
-    return 'workspace';
+    const hash = window.location.hash;
+    if (hash.startsWith('#verify')) return 'verify';
+    if (hash === '#login') return 'login';
+    if (hash === '#signup') return 'signup';
+    if (hash === '#waveform') return 'waveform';
+    if (hash === '#diagram') return 'diagram';
+    if (hash === '#workspace') return 'workspace';
+    return 'home';
   });
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
   const [error, setError] = useState('');
   const [simulationError, setSimulationError] = useState('');
 
+  const authHeaders = () => ({
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${localStorage.getItem('pcb_token')}`,
+  });
+
   useEffect(() => {
     const syncPageFromHash = () => {
-      if (window.location.hash === '#waveform') {
-        setPage('waveform');
-        return;
-      }
-      if (window.location.hash === '#diagram') {
-        setPage('diagram');
-        return;
-      }
-      setPage('workspace');
+      const hash = window.location.hash;
+      if (hash.startsWith('#verify')) { setPage('verify'); return; }
+      if (hash === '#login') { setPage('login'); return; }
+      if (hash === '#signup') { setPage('signup'); return; }
+      if (hash === '#waveform') { setPage('waveform'); return; }
+      if (hash === '#diagram') { setPage('diagram'); return; }
+      if (hash === '#workspace') { setPage('workspace'); return; }
+      setPage('home');
     };
 
     window.addEventListener('hashchange', syncPageFromHash);
@@ -879,6 +892,21 @@ function App() {
     [result],
   );
 
+  // ── Loading ──
+  if (loading) return <div className="loading-screen">Loading...</div>;
+
+  // ── Public pages ──
+  if (page === 'home') return <HomePage />;
+  if (page === 'login') return <LoginPage />;
+  if (page === 'signup') return <SignupPage />;
+  if (page === 'verify') return <VerifyPage />;
+
+  // ── Auth guard ──
+  if (!user) {
+    window.location.hash = 'login';
+    return null;
+  }
+
   const generate = async () => {
     setIsGenerating(true);
     setError('');
@@ -888,7 +916,7 @@ function App() {
 
       const response = await fetch(`${API_BASE}/api/generate-circuit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({ prompt }),
       });
 
@@ -900,7 +928,7 @@ function App() {
       setEditableKicadNetlist(data.kicadNetlist || '');
       setSimulationRun(null);
       setSimulationError('');
-      window.location.hash = '';
+      window.location.hash = 'workspace';
       setPage('workspace');
     } catch (requestError) {
       setError(requestError.message);
@@ -918,7 +946,7 @@ function App() {
     try {
       const response = await fetch(`${API_BASE}/api/simulate-circuit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({ circuit: result.circuit, spice: editableSpice }),
       });
       const data = await response.json();
@@ -985,7 +1013,7 @@ function App() {
   };
 
   const showWorkspace = () => {
-    window.location.hash = '';
+    window.location.hash = 'workspace';
     setPage('workspace');
   };
 
@@ -1003,6 +1031,10 @@ function App() {
             <div>
               <p className="eyebrow">Ngspice waveform</p>
               <h1>{result?.circuit?.title || 'Simulation waveform'}</h1>
+            </div>
+            <div className="user-bar">
+              <span>{user.email}</span>
+              <button onClick={logout}>Log out</button>
             </div>
             <button onClick={showWorkspace}>Back to generator</button>
           </header>
@@ -1047,6 +1079,10 @@ function App() {
               <h1>{result?.circuit?.title || 'No circuit generated yet'}</h1>
             </div>
             <div className="button-row">
+              <div className="user-bar">
+                <span>{user.email}</span>
+                <button onClick={logout}>Log out</button>
+              </div>
               <button onClick={showWorkspace}>Back to generator</button>
               <button onClick={() => setEditedDiagram(cloneDiagram(result?.diagram))} disabled={!result}>Reset layout</button>
               <button onClick={() => downloadText('generated.svg', toDiagramSvg(editedDiagram || result.diagram), 'image/svg+xml')} disabled={!result}>
@@ -1118,6 +1154,11 @@ function App() {
               <button onClick={exportAll} disabled={!result}>Export files</button>
             </div>
             {error && <p className="inline-error">{error}</p>}
+
+          <div className="user-bar" style={{ marginTop: 'auto' }}>
+            <span>{user.email}</span>
+            <button onClick={logout}>Log out</button>
+          </div>
         </aside>
 
         <section className="main-panel">
@@ -1143,7 +1184,7 @@ function App() {
               </header>
 
               <div className="source-strip">
-                <span>Generator: Ollama AI</span>
+                <span>Generator: AI</span>
               </div>
 
               <nav className="tabs" aria-label="Result views">
@@ -1281,4 +1322,10 @@ function App() {
   );
 }
 
-export default App;
+export default function WrappedApp() {
+  return (
+    <AuthProvider>
+      <App />
+    </AuthProvider>
+  );
+}
