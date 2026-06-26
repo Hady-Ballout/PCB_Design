@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { loadEnv } from './env.js';
-import { buildCircuitResponse, normalizeAiCircuit } from './circuitResponse.js';
+import { buildCircuitResponse, reconcileCircuitRevision } from './circuitResponse.js';
+import { normalizeChatMemory, sanitizeConversationHistory, updateChatMemory } from './chatMemory.js';
 import { generateCircuit } from './aiProvider.js';
 import { runNgspiceSimulation } from './simulator.js';
 import { initDb } from './db.js';
@@ -113,11 +114,38 @@ const server = createServer(async (request, response) => {
         return;
       }
 
-      const aiCircuit = await generateCircuit(prompt);
-      const circuit = normalizeAiCircuit(aiCircuit, prompt);
-      sendJson(response, 200, buildCircuitResponse(circuit, { rawPrompt: prompt, type: circuit.type }, provider));
+      // Preserve main's conversation/memory/revision context, but use the
+      // production (non-streaming) provider from the deployment branch.
+      const messages = Array.isArray(body.messages) ? body.messages : [];
+      const currentDesign = body.currentDesign?.circuit ? body.currentDesign : null;
+      const memory = normalizeChatMemory(body.memory);
+      const contextDiagnostics = {
+        contextTurnCount: sanitizeConversationHistory(messages).length,
+        revision: Boolean(currentDesign),
+      };
+      if (process.env.AI_CONTEXT_DIAGNOSTICS === '1' || process.env.OLLAMA_CONTEXT_DIAGNOSTICS === '1') {
+        console.info(`[circuit-context] turns=${contextDiagnostics.contextTurnCount} revision=${contextDiagnostics.revision}`);
+      }
+
+      const aiCircuit = await generateCircuit(prompt, messages, currentDesign, memory);
+      const circuit = reconcileCircuitRevision(aiCircuit, prompt, currentDesign?.circuit);
+
+      let updatedMemory = memory;
+      try {
+        updatedMemory = updateChatMemory(memory, prompt, circuit);
+      } catch (memoryError) {
+        console.error(`[chat-memory] ${memoryError.message}`);
+      }
+
+      sendJson(response, 200, {
+        ...buildCircuitResponse(circuit, { rawPrompt: prompt, type: circuit.type }, provider),
+        memory: updatedMemory,
+        ...(process.env.AI_CONTEXT_DIAGNOSTICS === '1' ? { contextDiagnostics } : {}),
+      });
     } catch (error) {
-      sendJson(response, 500, { error: error.message });
+      const errorCode = error.code || 'generation_failed';
+      console.error(`[circuit-generation:${errorCode}] ${error.message}`);
+      sendJson(response, 500, { code: errorCode, error: error.message });
     }
     return;
   }

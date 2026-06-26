@@ -265,3 +265,11 @@
   .pipeline-arrow { transform: rotate(90deg); }
   .auth-card { padding: 28px 20px; }
 }
+
+/* Floating user bar inside the authenticated workspace shell */
+.app-user-bar {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  z-index: 50;
+}

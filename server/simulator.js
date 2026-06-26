@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
+import { addMissingSpiceModels } from '../src/lib/pcbGenerator.js';
 
 const DEFAULT_TRAN = '.tran 10us 20ms';
 const getNgspiceCommand = () => process.env.NGSPICE_BINARY || (process.platform === 'win32' ? 'ngspice_con' : 'ngspice');
@@ -39,8 +40,9 @@ export const chooseWaveformNodes = (circuit) => {
   return [...new Set([...preferred, ...nodes])].slice(0, 4);
 };
 
-export const buildSimulationDeck = (spice, nodes) => {
-  const withoutEnd = String(spice || '')
+export const buildSimulationDeck = (spice, nodes, circuit = null) => {
+  const withRequiredModels = addMissingSpiceModels(spice, circuit);
+  const withoutEnd = withRequiredModels
     .replace(/\.control[\s\S]*?\.endc/gi, '')
     .replace(/^\s*\.end\s*$/gim, '')
     .trim();
@@ -109,7 +111,7 @@ export async function runNgspiceSimulation({ circuit, spice }) {
   let rawOutput = '';
 
   try {
-    await writeFile(deckPath, buildSimulationDeck(spice, nodes), 'utf8');
+    await writeFile(deckPath, buildSimulationDeck(spice, nodes, circuit), 'utf8');
     const command = getNgspiceCommand();
     const result = await runProcess(command, ['-b', deckPath], { cwd: workingDir });
     rawOutput = [result.stdout, result.stderr].filter(Boolean).join('\n');

@@ -1,3 +1,5 @@
+import { normalizeChatMemory, sanitizeConversationHistory } from './chatMemory.js';
+
 const SYSTEM_PROMPT = `You are a JSON API for beginner-safe electronics circuit generation.
 Return exactly one valid JSON object and no other text.
 Use node "0" for ground.
@@ -113,6 +115,40 @@ function extractJson(text) {
   }
 }
 
+// ── Conversation / memory / revision context builder ──
+// Mirrors the streaming provider's context so follow-up edits and chat memory
+// continue to work with the production (non-streaming) provider.
+
+function buildContextMessages(prompt, history = [], currentDesign = null, memory = null) {
+  const conversation = sanitizeConversationHistory(history).map((message) => ({
+    role: message.role,
+    content:
+      message.role === 'assistant'
+        ? JSON.stringify(message.circuit).slice(0, 12000)
+        : `Previous circuit request: ${String(message.content || '')}`,
+  }));
+
+  const normalizedMemory = normalizeChatMemory(memory);
+  const memoryContext = normalizedMemory.summary
+    ? [{ role: 'system', content: `Active chat memory:\n${normalizedMemory.summary}` }]
+    : [];
+
+  const revisionContext = currentDesign?.circuit
+    ? [{
+        role: 'system',
+        content: `This request belongs to an existing circuit conversation. The following circuit is the exact canonical current design:\n${JSON.stringify(currentDesign.circuit)}\nCurrent edited SPICE deck, included only as supplemental context:\n${String(currentDesign.spice || '').slice(0, 6000)}\nCurrent edited KiCad netlist, included only as supplemental context:\n${String(currentDesign.kicadNetlist || '').slice(0, 6000)}\nTreat the new request as an edit and return the complete revised circuit. Keep every unchanged component, reference, node, value, and footprint exactly as-is. Only replace the whole design when the new request explicitly asks to start over, replace it, or create a different circuit.`,
+      }]
+    : [];
+
+  return [
+    { role: 'system', content: SYSTEM_PROMPT },
+    ...memoryContext,
+    ...revisionContext,
+    ...conversation,
+    { role: 'user', content: USER_PROMPT_TEMPLATE(prompt) },
+  ];
+}
+
 // ── Provider detection ──
 
 function getProviderConfig() {
@@ -138,7 +174,7 @@ function getProviderConfig() {
 
 // ── Ollama request ──
 
-async function callOllama(prompt, config) {
+async function callOllama(messages, config) {
   const headers = { 'Content-Type': 'application/json' };
   if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
 
@@ -154,10 +190,7 @@ async function callOllama(prompt, config) {
         num_predict: 1400,
         temperature: 0.2,
       },
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: USER_PROMPT_TEMPLATE(prompt) },
-      ],
+      messages,
     }),
   });
 
@@ -171,7 +204,7 @@ async function callOllama(prompt, config) {
 
 // ── OpenAI-compatible request (Groq, OpenRouter, Together, etc.) ──
 
-async function callOpenAICompatible(prompt, config) {
+async function callOpenAICompatible(messages, config) {
   if (!config.baseUrl) throw new Error('AI_API_URL is not set.');
   if (!config.model) throw new Error('AI_MODEL is not set.');
 
@@ -194,10 +227,7 @@ async function callOpenAICompatible(prompt, config) {
       temperature: 0.2,
       max_tokens: 1400,
       response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: USER_PROMPT_TEMPLATE(prompt) },
-      ],
+      messages,
     }),
   });
 
@@ -211,12 +241,13 @@ async function callOpenAICompatible(prompt, config) {
 
 // ── Public API (drop-in replacement for generateCircuitWithOllama) ──
 
-export async function generateCircuit(prompt) {
+export async function generateCircuit(prompt, history = [], currentDesign = null, memory = null) {
   const config = getProviderConfig();
+  const messages = buildContextMessages(prompt, history, currentDesign, memory);
   const raw =
     config.provider === 'ollama'
-      ? await callOllama(prompt, config)
-      : await callOpenAICompatible(prompt, config);
+      ? await callOllama(messages, config)
+      : await callOpenAICompatible(messages, config);
 
   return extractJson(raw);
 }

@@ -1,170 +1,195 @@
-# Prompt-to-PCB Generator Session Summary
+# Prompt-to-PCB Session Summary
 
-## Current State
+## Session Goal
 
-This repo now contains a React/Vite MVP for a prompt-to-PCB workflow.
+This session evolved the original prompt form into an AI circuit workspace with persistent chats and synchronized SPICE, schematic, and KiCad editors.
 
-The app lets a user enter a natural-language circuit prompt, generate a structured circuit model, validate it, run Ngspice simulation for waveform data, export SPICE, and export a KiCad-style XML netlist.
-
-The current generation flow is:
+The current workflow is:
 
 ```text
-React frontend
--> local Node API server
--> Ollama
--> structured circuit JSON
--> validation
--> SPICE export
--> optional Ngspice waveform simulation
--> KiCad netlist export
+Chat prompt
+-> Ollama circuit generation or revision
+-> structured circuit model
+-> synchronized SPICE, canvas, and KiCad views
+-> optional Ngspice simulation
 ```
 
-If Ollama fails or returns unusable JSON, generation now fails with a visible error instead of substituting a local hardcoded circuit.
+## User Interface
+
+- The prompt area is now a persistent chat interface.
+- Previous conversations are available through the back arrow.
+- New conversations can be created without crowding the active chat.
+- The chat panel is positioned on the right side of the workspace.
+- The old Summary and Simulation pages were removed.
+- Simulation is launched with the play button in the Spice window.
+- The `Generator: Ollama AI` banner was removed.
+- Spice and Canvas behave like closable editor windows. The KiCad window is currently hidden while development focuses on the SPICE workflow.
+- Multiple editor windows can be open in split view.
+- Split panes can be resized horizontally and vertically.
+
+## Chat And AI Revisions
+
+- Chats and their generated artifacts are persisted in local storage.
+- Sending a follow-up prompt edits the current circuit instead of starting from an unrelated circuit.
+- The current circuit, edited SPICE, and edited KiCad netlist are sent as revision context.
+- SPICE generation streams into the editor while the AI is working.
+- Chat history includes previous user and assistant messages.
+- Each chat now keeps an isolated, persisted memory summary of earlier requirements and confirmed design decisions.
+- Ollama requests combine that summary, the canonical current circuit, recent turns, and the newest prompt in a server-controlled context window.
+
+## AI Output Reliability
+
+- Ollama generation now uses the circuit JSON schema as the structured-output format.
+- Model output is parsed and validated before it can replace the confirmed circuit.
+- Malformed, truncated, missing, or schema-invalid JSON triggers one automatic corrective retry.
+- Streamed SPICE is labeled as an unconfirmed preview until the complete circuit passes validation.
+- A failed revision restores the previous confirmed SPICE deck and leaves the existing circuit/canvas intact.
+- Provider errors are classified in server diagnostics.
+- Ollama context and output limits are configurable with `OLLAMA_NUM_CTX` and `OLLAMA_NUM_PREDICT`.
+
+## Op Amp Simulation
+
+- Generated SPICE now includes a built-in five-pin `LM358`-compatible subcircuit for op amp components.
+- The simulator injects the same model into older saved or manually edited decks that reference `LM358` without defining it.
+- This fixes Ngspice `unknown subckt` failures for generated op amp circuits.
+
+## Shared Circuit Model
+
+`src/lib/circuitSync.js` provides the synchronization layer shared by all editors.
+
+The structured circuit model remains the canonical electrical representation:
+
+```text
+component reference
+component kind
+component value
+ordered pin nodes
+footprint
+```
+
+Canvas coordinates and window layout are visual state and do not affect electrical connectivity.
+
+## Canvas To Netlists
+
+Canvas edits update the structured circuit, SPICE deck, and KiCad netlist.
+
+Supported canvas operations include:
+
+- Adding resistors, capacitors, sources, LEDs, BJTs, and op amps.
+- Deleting components, nets, and wires.
+- Creating explicit connections with the Wire tool.
+- Moving components, nets, and wire paths without changing connectivity.
+- Editing a selected component value from the canvas toolbar.
+- Ground node `0` is rendered with a standard ground symbol on the canvas and in downloaded SVG files.
+
+New components start unconnected. Their pins use `NC_...` placeholder nodes and do not display automatic wires or net labels. Legacy placeholders such as `V1_1` and `V1_2` are also treated as unconnected for compatibility with saved chats.
+
+The component value editor stays open while typing and closes when Enter is pressed. Value edits immediately update the canvas label, SPICE line, and KiCad `<value>` entry.
+
+## SPICE To Canvas
+
+Editing component lines in the Spice window updates the canvas after a short debounce.
+
+Examples:
+
+```spice
+R1 IN OUT 2.2k
+C1 OUT 0 220n
+V1 IN 0 SINE(0 1 60)
+```
+
+Supported component lines currently include:
+
+- `R`: resistor or existing load
+- `C`: capacitor
+- `L`: inductor
+- `V`: DC or signal voltage source
+- `D`: diode or LED
+- `Q`: BJT
+- `X`: five-node op amp/subcircuit form used by this application
+
+Changing values or nodes redraws the canvas. Adding a component line adds the component. Removing a component line removes it from the canvas and KiCad netlist.
+
+SPICE directives and comments such as `.model`, `.tran`, `.op`, `.end`, and `* comment` do not create canvas components.
+
+Subcircuit model definitions between `.subckt` and `.ends` are also ignored by canvas synchronization. Internal model elements such as `EGAIN`, `RPOLE`, and `EOUT` remain in SPICE for simulation but are not treated as editable schematic components.
+
+Incomplete or unsupported component lines pause canvas synchronization and display an error without replacing the last valid schematic.
+
+## KiCad To Canvas
+
+Editing the generated KiCad XML netlist updates the structured circuit and canvas after a short debounce.
+
+Supported edits include:
+
+- Component values
+- Component footprints and kinds
+- Net names
+- Pin-to-net assignments
+- Component additions and removals
+
+Malformed or incomplete XML pauses synchronization and preserves the last valid circuit. Generated XML now escapes references, values, footprints, kinds, and net names correctly.
+
+AI revisions now open SPICE in a review state. Added or edited proposal lines are highlighted in yellow, with compact green check and red X controls at the end of the final highlighted line. Accepting confirms the synchronized revision; rejecting restores the previous circuit and SPICE deck.
+
+## Layout Preservation
+
+When a valid SPICE or KiCad edit redraws the schematic:
+
+- Existing component positions are preserved by reference.
+- Existing repeated net-label positions are preserved by stable pin label ID.
+- New components receive generated positions.
+- Electrical changes regenerate normalized wires.
+- Every connected pin receives its own repeated net label or ground symbol, so same-net wires do not share trunks or junctions.
+- Components, component labels, net labels, and previously routed wires are hard routing obstacles.
+- Generated automatic routes cannot cross, touch, share segments, or come within 16px of another wire.
+- Interactive dragging is unrestricted: components, repeated net labels, and wire paths follow the pointer without snapping, collision correction, or automatic rollback.
+- The canvas expands in bounded steps when more routing space is required; failed layouts raise an error instead of returning partial stubs.
+- Saved v1/v2 diagrams migrate to layout v3 by preserving legal component positions and rerouting without bridges or junction dots.
 
 ## Important Files
 
-- `src/App.jsx`: main React UI.
-- `src/lib/pcbGenerator.js`: validation, SPICE export, KiCad netlist export, and generic simulation/export metadata for AI-generated circuits.
-- `server/index.js`: local Node API server on `127.0.0.1:8787`.
-- `server/ollamaProvider.js`: Ollama request logic, JSON prompting, and JSON repair/extraction.
-- `server/circuitResponse.js`: normalizes AI circuit output and builds the response consumed by the frontend.
-- `server/simulator.js`: writes temporary Ngspice batch decks, runs Ngspice, and parses waveform output.
-- `scripts/dev.mjs`: starts both the API server and Vite frontend.
-- `vite.config.js`: enables React plugin and proxies `/api` to `127.0.0.1:8787`.
-- `.env.example`: safe example environment config.
-- `.env.local`: real local config, ignored by git.
+- `src/App.jsx`: chat UI, editor windows, canvas controls, synchronization effects, simulation controls.
+- `src/styles.css`: chat, workbench, split pane, canvas, and component value editor styling.
+- `src/lib/chatStore.js`: persistent chat state and conversation context.
+- `src/lib/circuitSync.js`: canvas, SPICE, and KiCad parsing and synchronization.
+- `src/lib/circuitSync.test.js`: synchronization and round-trip tests.
+- `src/lib/pcbGenerator.js`: validation, diagram generation, SPICE export, KiCad export, and simulation metadata.
+- `server/streamingCircuit.js`: progressive SPICE streaming support.
+- `server/ollamaProvider.js`: Ollama generation and current-design revision prompting.
+- `server/index.js`: generation and simulation API routes.
 
-## Current Environment Setup
+## Verification
 
-`.env.local` should look like this:
-
-```env
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2:latest
-OLLAMA_API_KEY=
-```
-
-Local Ollama usually does not need an API key. Keep `OLLAMA_API_KEY` empty unless using a hosted Ollama-compatible endpoint.
-
-Secrets are protected by `.gitignore`:
+Latest verification completed during this session:
 
 ```text
-.env
-.env.local
-.env.*.local
+10 test files passed
+71 tests passed
+Vite production build succeeded
 ```
 
-## Run Commands
-
-Install dependencies:
-
-```bash
-npm install
-```
-
-Start frontend and backend:
-
-```bash
-npm run dev
-```
-
-Frontend:
-
-```text
-http://127.0.0.1:5173
-```
-
-Backend health:
-
-```text
-http://127.0.0.1:8787/api/health
-```
-
-Simulation endpoint:
-
-```text
-http://127.0.0.1:8787/api/simulate-circuit
-```
-
-Run checks:
+Commands:
 
 ```bash
 npm test
 npm run build
 ```
 
-## Ollama Notes
+## Current Limitations
 
-Ollama is running locally at:
+- The SPICE parser supports the component syntax generated by this application, not every SPICE dialect or device.
+- SPICE continuation lines beginning with `+` are not supported by canvas synchronization.
+- MOSFET and arbitrary subcircuit parsing are not yet implemented.
+- KiCad output remains an XML netlist rather than a complete `.kicad_sch` or PCB project.
+- Ngspice must be installed and available on PATH for simulation.
+- Validation checks structural issues but does not guarantee a physically correct circuit.
 
-```text
-http://127.0.0.1:11434
-```
+## Suggested Next Work
 
-Useful commands:
-
-```powershell
-ollama list
-ollama ps
-Invoke-WebRequest -UseBasicParsing http://127.0.0.1:11434/api/tags
-```
-
-Installed models observed during the session included:
-
-```text
-llama3:latest
-qwen2.5:latest
-llama3.2:latest
-qwen3-coder:480b-cloud
-gpt-oss:120b-cloud
-```
-
-`llama3:latest` failed because it needed more memory than available. The app was changed to use `llama3.2:latest`.
-
-The Ollama request also uses smaller generation options:
-
-```js
-num_ctx: 2048
-num_predict: 1400
-temperature: 0.2
-```
-
-## UI Behavior
-
-The app now starts with an empty prompt and no pre-generated circuit. After clicking `Generate`, the prompt is sent to the backend and then to Ollama.
-
-The source strip only appears after successful generation:
-
-```text
-Generator: Ollama AI
-```
-
-## What Works
-
-- React app renders correctly.
-- Vite frontend runs on port `5173`.
-- Node API runs on port `8787`.
-- API calls Ollama through `localhost:11434`.
-- AI-generated circuit JSON is normalized and validated.
-- Malformed Ollama JSON is partially repaired by `server/ollamaProvider.js`.
-- SPICE and KiCad netlist exports are generated from the structured circuit model.
-- The Simulation tab can call the backend to run Ngspice and render waveform data.
-- Build and tests passed after the latest changes.
-
-## Known Limitations
-
-- Ngspice must be installed and available on PATH for waveform simulation to run.
-- AI-generated SPICE can still fail in Ngspice if the model produces unsupported or electrically invalid circuit structures.
-- AI output can still be electrically incomplete or odd. Validation catches some structural issues, but not full circuit correctness.
-- KiCad export is a netlist-style export, not a complete routed PCB.
-- Ollama/local models may be slow or produce malformed JSON, especially for complex circuits.
-
-## Suggested Next Steps
-
-- Add a clearer timeout and loading status for Ollama requests.
-- Add stricter schema validation for AI circuit output.
-- Improve generated SPICE coverage for more component kinds, especially regulator, diode, MOSFET, and op-amp models.
-- Improve KiCad export toward real KiCad project/schematic files.
-- Add circuit-specific validators, especially for op-amps, regulators, and ICs.
-- Add a JSON repair retry: if the first Ollama output is malformed, ask Ollama to repair only the JSON.
-- Later, add provider adapters for OpenAI and Claude without exposing API keys in frontend code.
+- Add MOSFET and general subcircuit parsing.
+- Add editable component reference, kind, and footprint controls on the canvas.
+- Add undo/redo for canvas and text editor synchronization.
+- Add clearer visual markers for unconnected pins.
+- Add direct net naming and pin-disconnect controls on the canvas.
+- Move toward native KiCad schematic project generation.
