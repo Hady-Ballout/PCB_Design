@@ -25,8 +25,24 @@ const validCircuit = {
 };
 
 const validAiResponse = {
+  reply: 'I built an RC filter with R1 between IN and OUT.',
   circuit: validCircuit,
   spice: '* RC Filter\nR1 IN OUT 1k\n.end',
+};
+
+const circuitWithLoad = {
+  ...validCircuit,
+  title: 'RC Filter With Load',
+  components: [
+    ...validCircuit.components,
+    {
+      ref: 'RLOAD',
+      kind: 'load',
+      value: '10k',
+      nodes: ['OUT', '0'],
+      footprint: 'Resistor_THT:R_Axial',
+    },
+  ],
 };
 
 const streamResponse = (content) => new Response(
@@ -73,6 +89,21 @@ describe('Ollama circuit output', () => {
     expect(body.messages.filter((message) => message.content.includes('Previous circuit request'))).toHaveLength(12);
   });
 
+  it('includes current component inventory and load aliases for follow-up edits', () => {
+    const body = buildOllamaRequestBody(
+      'remove Rload',
+      [],
+      true,
+      { circuit: circuitWithLoad, spice: 'R1 IN OUT 1k\nRLOAD OUT 0 10k', kicadNetlist: '<export />' },
+    );
+
+    const revisionContext = body.messages.find((message) => message.content.includes('Current component inventory'));
+    expect(revisionContext.content).toContain('RLOAD: load, value=10k, nodes=OUT - 0');
+    expect(revisionContext.content).toContain('Rload');
+    expect(revisionContext.content).toContain('load resistor');
+    expect(revisionContext.content).toContain('modify or remove that existing component');
+  });
+
   it('does not attach memory or revision context to a new chat', () => {
     const body = buildOllamaRequestBody('Make a new filter', [], true, null, null);
 
@@ -83,7 +114,7 @@ describe('Ollama circuit output', () => {
   });
 
   it('validates AI response envelopes and returns the canonical circuit', () => {
-    expect(parseCircuitResponse(JSON.stringify(validAiResponse))).toEqual(validCircuit);
+    expect(parseCircuitResponse(JSON.stringify(validAiResponse))).toEqual(validAiResponse);
   });
 
   it('classifies malformed and schema-invalid responses', () => {
@@ -96,13 +127,14 @@ describe('Ollama circuit output', () => {
   });
 
   it('rejects missing, invalid, and mismatched AI SPICE', () => {
-    expect(() => parseCircuitResponse(JSON.stringify({ circuit: validCircuit }))).toThrowError(
+    expect(() => parseCircuitResponse(JSON.stringify({ reply: 'Here is the filter.', circuit: validCircuit }))).toThrowError(
       expect.objectContaining({ code: 'spice_validation' }),
     );
-    expect(() => parseCircuitResponse(JSON.stringify({ circuit: validCircuit, spice: 'R1 IN' }))).toThrowError(
+    expect(() => parseCircuitResponse(JSON.stringify({ reply: 'Here is the filter.', circuit: validCircuit, spice: 'R1 IN' }))).toThrowError(
       expect.objectContaining({ code: 'spice_validation' }),
     );
     expect(() => parseCircuitResponse(JSON.stringify({
+      reply: 'Here is the filter.',
       circuit: validCircuit,
       spice: '* wrong node\nR1 IN 0 1k\n.end',
     }))).toThrowError(expect.objectContaining({ code: 'spice_validation' }));
@@ -115,14 +147,14 @@ describe('Ollama circuit output', () => {
     const onContent = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(streamCircuitWithOllama('Make an RC filter', [], null, onContent)).resolves.toEqual(validCircuit);
+    await expect(streamCircuitWithOllama('Make an RC filter', [], null, onContent)).resolves.toEqual(validAiResponse);
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body);
     const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(firstBody.format).toEqual(AI_RESPONSE_SCHEMA);
     expect(retryBody.messages.at(-1).content).toContain('previous response was rejected');
-    expect(retryBody.messages.at(-1).content).toContain('top-level "circuit" and "spice"');
+    expect(retryBody.messages.at(-1).content).toContain('top-level "reply", "circuit", and "spice"');
     expect(onContent).toHaveBeenLastCalledWith(
       JSON.stringify(validAiResponse),
       expect.objectContaining({ attempt: 1, correcting: true }),
@@ -132,13 +164,14 @@ describe('Ollama circuit output', () => {
   it('retries once when AI SPICE does not match the JSON circuit', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(streamResponse(JSON.stringify({
+        reply: 'Here is the filter.',
         circuit: validCircuit,
         spice: '* wrong node\nR1 IN 0 1k\n.end',
       })))
       .mockResolvedValueOnce(streamResponse(JSON.stringify(validAiResponse)));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(streamCircuitWithOllama('Make an RC filter')).resolves.toEqual(validCircuit);
+    await expect(streamCircuitWithOllama('Make an RC filter')).resolves.toEqual(validAiResponse);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(retryBody.messages.at(-1).content).toContain('SPICE must exactly match');

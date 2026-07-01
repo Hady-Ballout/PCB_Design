@@ -146,7 +146,7 @@ const server = createServer(async (request, response) => {
       });
 
       let lastSpiceEvent = '';
-      const aiCircuit = await streamCircuitWithOllama(prompt, messages, currentDesign, (content, streamState) => {
+      const aiResponse = await streamCircuitWithOllama(prompt, messages, currentDesign, (content, streamState) => {
         const partial = buildStreamingSpice(content, prompt, currentDesign?.circuit);
         const eventKey = `${streamState.attempt}:${partial.spice}`;
         if (eventKey === lastSpiceEvent) return;
@@ -158,7 +158,7 @@ const server = createServer(async (request, response) => {
           ...partial,
         });
       }, memory);
-      const circuit = reconcileCircuitRevision(aiCircuit, prompt, currentDesign?.circuit);
+      const circuit = reconcileCircuitRevision(aiResponse.circuit, prompt, currentDesign?.circuit);
       let updatedMemory = memory;
       try {
         updatedMemory = updateChatMemory(memory, prompt, circuit);
@@ -169,6 +169,7 @@ const server = createServer(async (request, response) => {
         type: 'complete',
         data: {
           ...buildCircuitResponse(circuit, { rawPrompt: prompt, type: circuit.type }, 'ollama'),
+          reply: aiResponse.reply,
           memory: updatedMemory,
           ...(process.env.OLLAMA_CONTEXT_DIAGNOSTICS === '1' ? { contextDiagnostics } : {}),
         },

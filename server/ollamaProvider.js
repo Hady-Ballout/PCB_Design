@@ -4,7 +4,8 @@ import { parseSpiceNetlist } from '../src/lib/circuitSync.js';
 
 const SYSTEM_PROMPT = `You are a JSON API for beginner-safe electronics circuit generation.
 Return exactly one valid JSON object and no other text.
-The top-level object must contain "circuit" and "spice".
+The top-level object must contain "reply", "circuit", and "spice".
+The "reply" field is a concise, conversational explanation of what you built or changed for the user. Mention important component refs when helpful, such as RLOAD, R1, or C1. Do not use Markdown.
 The "circuit" field is the canonical structured circuit.
 The "spice" field is a SPICE netlist generated from the same circuit.
 Use node "0" for ground.
@@ -72,10 +73,11 @@ export const CIRCUIT_SCHEMA = {
 export const AI_RESPONSE_SCHEMA = {
   type: 'object',
   properties: {
+    reply: { type: 'string' },
     circuit: CIRCUIT_SCHEMA,
     spice: { type: 'string' },
   },
-  required: ['circuit', 'spice'],
+  required: ['reply', 'circuit', 'spice'],
 };
 
 function findBalancedJson(text) {
@@ -116,6 +118,36 @@ class CircuitGenerationError extends Error {
 }
 
 const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+const cleanReply = (value) => String(value || '').trim().replace(/\s+/g, ' ').slice(0, 1200);
+
+const describeComponent = (component) => {
+  const ref = String(component?.ref || '').toUpperCase();
+  const kind = String(component?.kind || 'component');
+  const value = String(component?.value || 'unknown value');
+  const nodes = Array.isArray(component?.nodes) ? component.nodes.join(' - ') : 'unknown nodes';
+  return `${ref}: ${kind}, value=${value}, nodes=${nodes}`;
+};
+
+const currentCircuitInventory = (circuit) => {
+  const components = Array.isArray(circuit?.components) ? circuit.components : [];
+  if (!components.length) return '';
+  const refs = components.map((component) => String(component.ref || '').toUpperCase()).filter(Boolean);
+  const loadRefs = components
+    .filter((component) => (
+      String(component.ref || '').toUpperCase().includes('LOAD')
+      || String(component.kind || '').toLowerCase() === 'load'
+    ))
+    .map(describeComponent);
+  return [
+    `Current component inventory (${components.length} components):`,
+    ...components.map(describeComponent),
+    refs.length ? `Known refs and aliases are case-insensitive: ${refs.join(', ')}.` : '',
+    loadRefs.length
+      ? `Load references present now: ${loadRefs.join('; ')}. User phrases like "Rload", "RLOAD", "load resistor", or "the load" refer to these current load components unless they explicitly ask for a new load.`
+      : '',
+  ].filter(Boolean).join('\n');
+};
 
 export function validateCircuitResponse(circuit) {
   const errors = [];
@@ -229,6 +261,10 @@ export function parseCircuitResponse(text) {
   if (!isPlainObject(responseObject)) {
     throw new CircuitGenerationError('schema_validation', 'AI response must be a JSON object.');
   }
+  const reply = cleanReply(responseObject.reply);
+  if (!reply) {
+    throw new CircuitGenerationError('schema_validation', 'AI response must include a conversational reply string.');
+  }
   if (!isPlainObject(responseObject.circuit)) {
     throw new CircuitGenerationError('schema_validation', 'AI response must include a circuit object.');
   }
@@ -243,7 +279,7 @@ export function parseCircuitResponse(text) {
   }
   validateAiSpice(responseObject.spice, circuit);
 
-  return circuit;
+  return { reply, circuit, spice: responseObject.spice };
 }
 
 const positiveIntegerOption = (value, fallback) => {
@@ -274,7 +310,7 @@ export const buildOllamaRequestBody = (
   const revisionContext = currentDesign?.circuit
     ? [{
         role: 'system',
-        content: `This request belongs to an existing circuit conversation. The following circuit is the exact canonical current design:\n${JSON.stringify(currentDesign.circuit)}\nCurrent edited SPICE deck, included only as supplemental context:\n${String(currentDesign.spice || '').slice(0, 6000)}\nCurrent edited KiCad netlist, included only as supplemental context:\n${String(currentDesign.kicadNetlist || '').slice(0, 6000)}\nTreat the new request as an edit and return the complete revised circuit. Keep every unchanged component, reference, node, value, and footprint exactly as-is. Only replace the whole design when the new request explicitly asks to start over, replace it, or create a different circuit.`,
+        content: `This request belongs to an existing circuit conversation. The following circuit is the exact canonical current design:\n${JSON.stringify(currentDesign.circuit)}\n${currentCircuitInventory(currentDesign.circuit)}\nCurrent edited SPICE deck, included only as supplemental context:\n${String(currentDesign.spice || '').slice(0, 6000)}\nCurrent edited KiCad netlist, included only as supplemental context:\n${String(currentDesign.kicadNetlist || '').slice(0, 6000)}\nTreat the new request as an edit to this exact current design. If the user names a component ref case-insensitively, such as Rload, RLOAD, RLoad, or "the load resistor", modify or remove that existing component when present instead of inventing a new circuit. Keep every unchanged component, reference, node, value, and footprint exactly as-is. Only replace the whole design when the new request explicitly asks to start over, replace it, or create a different circuit.`,
       }]
     : [];
 
@@ -283,7 +319,7 @@ export const buildOllamaRequestBody = (
         { role: 'assistant', content: String(correction.content || '').slice(0, 8000) },
         {
           role: 'user',
-          content: `Your previous response was rejected: ${correction.error}. Return the complete response again as one valid JSON object with top-level "circuit" and "spice". The SPICE must exactly match the JSON circuit refs, values, and node names. Do not explain the correction and do not use Markdown.`,
+          content: `Your previous response was rejected: ${correction.error}. Return the complete response again as one valid JSON object with top-level "reply", "circuit", and "spice". The reply must be conversational and concise. The SPICE must exactly match the JSON circuit refs, values, and node names. Do not explain the correction and do not use Markdown outside the JSON.`,
         },
       ]
     : [];
@@ -307,9 +343,10 @@ export const buildOllamaRequestBody = (
       {
         role: 'user',
         content: `Return this exact JSON shape with real circuit values:
-{"circuit":{"title":"...","type":"...","supplyVoltage":5,"nodes":["0"],"components":[{"ref":"R1","kind":"resistor","value":"1k","nodes":["A","0"],"footprint":"Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"}],"notes":["..."]},"spice":"* Example\\nR1 A 0 1k\\n.end"}
+{"reply":"I built a concise explanation of the circuit or edit for the user.","circuit":{"title":"...","type":"...","supplyVoltage":5,"nodes":["0"],"components":[{"ref":"R1","kind":"resistor","value":"1k","nodes":["A","0"],"footprint":"Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"}],"notes":["..."]},"spice":"* Example\\nR1 A 0 1k\\n.end"}
 Use SPICE-safe component refs. For example, an LED must be {"ref":"DLED1","kind":"led",...}, not {"ref":"LED1",...}.
 The SPICE field must describe the same circuit.components entries using the same refs, values, and node names.
+The reply field should sound like a helpful chat assistant: briefly explain what changed, mention relevant refs, and do not paste the netlist.
 Circuit prompt: ${prompt}
 This is a follow-up whenever canonical design context is present. Preserve all prior requirements and unchanged design details. Replace the whole circuit only when this request explicitly asks to start over, replace it, or create a different circuit.`,
       },

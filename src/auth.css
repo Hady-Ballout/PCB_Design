@@ -264,6 +264,11 @@
   .home-pipeline { flex-direction: column; align-items: center; }
   .pipeline-arrow { transform: rotate(90deg); }
   .auth-card { padding: 28px 20px; }
+  .app-user-bar {
+    justify-content: flex-end;
+    margin-bottom: 12px;
+    position: static;
+  }
 }
 
 /* Floating user bar inside the authenticated workspace shell */
@@ -272,4 +277,103 @@
   top: 12px;
   right: 16px;
   z-index: 50;
+}
+
+/* Dark theme overrides */
+.home-page,
+.auth-page,
+.loading-screen {
+  background: var(--color-page);
+  color: var(--color-text);
+}
+
+.home-title,
+.pipeline-step h3,
+.auth-card h2,
+.auth-switch a {
+  color: var(--color-primary);
+}
+
+.home-subtitle,
+.pipeline-step p,
+.auth-success-msg,
+.auth-switch,
+.user-bar,
+.loading-screen {
+  color: var(--color-text-muted);
+}
+
+.pipeline-step,
+.auth-card {
+  background: var(--color-panel);
+  border-color: var(--color-border);
+}
+
+.pipeline-number,
+.btn-primary {
+  background: var(--color-primary);
+  color: #102116;
+}
+
+.btn-primary:hover {
+  background: var(--color-primary-hover);
+}
+
+.btn-primary:disabled {
+  background: var(--color-primary-border);
+  color: var(--color-page);
+}
+
+.btn-outline {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.btn-outline:hover {
+  background: var(--color-primary);
+  color: #102116;
+}
+
+.pipeline-arrow {
+  color: var(--color-text-subtle);
+}
+
+.auth-label {
+  color: var(--color-text);
+}
+
+.auth-input {
+  background: var(--color-code);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+.auth-input:focus {
+  background: var(--color-surface-soft);
+  border-color: var(--color-primary);
+}
+
+.auth-error {
+  background: var(--color-error-bg);
+  border-color: var(--color-error-border);
+  color: var(--color-error-text);
+}
+
+.user-bar button {
+  background: var(--color-surface-soft);
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+
+.user-bar button:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary-hover);
+}
+
+@media (max-width: 640px) {
+  .app-user-bar {
+    justify-content: flex-end;
+    margin-bottom: 12px;
+    position: static;
+  }
 }

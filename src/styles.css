@@ -1,6 +1,32 @@
 :root {
-  color: #17201a;
-  background: #f5f3ee;
+  --color-page: #151a18;
+  --color-panel: #1c241f;
+  --color-surface: #243026;
+  --color-surface-soft: #202822;
+  --color-canvas: #18201c;
+  --color-code: #202822;
+  --color-primary: #49c878;
+  --color-primary-hover: #5fe190;
+  --color-primary-pressed: #2fa85f;
+  --color-primary-soft: #173824;
+  --color-primary-border: #3ea969;
+  --color-text: #e4ece7;
+  --color-text-muted: #a8b8ad;
+  --color-text-subtle: #77877d;
+  --color-border: #33443a;
+  --color-border-soft: #27352d;
+  --color-chart-bg: #18201c;
+  --color-diagram-bg: #19221d;
+  --color-diagram-grid-small: #24342b;
+  --color-diagram-grid-large: #31473a;
+  --color-error-bg: #3a1d1d;
+  --color-error-text: #ff8a7f;
+  --color-error-border: #6d3530;
+  --color-warning-bg: #423414;
+  --color-warning-text: #ffd56d;
+  color: var(--color-text);
+  background: var(--color-page);
+  color-scheme: dark;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.5;
 }
@@ -1338,4 +1364,308 @@ pre {
 .netlist-diff .diff-line.changed {
   background: #ffe58a;
   box-shadow: -12px 0 #ffe58a, 12px 0 #ffe58a;
+}
+
+/* Dark theme overrides */
+html,
+body {
+  background: var(--color-page);
+  color: var(--color-text);
+}
+
+body,
+.app-shell,
+.waveform-page-shell {
+  background: var(--color-page);
+}
+
+button,
+textarea,
+input {
+  background: var(--color-surface-soft);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+button:hover,
+button:focus-visible,
+textarea:focus,
+input:focus {
+  border-color: var(--color-primary);
+  outline-color: var(--color-primary);
+}
+
+button.primary,
+.play-simulation-button,
+.netlist-review-button.accept {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #102116;
+}
+
+button.primary:hover,
+.play-simulation-button:hover {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+
+.text-button {
+  color: var(--color-primary-hover);
+}
+
+.side-panel,
+.main-panel,
+.panel-block,
+.waveform-page-header {
+  background: var(--color-panel);
+  border-color: var(--color-border);
+}
+
+.eyebrow,
+.chat-section-label,
+.chat-history-copy small,
+.chat-history-item time,
+.chat-welcome p,
+.chat-composer-footer small,
+.empty-state p:last-child,
+.workbench-empty p,
+.editor-window-empty p,
+.editor-header p,
+.waveform-page-summary p,
+.empty-waveform-page p,
+.empty-chart,
+.chat-message.pending {
+  color: var(--color-text-muted);
+}
+
+.prompt-box span,
+.chat-welcome,
+.component-value-editor span,
+.workbench-empty,
+.editor-window-empty,
+.waveform-card text,
+.diagram-small,
+.trace-picker label {
+  color: var(--color-text);
+  fill: var(--color-text);
+}
+
+.chat-conversation-header,
+.editor-launchbar,
+.waveform-toolbar,
+.editor-window-titlebar {
+  border-color: var(--color-border);
+}
+
+.chat-messages,
+.editor-window,
+.waveform-card,
+.diagram-card {
+  background: var(--color-canvas);
+  border-color: var(--color-border);
+}
+
+.chat-message,
+.chat-artifact-chip,
+.editor-window-titlebar,
+.waveform-toolbar,
+.trace-picker label,
+.cursor-box {
+  background: var(--color-surface-soft);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+.chat-message.user {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #102116;
+}
+
+.chat-message.user .chat-message-meta time {
+  color: #244b31;
+}
+
+.chat-artifact-chip span,
+.chat-message-meta time,
+.user-bar,
+.user-bar button {
+  color: var(--color-text-muted);
+}
+
+.chat-history-item.active,
+.editor-launchbar button.open,
+.active-tool,
+.live-code-editor,
+.code-editor:read-only {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary-border);
+  color: var(--color-text);
+}
+
+.editor-launchbar button.active,
+.editor-window.active {
+  border-color: var(--color-primary);
+}
+
+.editor-launchbar button.active {
+  background: var(--color-primary);
+  color: #102116;
+}
+
+.editor-window {
+  background: var(--color-surface-soft);
+}
+
+.editor-window.active {
+  box-shadow: 0 0 0 1px var(--color-primary);
+}
+
+.editor-window-titlebar,
+.editor-window.active .editor-window-titlebar {
+  background: var(--color-surface);
+}
+
+.editor-window-close:hover,
+.component-symbol-button:hover {
+  background: var(--color-primary-soft);
+}
+
+.editor-resize-handle::before {
+  background: var(--color-border);
+}
+
+.editor-resize-handle span {
+  background: var(--color-text-subtle);
+}
+
+.editor-resize-handle:hover::before,
+.editor-resize-handle:focus-visible::before,
+.resizing-columns .editor-resize-handle.columns::before,
+.resizing-rows > .editor-resize-handle.rows::before {
+  background: var(--color-primary);
+}
+
+.component-value-editor input,
+code,
+pre,
+.code-editor {
+  background: var(--color-code);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+.component-value-editor input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(73, 200, 120, 0.2);
+}
+
+.status.ok,
+.simulation-ok {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-hover);
+}
+
+.status.error,
+.inline-error {
+  color: var(--color-error-text);
+}
+
+.status.error {
+  background: var(--color-error-bg);
+}
+
+.streaming-status {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-hover);
+}
+
+.netlist-review-button.reject {
+  background: var(--color-error-border);
+  border-color: var(--color-error-border);
+}
+
+.netlist-diff .diff-line.changed {
+  background: var(--color-warning-bg);
+  box-shadow: -12px 0 var(--color-warning-bg), 12px 0 var(--color-warning-bg);
+}
+
+.netlist-diff .diff-line.changed code {
+  color: var(--color-warning-text);
+}
+
+.chart-bg {
+  fill: var(--color-chart-bg);
+}
+
+.grid-line {
+  stroke: var(--color-border-soft);
+}
+
+.axis-line {
+  stroke: var(--color-text-muted);
+}
+
+.cursor-line {
+  stroke: var(--color-primary-hover);
+}
+
+.cursor-box {
+  fill: var(--color-surface);
+  opacity: 0.96;
+  stroke: var(--color-border);
+}
+
+.diagram-bg {
+  fill: var(--color-diagram-bg);
+}
+
+.diagram-grid-small {
+  stroke: var(--color-diagram-grid-small);
+}
+
+.diagram-grid-large {
+  stroke: var(--color-diagram-grid-large);
+}
+
+.diagram-wire,
+.diagram-symbol,
+.diagram-ground {
+  stroke: var(--color-text);
+}
+
+.diagram-wire {
+  stroke: var(--color-text-muted);
+}
+
+.diagram-wire.pending,
+.diagram-wire:hover,
+.diagram-wire.selected,
+.editable-component:hover .diagram-symbol,
+.editable-component.selected .diagram-symbol,
+.editable-net:hover .diagram-net,
+.editable-net:hover .diagram-ground,
+.editable-net.selected .diagram-ground,
+.editable-net.selected .diagram-net {
+  stroke: var(--color-primary);
+}
+
+.diagram-fill,
+.terminal-dot {
+  fill: var(--color-surface-soft);
+  stroke: var(--color-text);
+}
+
+.diagram-node,
+.terminal-dot.selected {
+  fill: var(--color-primary);
+}
+
+.diagram-net {
+  fill: var(--color-surface);
+  stroke: var(--color-border);
+}
+
+.diagram-text {
+  fill: var(--color-text);
 }

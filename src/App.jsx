@@ -219,7 +219,7 @@ function WaveformChart({ waveform }) {
   const margin = { top: 18, right: 20, bottom: 42, left: 62 };
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
-  const colors = ['#23533a', '#275f85', '#9a5b20', '#7b3f7a'];
+  const colors = ['#49c878', '#5aa7ff', '#ffd56d', '#c792ea'];
   const scaleX = (x) => margin.left + ((x - xMin) / Math.max(xMax - xMin, Number.EPSILON)) * plotWidth;
   const scaleY = (y) => margin.top + plotHeight - ((y - yMin) / Math.max(yMax - yMin, Number.EPSILON)) * plotHeight;
   const xTicks = [xMin, xMin + (xMax - xMin) / 2, xMax];
@@ -1499,10 +1499,11 @@ function App() {
           })
         : await response.json();
       if (data.error) throw new Error(data.error);
+      const fallbackReply = `${isRevision ? 'Updated' : 'Generated'} ${data.circuit.title} with ${data.circuit.components.length} components. The latest circuit package is open in the workspace.`;
       const assistantMessage = {
         id: messageId(),
         role: 'assistant',
-        content: `${isRevision ? 'Updated' : 'Generated'} ${data.circuit.title} with ${data.circuit.components.length} components. The latest circuit package is open in the workspace.`,
+        content: String(data.reply || '').trim() || fallbackReply,
         circuit: data.circuit,
         createdAt: Date.now(),
       };
@@ -1791,7 +1792,7 @@ function App() {
             {isGenerating
               ? 'AI is updating this deck in real time.'
               : result
-                ? 'Valid component edits update the circuit canvas automatically.'
+                ? ''
                 : 'The live deck will appear here while the AI generates the circuit.'}
           </p>
         </div>
