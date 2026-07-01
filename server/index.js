@@ -5,6 +5,8 @@ import { normalizeChatMemory, sanitizeConversationHistory, updateChatMemory } fr
 import { streamCircuitWithOllama } from './ollamaProvider.js';
 import { runNgspiceSimulation } from './simulator.js';
 import { buildStreamingSpice } from './streamingCircuit.js';
+import { initDb } from './db.js';
+import { handleSignup, handleLogin, handleVerifyEmail, handleMe, verifyJwt } from './auth.js';
 
 loadEnv();
 
@@ -16,7 +18,7 @@ const sendJson = (response, status, body) => {
   response.writeHead(status, {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': corsOrigin,
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
   });
   response.end(JSON.stringify(body));
@@ -34,7 +36,7 @@ const startJsonStream = (response) => {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
     'Access-Control-Allow-Origin': corsOrigin,
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
   });
 };
@@ -42,6 +44,13 @@ const startJsonStream = (response) => {
 const writeStreamEvent = (response, event) => {
   response.write(`${JSON.stringify(event)}\n`);
 };
+
+function getUser(request) {
+  const auth = request.headers.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!token) return null;
+  return verifyJwt(token);
+}
 
 const server = createServer(async (request, response) => {
   if (request.method === 'OPTIONS') {
@@ -52,9 +61,60 @@ const server = createServer(async (request, response) => {
   if (request.url === '/api/health') {
     sendJson(response, 200, {
       ok: true,
-      provider: 'ollama',
-      model: process.env.OLLAMA_MODEL || 'llama3.2:latest',
+      provider: process.env.AI_PROVIDER || 'ollama',
+      model: process.env.AI_PROVIDER && process.env.AI_PROVIDER !== 'ollama'
+        ? process.env.AI_MODEL
+        : process.env.OLLAMA_MODEL || 'llama3.2:latest',
     });
+    return;
+  }
+
+  if (request.url === '/api/auth/signup' && request.method === 'POST') {
+    try {
+      const body = await readJsonBody(request);
+      const result = await handleSignup(body);
+      sendJson(response, result.status, result.body);
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
+    }
+    return;
+  }
+
+  if (request.url === '/api/auth/login' && request.method === 'POST') {
+    try {
+      const body = await readJsonBody(request);
+      const result = await handleLogin(body);
+      sendJson(response, result.status, result.body);
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
+    }
+    return;
+  }
+
+  if (request.url?.startsWith('/api/auth/verify') && request.method === 'POST') {
+    try {
+      const body = await readJsonBody(request);
+      const result = await handleVerifyEmail(body.token);
+      sendJson(response, result.status, result.body);
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
+    }
+    return;
+  }
+
+  if (request.url === '/api/auth/me' && request.method === 'GET') {
+    try {
+      const result = await handleMe(request);
+      sendJson(response, result.status, result.body);
+    } catch (error) {
+      sendJson(response, 500, { error: error.message });
+    }
+    return;
+  }
+
+  const user = getUser(request);
+  if (!user) {
+    sendJson(response, 401, { error: 'Authentication required.' });
     return;
   }
 
@@ -149,6 +209,13 @@ const server = createServer(async (request, response) => {
   sendJson(response, 404, { error: 'Not found.' });
 });
 
-server.listen(port, host, () => {
-  console.log(`Prompt-to-PCB API listening on http://${host}:${port}`);
-});
+initDb()
+  .then(() => {
+    server.listen(port, host, () => {
+      console.log(`Prompt-to-PCB API listening on http://${host}:${port}`);
+    });
+  })
+  .catch((error) => {
+    console.error('Failed to initialize database:', error);
+    process.exit(1);
+  });

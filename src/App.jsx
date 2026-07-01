@@ -21,6 +21,8 @@ import {
   rerouteAffectedNets,
   routeDiagramWire,
 } from './lib/schematicLayout.js';
+import { AuthProvider, useAuth, HomePage, LoginPage, SignupPage, VerifyPage } from './auth.jsx';
+import './auth.css';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -1102,6 +1104,11 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
 }
 
 function App() {
+  const { user, loading, logout } = useAuth();
+  const authHeaders = () => ({
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${localStorage.getItem('pcb_token')}`,
+  });
   const [chatStore, setChatStore] = useState(loadChatStore);
   const [diagramTool, setDiagramTool] = useState('select');
   const [diagramSelection, setDiagramSelection] = useState(null);
@@ -1112,7 +1119,11 @@ function App() {
   const [resizingAxis, setResizingAxis] = useState(null);
   const [chatPanelView, setChatPanelView] = useState('conversation');
   const [page, setPage] = useState(() => {
-    if (window.location.hash === '#waveform') return 'waveform';
+    const hash = window.location.hash;
+    if (hash.startsWith('#verify')) return 'verify';
+    if (hash === '#login') return 'login';
+    if (hash === '#signup') return 'signup';
+    if (hash === '#waveform') return 'waveform';
     return 'workspace';
   });
   const [generatingChatId, setGeneratingChatId] = useState(null);
@@ -1216,7 +1227,20 @@ function App() {
 
   useEffect(() => {
     const syncPageFromHash = () => {
-      if (window.location.hash === '#waveform') {
+      const hash = window.location.hash;
+      if (hash.startsWith('#verify')) {
+        setPage('verify');
+        return;
+      }
+      if (hash === '#login') {
+        setPage('login');
+        return;
+      }
+      if (hash === '#signup') {
+        setPage('signup');
+        return;
+      }
+      if (hash === '#waveform') {
         setPage('waveform');
         return;
       }
@@ -1448,7 +1472,7 @@ function App() {
     try {
       const response = await fetch(`${API_BASE}/api/generate-circuit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({
           prompt: submittedPrompt,
           messages: buildConversationContext(priorMessages),
@@ -1533,9 +1557,9 @@ function App() {
     setSimulationError('');
 
     try {
-      const response = await fetch('/api/simulate-circuit', {
+      const response = await fetch(`${API_BASE}/api/simulate-circuit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({ circuit: result.circuit, spice: editableSpice }),
       });
       const data = await response.json();
@@ -1984,6 +2008,18 @@ function App() {
     );
   };
 
+  if (loading) return <div className="loading-screen">Loading...</div>;
+
+  if (page === 'home') return <HomePage />;
+  if (page === 'login') return <LoginPage />;
+  if (page === 'signup') return <SignupPage />;
+  if (page === 'verify') return <VerifyPage />;
+
+  if (!user) {
+    window.location.hash = 'login';
+    return null;
+  }
+
   if (page === 'waveform') {
     return (
       <main className="app-shell waveform-page-shell">
@@ -2028,6 +2064,10 @@ function App() {
 
   return (
     <main className="app-shell">
+      <div className="user-bar app-user-bar">
+        <span>{user.email}</span>
+        <button type="button" onClick={logout}>Log out</button>
+      </div>
       <section className="workspace">
         <aside className={`side-panel chat-panel-${chatPanelView}`}>
           {chatPanelView === 'history' ? (
@@ -2185,4 +2225,10 @@ function App() {
   );
 }
 
-export default App;
+export default function WrappedApp() {
+  return (
+    <AuthProvider>
+      <App />
+    </AuthProvider>
+  );
+}
