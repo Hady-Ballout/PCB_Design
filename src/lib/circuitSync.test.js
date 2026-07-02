@@ -320,8 +320,8 @@ V2 IN 0 DC 5
 
     expect(capacitorWires).toHaveLength(2);
     expect(capacitorWires.every((wire) => wire.points.length >= 2)).toBe(true);
-    expect(capacitorWires.every((wire) =>
-      afterRestore.diagram.netLabels.some((label) => label.id === wire.labelId))).toBe(true);
+    expect(capacitorWires.every((wire) => !wire.labelId)).toBe(true);
+    expect(afterRestore.diagram.netLabels).toHaveLength(0);
   });
 
   it('separates preserved component positions that collide', () => {

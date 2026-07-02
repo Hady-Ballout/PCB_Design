@@ -30,6 +30,40 @@ const validAiResponse = {
   spice: '* RC Filter\nR1 IN OUT 1k\n.end',
 };
 
+const opampCircuit = {
+  title: 'Op Amp Buffer',
+  type: 'opamp_buffer',
+  supplyVoltage: 5,
+  nodes: ['VINP', 'VINN', 'VOUT', 'VCC', '0'],
+  components: [
+    {
+      ref: 'XU1',
+      kind: 'opamp',
+      value: 'LM358',
+      nodes: ['VINP', 'VINN', 'VOUT', 'VCC', '0'],
+      footprint: 'Package_DIP:DIP-8_W7.62mm',
+    },
+  ],
+  notes: [],
+};
+
+const sourceCircuit = {
+  title: 'Source Test',
+  type: 'source_test',
+  supplyVoltage: 5,
+  nodes: ['VIN', '0'],
+  components: [
+    {
+      ref: 'V1',
+      kind: 'voltage_source',
+      value: '1V',
+      nodes: ['VIN', '0'],
+      footprint: '',
+    },
+  ],
+  notes: [],
+};
+
 const circuitWithLoad = {
   ...validCircuit,
   title: 'RC Filter With Load',
@@ -61,6 +95,15 @@ describe('Ollama circuit output', () => {
     expect(body.format).toEqual(AI_RESPONSE_SCHEMA);
     expect(body.format.properties.circuit).toEqual(CIRCUIT_SCHEMA);
     expect(body.options).toMatchObject({ num_ctx: 8192, num_predict: 2400, temperature: 0 });
+    expect(body.format.properties.circuit.properties.schematic).toBeTruthy();
+    expect(body.messages[0].content).toContain('opamp components must use value LM358');
+    expect(body.messages[0].content).toContain('Use voltage_source for DC supplies');
+    expect(body.messages[0].content).toContain('schematic');
+    expect(body.messages[1].content).toContain('A SPICE line like `V1 VIN 0 DC 1` must match a JSON `voltage_source`');
+    expect(body.messages[1].content).toContain('Schematic Intent Metadata');
+    expect(body.messages.at(-1).content).toContain('use LM358 as the SPICE subcircuit name');
+    expect(body.messages.at(-1).content).toContain('use voltage_source for DC values');
+    expect(body.messages.at(-1).content).toContain('schematic.externalTerminals');
   });
 
   it('orders memory, canonical design, recent turns, and the new request', () => {
@@ -117,6 +160,127 @@ describe('Ollama circuit output', () => {
     expect(parseCircuitResponse(JSON.stringify(validAiResponse))).toEqual(validAiResponse);
   });
 
+  it('accepts optional schematic intent metadata in AI responses', () => {
+    const response = parseCircuitResponse(JSON.stringify({
+      ...validAiResponse,
+      circuit: {
+        ...validCircuit,
+        schematic: {
+          version: 1,
+          topology: 'rc_filter',
+          primaryRef: '',
+          externalTerminals: [
+            { net: 'IN', label: 'VIN', type: 'input', side: 'left' },
+            { net: 'OUT', label: 'VOUT', type: 'output', side: 'right' },
+          ],
+          netRoles: [
+            { net: 'IN', role: 'input', side: 'left' },
+            { net: 'OUT', role: 'output', side: 'right' },
+          ],
+          componentRoles: [
+            { ref: 'R1', role: 'input_network', block: 'filter', side: 'left', orientation: 'horizontal', order: 1 },
+          ],
+          blocks: [
+            { id: 'filter', role: 'filter', refs: ['R1'], side: 'center', order: 1 },
+          ],
+        },
+      },
+    }));
+
+    expect(response.circuit.schematic.externalTerminals).toHaveLength(2);
+    expect(response.circuit.schematic.componentRoles[0]).toMatchObject({ ref: 'R1', role: 'input_network' });
+  });
+
+  it('normalizes generic op amp aliases to the canonical LM358 model', () => {
+    const response = parseCircuitResponse(JSON.stringify({
+      reply: 'I built an LM358 voltage follower around XU1.',
+      circuit: {
+        ...opampCircuit,
+        components: [{ ...opampCircuit.components[0], value: 'GENERIC' }],
+      },
+      spice: '* op amp\nXU1 VINP VINN VOUT VCC 0 OPAMP\n.end',
+    }));
+
+    expect(response.circuit.components.find((part) => part.ref === 'XU1').value).toBe('LM358');
+  });
+
+  it('accepts LM358 SPICE when the op amp JSON used an alias', () => {
+    const response = parseCircuitResponse(JSON.stringify({
+      reply: 'I built an LM358 voltage follower around XU1.',
+      circuit: {
+        ...opampCircuit,
+        components: [{ ...opampCircuit.components[0], value: 'OPAMP' }],
+      },
+      spice: '* op amp\nXU1 VINP VINN VOUT VCC 0 LM358\n.end',
+    }));
+
+    expect(response.circuit.components.find((part) => part.ref === 'XU1').value).toBe('LM358');
+  });
+
+  it('still rejects op amp SPICE when the nodes differ from the JSON circuit', () => {
+    expect(() => parseCircuitResponse(JSON.stringify({
+      reply: 'I built an LM358 voltage follower around XU1.',
+      circuit: {
+        ...opampCircuit,
+        components: [{ ...opampCircuit.components[0], value: 'GENERIC' }],
+      },
+      spice: '* wrong op amp output\nXU1 VINP VINN VDIFF VCC 0 OPAMP\n.end',
+    }))).toThrowError(expect.objectContaining({ code: 'spice_validation' }));
+  });
+
+  it('normalizes a DC V-source JSON signal_source to voltage_source', () => {
+    const response = parseCircuitResponse(JSON.stringify({
+      reply: 'I built a 1 V DC source at VIN.',
+      circuit: {
+        ...sourceCircuit,
+        components: [{
+          ...sourceCircuit.components[0],
+          kind: 'signal_source',
+          value: 'DC 1',
+        }],
+      },
+      spice: '* source\nV1 VIN 0 DC 1\n.end',
+    }));
+
+    const source = response.circuit.components.find((part) => part.ref === 'V1');
+    expect(source.kind).toBe('voltage_source');
+    expect(source.value).toBe('1V');
+  });
+
+  it('normalizes a waveform V-source JSON voltage_source to signal_source', () => {
+    const response = parseCircuitResponse(JSON.stringify({
+      reply: 'I built a sine source at VIN.',
+      circuit: {
+        ...sourceCircuit,
+        components: [{
+          ...sourceCircuit.components[0],
+          kind: 'voltage_source',
+          value: 'SINE(0 1 1k)',
+        }],
+      },
+      spice: '* source\nV1 VIN 0 SINE(0 1 1k)\n.end',
+    }));
+
+    const source = response.circuit.components.find((part) => part.ref === 'V1');
+    expect(source.kind).toBe('signal_source');
+    expect(source.value).toBe('SINE(0 1 1k)');
+  });
+
+  it('still rejects source SPICE when nodes differ from the JSON circuit', () => {
+    expect(() => parseCircuitResponse(JSON.stringify({
+      reply: 'I built a 1 V DC source at VIN.',
+      circuit: {
+        ...sourceCircuit,
+        components: [{
+          ...sourceCircuit.components[0],
+          kind: 'signal_source',
+          value: 'DC 1',
+        }],
+      },
+      spice: '* wrong source node\nV1 VWRONG 0 DC 1\n.end',
+    }))).toThrowError(expect.objectContaining({ code: 'spice_validation' }));
+  });
+
   it('classifies malformed and schema-invalid responses', () => {
     expect(() => parseCircuitResponse('{"title": broken}')).toThrowError(
       expect.objectContaining({ code: 'json_syntax' }),
@@ -131,6 +295,9 @@ describe('Ollama circuit output', () => {
       expect.objectContaining({ code: 'spice_validation' }),
     );
     expect(() => parseCircuitResponse(JSON.stringify({ reply: 'Here is the filter.', circuit: validCircuit, spice: 'R1 IN' }))).toThrowError(
+      expect.objectContaining({ code: 'spice_validation' }),
+    );
+    expect(() => parseCircuitResponse(JSON.stringify({ reply: 'Here is the filter.', circuit: validCircuit, spice: 'Y1 IN OUT 1k' }))).toThrowError(
       expect.objectContaining({ code: 'spice_validation' }),
     );
     expect(() => parseCircuitResponse(JSON.stringify({

@@ -108,7 +108,11 @@ describe('chat store', () => {
     expect(loaded.result.diagram.layoutVersion).toBe(LAYOUT_VERSION);
     expect(loaded.editedDiagram.layoutVersion).toBe(LAYOUT_VERSION);
     expect(loaded.editedDiagram.wires.every((wire) => wire.routingMode && Array.isArray(wire.points))).toBe(true);
-    expect(loaded.editedDiagram.netLabels).toHaveLength(loaded.editedDiagram.wires.length);
+    if (loaded.editedDiagram.layoutMode === 'fallback') {
+      expect(loaded.editedDiagram.netLabels).toHaveLength(loaded.editedDiagram.wires.length);
+    } else {
+      expect(loaded.editedDiagram.netLabels).toHaveLength(0);
+    }
     expect(loaded.editedDiagram.bridges).toEqual([]);
     expect(loaded.editedDiagram.junctions).toEqual([]);
   });

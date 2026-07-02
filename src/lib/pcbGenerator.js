@@ -28,6 +28,16 @@ export const validateCircuit = (circuit) => {
   const errors = [];
   const warnings = [];
   const nodeUse = new Map();
+  const externalTerminalNets = new Set(
+    (circuit.schematic?.externalTerminals || [])
+      .map((terminal) => String(terminal?.net || ''))
+      .filter(Boolean),
+  );
+  const explicitTestPointNets = new Set(
+    (circuit.schematic?.externalTerminals || [])
+      .filter((terminal) => /test|tp/i.test(String(terminal?.type || '')))
+      .map((terminal) => String(terminal.net || '')),
+  );
 
   for (const part of circuit.components) {
     if (!part.value) errors.push(`${part.ref} is missing a value.`);
@@ -42,7 +52,9 @@ export const validateCircuit = (circuit) => {
 
   if (!nodeUse.has('0')) errors.push('No ground node was generated.');
   for (const [node, count] of nodeUse.entries()) {
-    if (node !== '0' && count < 2) warnings.push(`${node} only connects to one pin and may be floating.`);
+    if (node !== '0' && count < 2 && !externalTerminalNets.has(node) && !explicitTestPointNets.has(node)) {
+      warnings.push(`${node} only connects to one pin and may be floating.`);
+    }
   }
 
   if (!circuit.supplyVoltage || circuit.supplyVoltage <= 0) errors.push('Supply voltage must be positive.');
@@ -345,6 +357,17 @@ const escapeXml = (value) =>
 
 const svgPolyline = (points) => points.map((point) => `${point.x},${point.y}`).join(' ');
 
+const bridgeSvg = (bridge) => {
+  const radius = bridge.radius || 7;
+  const path = bridge.orientation === 'vertical'
+    ? `M ${bridge.x} ${bridge.y - radius} C ${bridge.x + radius} ${bridge.y - radius} ${bridge.x + radius} ${bridge.y + radius} ${bridge.x} ${bridge.y + radius}`
+    : `M ${bridge.x - radius} ${bridge.y} C ${bridge.x - radius} ${bridge.y - radius} ${bridge.x + radius} ${bridge.y - radius} ${bridge.x + radius} ${bridge.y}`;
+  const clear = bridge.orientation === 'vertical'
+    ? `<line class="diagram-bridge-clear" x1="${bridge.x}" y1="${bridge.y - radius - 2}" x2="${bridge.x}" y2="${bridge.y + radius + 2}" />`
+    : `<line class="diagram-bridge-clear" x1="${bridge.x - radius - 2}" y1="${bridge.y}" x2="${bridge.x + radius + 2}" y2="${bridge.y}" />`;
+  return `<g class="diagram-bridge">${clear}<path class="diagram-bridge-arc" d="${path}" /></g>`;
+};
+
 const ROUTE_CLEARANCE = 16;
 const LEGACY_COMPONENT_CLEARANCE = 24;
 
@@ -464,6 +487,15 @@ export const buildCircuitDiagram = (circuit) => layoutCircuitDiagram(circuit);
 const renderGroundSvg = (x, y) =>
   `<g class="diagram-ground" aria-label="Ground"><circle class="diagram-node" cx="${x}" cy="${y}" r="4" /><line class="diagram-symbol" x1="${x}" y1="${y}" x2="${x}" y2="${y + 16}" /><line class="diagram-symbol" x1="${x - 18}" y1="${y + 16}" x2="${x + 18}" y2="${y + 16}" /><line class="diagram-symbol" x1="${x - 12}" y1="${y + 22}" x2="${x + 12}" y2="${y + 22}" /><line class="diagram-symbol" x1="${x - 6}" y1="${y + 28}" x2="${x + 6}" y2="${y + 28}" /></g>`;
 
+const renderPortSvg = (port) => {
+  const width = port.labelWidth || 58;
+  const height = 24;
+  const left = port.side === 'right' ? port.x + 10 : port.x - width - 10;
+  const y = port.y - height / 2;
+  const lineEnd = port.side === 'right' ? port.x + 10 : port.x - 10;
+  return `<g class="diagram-port" aria-label="${escapeXml(port.label)} port"><circle class="diagram-node" cx="${port.x}" cy="${port.y}" r="4" /><line class="diagram-symbol" x1="${port.x}" y1="${port.y}" x2="${lineEnd}" y2="${port.y}" /><rect class="diagram-net" x="${left}" y="${y}" width="${width}" height="${height}" rx="4" /><text class="diagram-small" x="${left + width / 2}" y="${y + 16}" text-anchor="middle">${escapeXml(port.label)}</text></g>`;
+};
+
 const renderSymbolSvg = (component) => {
   const { x, y, width, height, symbolType, orientation } = component;
   const left = x - width / 2;
@@ -540,13 +572,14 @@ export const toDiagramSvg = (diagram) => `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${diagram.width} ${diagram.height}" role="img">
   <title>${escapeXml(diagram.title)}</title>
   <style>
-    .diagram-bg{fill:#161e26}.diagram-wire,.diagram-symbol{fill:none;stroke:#94a3b5;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.diagram-wire{stroke:#637080;stroke-width:1.5}.diagram-fill{fill:#161e26;stroke:#94a3b5;stroke-width:2}.diagram-node{fill:#d4943a}.diagram-net{fill:#232b36;stroke:#364050}.diagram-text{fill:#d4943a;font:700 14px Inter,Arial,sans-serif}.diagram-small{fill:#94a3b5;font:12px Inter,Arial,sans-serif}.diagram-value{fill:#3ab4a8}.thin{stroke-width:1.5}
+    .diagram-bg{fill:#161e26}.diagram-wire,.diagram-symbol{fill:none;stroke:#94a3b5;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.diagram-wire{stroke:#637080;stroke-width:1.5}.diagram-bridge-clear{stroke:#161e26;stroke-width:7;stroke-linecap:round}.diagram-bridge-arc{fill:none;stroke:#637080;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}.diagram-fill{fill:#161e26;stroke:#94a3b5;stroke-width:2}.diagram-node{fill:#d4943a}.diagram-net{fill:#232b36;stroke:#364050}.diagram-text{fill:#d4943a;font:700 14px Inter,Arial,sans-serif}.diagram-small{fill:#94a3b5;font:12px Inter,Arial,sans-serif}.diagram-value{fill:#3ab4a8}.thin{stroke-width:1.5}
   </style>
   <rect class="diagram-bg" width="${diagram.width}" height="${diagram.height}" rx="8" />
   ${diagram.wires.map((wire) => {
     const points = diagramWirePoints(diagram, wire);
     return `<polyline class="diagram-wire" points="${svgPolyline(points)}" />`;
   }).join('\n  ')}
+  ${(diagram.bridges || []).map(bridgeSvg).join('\n  ')}
   ${(diagram.netLabels || []).map((label) => label.name === '0'
     ? renderGroundSvg(label.x, label.y)
     : `<g><rect class="diagram-net" x="${label.labelX}" y="${label.labelY}" width="${label.labelWidth}" height="26" rx="13" /><text class="diagram-small" x="${label.labelX + label.labelWidth / 2}" y="${label.labelY + 17}" text-anchor="middle">${escapeXml(label.name)}</text></g>`).join('\n  ')}
@@ -556,6 +589,7 @@ export const toDiagramSvg = (diagram) => `<?xml version="1.0" encoding="UTF-8"?>
     .filter(Boolean)
     .map((point) => [`${point.x}:${point.y}`, point])).values()]
     .map((point) => renderGroundSvg(point.x, point.y)).join('\n  ')}
+  ${(diagram.ports || []).map(renderPortSvg).join('\n  ')}
   ${(diagram.junctions || []).map((junction) => `<circle class="diagram-node" cx="${junction.x}" cy="${junction.y}" r="4" />`).join('\n  ')}
   ${diagram.components.map((component) => {
     const refLabel = diagram.labels?.find((label) => label.ref === component.ref && label.kind === 'ref');

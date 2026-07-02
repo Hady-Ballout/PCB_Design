@@ -48,6 +48,53 @@ const fixtures = [
   ]),
 ];
 
+const differenceAmplifier = circuit('Difference Amplifier', [
+  { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+  { ref: 'V2', kind: 'voltage_source', value: '2.5V', nodes: ['VBIAS', '0'] },
+  { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VINP', 'OPP'] },
+  { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['OPP', 'VBIAS'] },
+  { ref: 'R3', kind: 'resistor', value: '10k', nodes: ['VINN', 'OPN'] },
+  { ref: 'R4', kind: 'resistor', value: '10k', nodes: ['OPN', 'VBIAS'] },
+  { ref: 'XU1', kind: 'opamp', value: 'LM358', nodes: ['OPP', 'OPN', 'VOUT', 'VCC', '0'] },
+  { ref: 'RLOAD', kind: 'load', value: '10k', nodes: ['VOUT', '0'] },
+]);
+
+const testPathSegments = (points) => points.slice(1).map((point, index) => ({ from: points[index], to: point }));
+const testPointOnSegment = (point, segment) => (
+  segment.from.x === segment.to.x
+    ? point.x === segment.from.x
+      && point.y >= Math.min(segment.from.y, segment.to.y)
+      && point.y <= Math.max(segment.from.y, segment.to.y)
+    : point.y === segment.from.y
+      && point.x >= Math.min(segment.from.x, segment.to.x)
+      && point.x <= Math.max(segment.from.x, segment.to.x)
+);
+const testSegmentsTouch = (first, second) =>
+  [first.from, first.to].some((point) => testPointOnSegment(point, second))
+  || [second.from, second.to].some((point) => testPointOnSegment(point, first));
+
+const expectNodePhysicallyConnected = (diagram, node) => {
+  const wires = diagram.wires.filter((wire) => wire.node === node);
+  expect(wires.length).toBeGreaterThan(1);
+  const visited = new Set([wires[0].id]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const wire of wires) {
+      if (visited.has(wire.id)) continue;
+      const touchesVisited = wires
+        .filter((other) => visited.has(other.id))
+        .some((other) => testPathSegments(wire.points).some((segment) =>
+          testPathSegments(other.points).some((otherSegment) => testSegmentsTouch(segment, otherSegment))));
+      if (touchesVisited) {
+        visited.add(wire.id);
+        changed = true;
+      }
+    }
+  }
+  expect(visited.size).toBe(wires.length);
+};
+
 describe('schematic layout engine', () => {
   it.each(fixtures)('produces a valid deterministic layout for $title', (fixture) => {
     const first = layoutCircuitDiagram(fixture);
@@ -84,7 +131,7 @@ describe('schematic layout engine', () => {
     expect(types).toContain('out_of_bounds');
   });
 
-  it('rejects bridge crossings and uses one repeated label per automatic wire', () => {
+  it('validates crossings and routes shared nets as physical wire groups', () => {
     const crossed = {
       width: 300,
       height: 220,
@@ -98,18 +145,64 @@ describe('schematic layout engine', () => {
       bridges: [{ wireId: 'vertical', x: 150, y: 100, orientation: 'vertical', radius: 7 }],
       junctions: [],
     };
-    expect(validateDiagramLayout(crossed).violations).toContainEqual({
+    const unbridged = { ...crossed, bridges: [] };
+    expect(validateDiagramLayout(unbridged).violations).toContainEqual({
+      type: 'wire_wire_intersection',
+      wires: ['vertical', 'horizontal'],
+    });
+    expect(validateDiagramLayout(crossed).violations).not.toContainEqual({
       type: 'wire_wire_intersection',
       wires: ['vertical', 'horizontal'],
     });
 
     const dense = layoutCircuitDiagram(fixtures.at(-1));
-    expect(dense.junctions).toEqual([]);
-    expect(dense.bridges).toEqual([]);
-    expect(dense.netLabels).toHaveLength(dense.wires.length);
+    expect(dense.junctions.length).toBeGreaterThan(0);
+    expect(dense.netLabels).toHaveLength(0);
     expect(dense.wires.every((wire) => !wire.stub)).toBe(true);
-    expect(new Set(dense.netLabels.map((label) => label.id)).size).toBe(dense.netLabels.length);
-    expect(dense.wires.every((wire) => dense.netLabels.some((label) => label.id === wire.labelId))).toBe(true);
+    expect(dense.wires.every((wire) => !wire.labelId)).toBe(true);
+    expectNodePhysicallyConnected(dense, 'VCC');
+    expectNodePhysicallyConnected(dense, '0');
+  });
+
+  it('physically connects op amp signal, power, and ground nets', () => {
+    const diagram = layoutCircuitDiagram(fixtures[2]);
+
+    expect(diagram.netLabels).toHaveLength(0);
+    ['NIN', 'OUT', 'VCC', '0'].forEach((node) => expectNodePhysicallyConnected(diagram, node));
+    expect(diagram.junctions.length).toBeGreaterThan(0);
+    expect(validateDiagramLayout(diagram)).toEqual({ ok: true, violations: [] });
+  });
+
+  it('physically routes a generated difference amplifier without net labels', () => {
+    const diagram = layoutCircuitDiagram(differenceAmplifier);
+
+    expect(diagram.netLabels).toHaveLength(0);
+    expect(diagram.wires.every((wire) => wire.points.length >= 2 && !wire.labelId)).toBe(true);
+    ['VBIAS', 'OPP', 'OPN', 'VCC', 'VOUT', '0'].forEach((node) => expectNodePhysicallyConnected(diagram, node));
+    expect(validateDiagramLayout(diagram)).toEqual({ ok: true, violations: [] });
+  });
+
+  it('renders schematic external terminals as visual ports', () => {
+    const diagram = layoutCircuitDiagram({
+      ...fixtures[0],
+      schematic: {
+        version: 1,
+        topology: 'rc_filter',
+        externalTerminals: [
+          { net: 'VIN', label: 'VIN', type: 'input', side: 'left', explicit: true },
+          { net: 'OUT', label: 'VOUT', type: 'output', side: 'right', explicit: true },
+        ],
+        netRoles: [
+          { net: 'VIN', role: 'input', side: 'left' },
+          { net: 'OUT', role: 'output', side: 'right' },
+        ],
+      },
+    });
+
+    expect(diagram.ports.map((port) => port.net).sort()).toEqual(['OUT', 'VIN']);
+    expect(diagram.wires.filter((wire) => wire.portId)).toHaveLength(2);
+    expectNodePhysicallyConnected(diagram, 'OUT');
+    expect(validateDiagramLayout(diagram)).toEqual({ ok: true, violations: [] });
   });
 
   it('reports near-parallel wires that violate the 16px clearance', () => {

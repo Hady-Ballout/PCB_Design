@@ -1137,6 +1137,20 @@ pre {
   stroke-width: 4;
 }
 
+.diagram-bridge-clear {
+  stroke: #fbfbf7;
+  stroke-linecap: round;
+  stroke-width: 7;
+}
+
+.diagram-bridge-arc {
+  fill: none;
+  stroke: #617066;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
 .diagram-fill {
   fill: #ffffff;
   stroke: #17201a;
@@ -1635,6 +1649,14 @@ pre,
 }
 
 .diagram-wire {
+  stroke: var(--color-text-muted);
+}
+
+.diagram-bridge-clear {
+  stroke: var(--color-diagram-bg);
+}
+
+.diagram-bridge-arc {
   stroke: var(--color-text-muted);
 }
 

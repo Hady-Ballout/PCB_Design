@@ -41,6 +41,25 @@ Use only this top-level structure unless the application schema changes:
       "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
     }
   ],
+  "schematic": {
+    "version": 1,
+    "topology": "voltage_divider",
+    "primaryRef": "",
+    "externalTerminals": [
+      { "net": "VOUT", "label": "VOUT", "type": "output", "side": "right" }
+    ],
+    "netRoles": [
+      { "net": "VCC", "role": "supply", "side": "top" },
+      { "net": "VOUT", "role": "output", "side": "right" },
+      { "net": "0", "role": "ground", "side": "bottom" }
+    ],
+    "componentRoles": [
+      { "ref": "R1", "role": "upper_divider", "block": "divider", "side": "center", "orientation": "vertical", "order": 1, "pinRoles": { "1": "supply", "2": "output" } }
+    ],
+    "blocks": [
+      { "id": "divider", "role": "signal_conditioning", "refs": ["R1"], "side": "center", "order": 1 }
+    ]
+  },
   "notes": ["Short useful note."]
 }
 ```
@@ -63,6 +82,28 @@ Allowed component kinds:
 - `load`
 
 Do not invent additional component kinds.
+
+## Schematic Intent Metadata
+
+Use optional `schematic` metadata to help the layout engine draw a human-readable schematic. This metadata is visual/layout intent only; it must not add SPICE lines or change `components`.
+
+- `version` should be `1`.
+- `topology` should name the recognizable circuit pattern, such as `difference_amplifier`, `voltage_divider`, `rc_filter`, `opamp_buffer`, or `transistor_switch`.
+- `primaryRef` should identify the central component for circuits built around one part, such as `XU1` for an op amp.
+- `externalTerminals` should list intentional user-facing ports such as `VIN`, `VINP`, `VINN`, `VOUT`, `CTRL`, or test points, with `side` set to `left`, `right`, `top`, or `bottom`.
+- `netRoles` should classify important nets as `input`, `output`, `feedback`, `bias`, `supply`, `ground`, or `internal`.
+- `componentRoles` should classify parts as `primary`, `input_network`, `feedback`, `bias_network`, `load`, `source`, `supply`, or another concise role.
+- `blocks` should group related parts, such as `input_network`, `feedback_network`, `output_load`, or `power`.
+
+For op-amp schematics, prefer:
+
+- input terminals on the left,
+- output terminal on the right,
+- feedback parts above or around the op amp,
+- load parts to the right or lower-right,
+- supply rail above and ground below.
+
+Single-connection nodes are allowed only when they are intentional external terminals or test points and are listed in `schematic.externalTerminals`.
 
 ## Component Node Order
 
@@ -105,17 +146,20 @@ For a single-supply op amp, connect the negative-supply node to `"0"`.
 - BJTs start with `Q`.
 - MOSFETs start with `M`.
 - Op amps and other subcircuits start with `X`, for example `XU1`.
+- Op amps must use `LM358` as the JSON `value` and as the SPICE subcircuit/model name. Do not use `GENERIC` or `OPAMP` for op amp values.
 - Regulators represented as subcircuits should start with `X`, for example `XREG1`.
 - Loads should normally be represented electrically as resistive loads and use an `R` reference such as `RLOAD`.
 - Use compact SPICE-friendly values such as `220`, `1k`, `4.7k`, `10k`, `1Meg`, `100nF`, `1uF`, `10uF`, `5V`, and `SINE(0 1 1k)`.
 - Use `1Meg` rather than `1M` when one megaohm is intended.
+- Use `voltage_source` for DC supplies and fixed DC input biases. A SPICE line like `V1 VIN 0 DC 1` must match a JSON `voltage_source`.
+- Use `signal_source` only for waveform or time-varying sources such as `SINE(...)`, `PULSE(...)`, `PWL(...)`, `EXP(...)`, or `AC`.
 
 ## Circuit Sanity Checklist
 
 Before returning a circuit, verify:
 
 - The output is valid JSON with double quotes, no comments, and no trailing commas.
-- No unsupported fields are included.
+- No unsupported fields are included except the optional `schematic` metadata described above.
 - `title`, `type`, numeric `supplyVoltage`, `nodes`, `components`, and `notes` are present.
 - Every component has `ref`, `kind`, `value`, `nodes`, and `footprint`.
 - Every `kind` is supported.
@@ -199,6 +243,7 @@ Inverting gain: `gain = -Rf/Rin`.
 - Use feedback for linear amplifiers.
 - Do not request output beyond the rails.
 - For single-supply AC circuits, bias around a midpoint reference when needed.
+- Use `LM358` for the op amp component value and for the final token of the `XU1 ... LM358` SPICE line.
 
 ### 5 V to 3.3 V Regulator
 

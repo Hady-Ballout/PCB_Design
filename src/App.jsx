@@ -763,6 +763,38 @@ function GroundSymbol({ x, y }) {
   );
 }
 
+function PortSymbol({ port }) {
+  const width = port.labelWidth || 58;
+  const height = 24;
+  const left = port.side === 'right' ? port.x + 10 : port.x - width - 10;
+  const y = port.y - height / 2;
+  const lineEnd = port.side === 'right' ? port.x + 10 : port.x - 10;
+  return (
+    <g className="diagram-port" pointerEvents="none" aria-label={`${port.label} port`}>
+      <circle className="diagram-node" cx={port.x} cy={port.y} r="4" />
+      <line className="diagram-symbol" x1={port.x} y1={port.y} x2={lineEnd} y2={port.y} />
+      <rect className="diagram-net" x={left} y={y} width={width} height={height} rx="4" />
+      <text className="diagram-small" x={left + width / 2} y={y + 16} textAnchor="middle">{port.label}</text>
+    </g>
+  );
+}
+
+function BridgeSymbol({ bridge }) {
+  const radius = bridge.radius || 7;
+  const path = bridge.orientation === 'vertical'
+    ? `M ${bridge.x} ${bridge.y - radius} C ${bridge.x + radius} ${bridge.y - radius} ${bridge.x + radius} ${bridge.y + radius} ${bridge.x} ${bridge.y + radius}`
+    : `M ${bridge.x - radius} ${bridge.y} C ${bridge.x - radius} ${bridge.y - radius} ${bridge.x + radius} ${bridge.y - radius} ${bridge.x + radius} ${bridge.y}`;
+  const clear = bridge.orientation === 'vertical'
+    ? { x1: bridge.x, y1: bridge.y - radius - 2, x2: bridge.x, y2: bridge.y + radius + 2 }
+    : { x1: bridge.x - radius - 2, y1: bridge.y, x2: bridge.x + radius + 2, y2: bridge.y };
+  return (
+    <g className="diagram-bridge" pointerEvents="none">
+      <line className="diagram-bridge-clear" {...clear} />
+      <path className="diagram-bridge-arc" d={path} />
+    </g>
+  );
+}
+
 function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTerminal, onPendingTerminal }) {
   const [drag, setDrag] = useState(null);
   const [wirePointer, setWirePointer] = useState(null);
@@ -1022,6 +1054,9 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
             />
           );
         })}
+        {(diagram.bridges || []).map((bridge, index) => (
+          <BridgeSymbol bridge={bridge} key={`${bridge.wireId}-${bridge.x}-${bridge.y}-${index}`} />
+        ))}
         {pendingWireStart && wirePointer && (
           <polyline
             className="diagram-wire pending"
@@ -1047,6 +1082,9 @@ function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pendingTe
         ))}
         {fallbackGroundSymbols.map((point) => (
           <GroundSymbol key={`fallback-ground-${point.x}-${point.y}`} x={point.x} y={point.y} />
+        ))}
+        {(diagram.ports || []).map((port) => (
+          <PortSymbol key={port.id} port={port} />
         ))}
         {(diagram.junctions || []).map((junction) => (
           <circle

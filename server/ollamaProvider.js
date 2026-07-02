@@ -10,6 +10,7 @@ The "circuit" field is the canonical structured circuit.
 The "spice" field is a SPICE netlist generated from the same circuit.
 Use node "0" for ground.
 Every component needs ref, kind, value, nodes, and footprint.
+The circuit may include optional "schematic" metadata for layout intent. Schematic metadata is visual only and must not add SPICE components.
 Allowed component kinds: resistor, capacitor, inductor, diode, led, bjt_npn, bjt_pnp, mosfet_n, mosfet_p, opamp, regulator, voltage_source, signal_source, load.
 Component refs must be SPICE-compatible because the program will simulate them with Ngspice:
 - resistor refs start with R, e.g. R1
@@ -20,10 +21,77 @@ Component refs must be SPICE-compatible because the program will simulate them w
 - bjt refs start with Q, e.g. Q1
 - mosfet refs start with M, e.g. M1
 - opamp/subcircuit refs start with X, e.g. XU1
+- opamp components must use value LM358 in JSON and LM358 as the SPICE subcircuit name; do not use GENERIC or OPAMP.
 - load refs should be modeled as resistors and start with R, e.g. RLOAD
 - regulator refs may use U in the JSON, but include enough surrounding passives/load nodes for simulation.
 Use simple Ngspice-friendly values such as 1k, 100nF, 10uF, 5V, and SINE(0 1 1k).
+Use voltage_source for DC supplies and fixed DC input biases. Use signal_source only for waveform or time-varying sources such as SINE(...), PULSE(...), PWL(...), EXP(...), or AC.
+If SPICE uses "V... ... DC value", the matching JSON component kind must be voltage_source. If SPICE uses a waveform source, the matching JSON component kind must be signal_source.
 The SPICE netlist must use the exact same component refs, values, and node names as circuit.components.`;
+
+const SCHEMATIC_SCHEMA = {
+  type: 'object',
+  properties: {
+    version: { type: 'number' },
+    topology: { type: 'string' },
+    primaryRef: { type: 'string' },
+    externalTerminals: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          net: { type: 'string' },
+          label: { type: 'string' },
+          type: { type: 'string' },
+          side: { type: 'string', enum: ['left', 'right', 'top', 'bottom'] },
+        },
+        required: ['net', 'label', 'type', 'side'],
+      },
+    },
+    netRoles: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          net: { type: 'string' },
+          role: { type: 'string' },
+          side: { type: 'string', enum: ['left', 'right', 'top', 'bottom', 'center'] },
+        },
+        required: ['net', 'role'],
+      },
+    },
+    componentRoles: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          ref: { type: 'string' },
+          role: { type: 'string' },
+          block: { type: 'string' },
+          side: { type: 'string', enum: ['left', 'right', 'top', 'bottom', 'center'] },
+          orientation: { type: 'string', enum: ['horizontal', 'vertical'] },
+          order: { type: 'number' },
+          pinRoles: { type: 'object' },
+        },
+        required: ['ref', 'role'],
+      },
+    },
+    blocks: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          role: { type: 'string' },
+          refs: { type: 'array', items: { type: 'string' } },
+          side: { type: 'string', enum: ['left', 'right', 'top', 'bottom', 'center'] },
+          order: { type: 'number' },
+        },
+        required: ['id', 'role', 'refs'],
+      },
+    },
+  },
+};
 
 export const CIRCUIT_SCHEMA = {
   type: 'object',
@@ -66,6 +134,7 @@ export const CIRCUIT_SCHEMA = {
       },
     },
     notes: { type: 'array', items: { type: 'string' } },
+    schematic: SCHEMATIC_SCHEMA,
   },
   required: ['title', 'type', 'supplyVoltage', 'nodes', 'components', 'notes'],
 };
@@ -162,6 +231,9 @@ export function validateCircuitResponse(circuit) {
   if (!Array.isArray(circuit.notes) || circuit.notes.some((note) => typeof note !== 'string')) {
     errors.push('notes must be an array of strings');
   }
+  if (circuit.schematic !== undefined && !isPlainObject(circuit.schematic)) {
+    errors.push('schematic must be an object when present');
+  }
   if (!Array.isArray(circuit.components) || circuit.components.length === 0) {
     errors.push('components must be a non-empty array');
   } else {
@@ -185,14 +257,66 @@ export function validateCircuitResponse(circuit) {
   return errors;
 }
 
-const normalizeSignatureValue = (value) => String(value || '').trim().toUpperCase();
+const OPAMP_MODEL = 'LM358';
+const OPAMP_MODEL_ALIASES = new Set(['', 'GENERIC', 'OPAMP', 'UNKNOWN']);
+
+const normalizeOpampModel = (value) => {
+  const normalized = String(value || '').trim().toUpperCase();
+  return OPAMP_MODEL_ALIASES.has(normalized) || normalized === OPAMP_MODEL ? OPAMP_MODEL : normalized;
+};
+
+const isSourceKind = (kind) => kind === 'voltage_source' || kind === 'signal_source';
+
+const voltageValue = (value) => {
+  const text = String(value || '').trim();
+  return /v$/i.test(text) ? text : `${text}V`;
+};
+
+const sourceExpressionKind = (value) => {
+  const expression = String(value || '').trim();
+  if (/^(SINE|SIN|PULSE|PWL|EXP|AC)\b/i.test(expression)) return 'signal_source';
+  if (/^DC\b/i.test(expression)) return 'voltage_source';
+  if (/^[+-]?\d+(?:\.\d+)?(?:[munpfkKMegG]+)?V?$/i.test(expression)) return 'voltage_source';
+  return null;
+};
+
+const normalizeSourceComponent = (component) => {
+  if (!isSourceKind(component.kind)) return component;
+  const expression = String(component.value || '').trim();
+  const kind = sourceExpressionKind(expression) || component.kind;
+  const dcMatch = expression.match(/^DC\s+(.+)$/i);
+  if (kind === 'voltage_source') {
+    return {
+      ...component,
+      kind,
+      value: voltageValue(dcMatch ? dcMatch[1] : expression),
+    };
+  }
+  return { ...component, kind, value: expression };
+};
+
+export const normalizeCircuitForValidation = (circuit) => ({
+  ...circuit,
+  components: (circuit.components || []).map((component) => {
+    const normalizedSource = normalizeSourceComponent(component);
+    return normalizedSource.kind === 'opamp'
+      ? { ...normalizedSource, value: OPAMP_MODEL }
+      : normalizedSource;
+  }),
+});
+
+const normalizeSignatureValue = (component) => (
+  component.kind === 'opamp'
+    ? normalizeOpampModel(component.value)
+    : String(component.value || '').trim().toUpperCase()
+);
 
 const electricalSignature = (circuit) => (
   circuit?.components || []
 ).map((component) => ({
   ref: String(component.ref || '').toUpperCase(),
   kind: String(component.kind || ''),
-  value: normalizeSignatureValue(component.value),
+  value: normalizeSignatureValue(component),
   nodes: (component.nodes || []).map((node) => String(node)),
 })).sort((a, b) => a.ref.localeCompare(b.ref));
 
@@ -277,9 +401,10 @@ export function parseCircuitResponse(text) {
       `AI circuit did not match the required schema: ${validationErrors.slice(0, 4).join('; ')}.`,
     );
   }
-  validateAiSpice(responseObject.spice, circuit);
+  const normalizedCircuit = normalizeCircuitForValidation(circuit);
+  validateAiSpice(responseObject.spice, normalizedCircuit);
 
-  return { reply, circuit, spice: responseObject.spice };
+  return { reply, circuit: normalizedCircuit, spice: responseObject.spice };
 }
 
 const positiveIntegerOption = (value, fallback) => {
@@ -343,8 +468,13 @@ export const buildOllamaRequestBody = (
       {
         role: 'user',
         content: `Return this exact JSON shape with real circuit values:
-{"reply":"I built a concise explanation of the circuit or edit for the user.","circuit":{"title":"...","type":"...","supplyVoltage":5,"nodes":["0"],"components":[{"ref":"R1","kind":"resistor","value":"1k","nodes":["A","0"],"footprint":"Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"}],"notes":["..."]},"spice":"* Example\\nR1 A 0 1k\\n.end"}
+{"reply":"I built a concise explanation of the circuit or edit for the user.","circuit":{"title":"...","type":"...","supplyVoltage":5,"nodes":["0"],"components":[{"ref":"R1","kind":"resistor","value":"1k","nodes":["A","0"],"footprint":"Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"}],"schematic":{"version":1,"topology":"...","primaryRef":"XU1","externalTerminals":[{"net":"VIN","label":"VIN","type":"input","side":"left"},{"net":"VOUT","label":"VOUT","type":"output","side":"right"}],"netRoles":[{"net":"VIN","role":"input","side":"left"},{"net":"VOUT","role":"output","side":"right"},{"net":"0","role":"ground","side":"bottom"}],"componentRoles":[{"ref":"R1","role":"input_network","block":"input","side":"left","orientation":"horizontal","order":1,"pinRoles":{"1":"input","2":"output"}}],"blocks":[{"id":"input","role":"input_network","refs":["R1"],"side":"left","order":1}]},"notes":["..."]},"spice":"* Example\\nR1 A 0 1k\\n.end"}
 Use SPICE-safe component refs. For example, an LED must be {"ref":"DLED1","kind":"led",...}, not {"ref":"LED1",...}.
+For op amps, use {"ref":"XU1","kind":"opamp","value":"LM358",...} and use LM358 as the SPICE subcircuit name; never use GENERIC or OPAMP.
+For sources, use voltage_source for DC values and signal_source only for waveform values like SINE(...), PULSE(...), PWL(...), EXP(...), or AC.
+Use schematic metadata to describe human schematic intent: primary op amp/component, input/output ports, feedback networks, load groups, power rails, and preferred sides/orientations.
+Mark intentional single-pin user connections such as VINP, VINN, VIN, VOUT, CTRL, or test points in schematic.externalTerminals. Do not mark accidental floating internal nets as external terminals.
+Schematic metadata is visual only. Do not create extra SPICE lines for externalTerminals, netRoles, componentRoles, or blocks.
 The SPICE field must describe the same circuit.components entries using the same refs, values, and node names.
 The reply field should sound like a helpful chat assistant: briefly explain what changed, mention relevant refs, and do not paste the netlist.
 Circuit prompt: ${prompt}
