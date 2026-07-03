@@ -10,7 +10,7 @@ The "circuit" field is the canonical structured circuit.
 The "spice" field is a SPICE netlist generated from the same circuit.
 Use node "0" for ground.
 Every component needs ref, kind, value, nodes, and footprint.
-The circuit may include optional "schematic" metadata for layout intent. Schematic metadata is visual only and must not add SPICE components.
+The circuit may include optional compact "schematic" metadata for layout intent. Omit schematic unless it is needed to mark external terminals or an op amp primaryRef. Schematic metadata is visual only and must not add SPICE components.
 Allowed component kinds: resistor, capacitor, inductor, diode, led, bjt_npn, bjt_pnp, mosfet_n, mosfet_p, opamp, regulator, voltage_source, signal_source, load.
 Component refs must be SPICE-compatible because the program will simulate them with Ngspice:
 - resistor refs start with R, e.g. R1
@@ -412,6 +412,25 @@ const positiveIntegerOption = (value, fallback) => {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
 
+const providerConfig = () => {
+  const provider = String(process.env.AI_PROVIDER || 'ollama').toLowerCase();
+  if (provider === 'ollama') {
+    return {
+      provider,
+      baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
+      model: process.env.OLLAMA_MODEL || 'llama3.2:latest',
+      apiKey: process.env.OLLAMA_API_KEY || '',
+    };
+  }
+
+  return {
+    provider,
+    baseUrl: process.env.AI_API_URL || '',
+    model: process.env.AI_MODEL || '',
+    apiKey: process.env.AI_API_KEY || '',
+  };
+};
+
 export const buildOllamaRequestBody = (
   prompt,
   history,
@@ -441,10 +460,9 @@ export const buildOllamaRequestBody = (
 
   const correctionMessages = correction
     ? [
-        { role: 'assistant', content: String(correction.content || '').slice(0, 8000) },
         {
           role: 'user',
-          content: `Your previous response was rejected: ${correction.error}. Return the complete response again as one valid JSON object with top-level "reply", "circuit", and "spice". The reply must be conversational and concise. The SPICE must exactly match the JSON circuit refs, values, and node names. Do not explain the correction and do not use Markdown outside the JSON.`,
+          content: `Your previous response was rejected: ${correction.error}. Return a smaller complete response as one valid JSON object with top-level "reply", "circuit", and "spice". Omit circuit.schematic unless it is essential for external terminals or op amp intent. The reply must be conversational and concise. The SPICE must exactly match the JSON circuit refs, values, and node names. Do not explain the correction and do not use Markdown outside the JSON.`,
         },
       ]
     : [];
@@ -456,7 +474,7 @@ export const buildOllamaRequestBody = (
     format: AI_RESPONSE_SCHEMA,
     options: {
       num_ctx: positiveIntegerOption(process.env.OLLAMA_NUM_CTX, 8192),
-      num_predict: positiveIntegerOption(process.env.OLLAMA_NUM_PREDICT, 2400),
+      num_predict: positiveIntegerOption(process.env.OLLAMA_NUM_PREDICT, 4096),
       temperature: 0,
     },
     messages: [
@@ -467,14 +485,13 @@ export const buildOllamaRequestBody = (
       ...conversation,
       {
         role: 'user',
-        content: `Return this exact JSON shape with real circuit values:
-{"reply":"I built a concise explanation of the circuit or edit for the user.","circuit":{"title":"...","type":"...","supplyVoltage":5,"nodes":["0"],"components":[{"ref":"R1","kind":"resistor","value":"1k","nodes":["A","0"],"footprint":"Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"}],"schematic":{"version":1,"topology":"...","primaryRef":"XU1","externalTerminals":[{"net":"VIN","label":"VIN","type":"input","side":"left"},{"net":"VOUT","label":"VOUT","type":"output","side":"right"}],"netRoles":[{"net":"VIN","role":"input","side":"left"},{"net":"VOUT","role":"output","side":"right"},{"net":"0","role":"ground","side":"bottom"}],"componentRoles":[{"ref":"R1","role":"input_network","block":"input","side":"left","orientation":"horizontal","order":1,"pinRoles":{"1":"input","2":"output"}}],"blocks":[{"id":"input","role":"input_network","refs":["R1"],"side":"left","order":1}]},"notes":["..."]},"spice":"* Example\\nR1 A 0 1k\\n.end"}
+        content: `Return this exact compact JSON shape with real circuit values:
+{"reply":"I built a concise explanation of the circuit or edit for the user.","circuit":{"title":"...","type":"...","supplyVoltage":5,"nodes":["VIN","VOUT","0"],"components":[{"ref":"R1","kind":"resistor","value":"1k","nodes":["VIN","VOUT"],"footprint":"Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"}],"notes":["..."]},"spice":"* Example\\nR1 VIN VOUT 1k\\n.end"}
 Use SPICE-safe component refs. For example, an LED must be {"ref":"DLED1","kind":"led",...}, not {"ref":"LED1",...}.
 For op amps, use {"ref":"XU1","kind":"opamp","value":"LM358",...} and use LM358 as the SPICE subcircuit name; never use GENERIC or OPAMP.
 For sources, use voltage_source for DC values and signal_source only for waveform values like SINE(...), PULSE(...), PWL(...), EXP(...), or AC.
-Use schematic metadata to describe human schematic intent: primary op amp/component, input/output ports, feedback networks, load groups, power rails, and preferred sides/orientations.
-Mark intentional single-pin user connections such as VINP, VINN, VIN, VOUT, CTRL, or test points in schematic.externalTerminals. Do not mark accidental floating internal nets as external terminals.
-Schematic metadata is visual only. Do not create extra SPICE lines for externalTerminals, netRoles, componentRoles, or blocks.
+Only include circuit.schematic when it adds essential layout intent. Keep it compact: use primaryRef for op amps and externalTerminals for intentional single-pin user connections such as VINP, VINN, VIN, VOUT, CTRL, or test points. Omit netRoles, componentRoles, and blocks unless the user request truly needs them.
+Schematic metadata is visual only. Do not create extra SPICE lines for schematic fields.
 The SPICE field must describe the same circuit.components entries using the same refs, values, and node names.
 The reply field should sound like a helpful chat assistant: briefly explain what changed, mention relevant refs, and do not paste the netlist.
 Circuit prompt: ${prompt}
@@ -485,11 +502,13 @@ This is a follow-up whenever canonical design context is present. Preserve all p
   };
 };
 
-const ollamaHeaders = () => {
+const authHeaders = (apiKey = '') => {
   const headers = { 'Content-Type': 'application/json' };
-  if (process.env.OLLAMA_API_KEY) headers.Authorization = `Bearer ${process.env.OLLAMA_API_KEY}`;
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
   return headers;
 };
+
+const ollamaHeaders = () => authHeaders(process.env.OLLAMA_API_KEY);
 
 const retryableOutputCodes = new Set([
   'json_missing',
@@ -521,7 +540,104 @@ const parseWithCorrectionRetry = async (requestAttempt) => {
 
 const ollamaUrl = () => `${(process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '')}/api/chat`;
 
+const isZaiProvider = (provider) => new Set(['zai', 'zhipu', 'bigmodel']).has(provider);
+
+const shouldUseJsonResponseFormat = () => process.env.AI_RESPONSE_FORMAT !== 'text';
+
+const buildOpenAiCompatibleBody = (config, ollamaBody) => ({
+  model: config.model,
+  temperature: ollamaBody.options.temperature,
+  max_tokens: positiveIntegerOption(process.env.AI_MAX_TOKENS, isZaiProvider(config.provider) ? 12000 : 4096),
+  ...(shouldUseJsonResponseFormat() ? { response_format: { type: 'json_object' } } : {}),
+  ...(isZaiProvider(config.provider)
+    ? {
+        thinking: { type: process.env.ZAI_THINKING_TYPE || 'disabled' },
+        reasoning_effort: process.env.ZAI_REASONING_EFFORT || 'none',
+      }
+    : {}),
+  messages: ollamaBody.messages,
+});
+
+const openAiCompatibleHeaders = (config) => {
+  const headers = authHeaders(config.apiKey);
+  if (config.provider === 'openrouter') {
+    headers['HTTP-Referer'] = 'https://pcb-pilot.web.app';
+    headers['X-Title'] = 'PCB Pilot';
+  }
+  return headers;
+};
+
+const openAiCompatibleUrl = (config) => {
+  if (!config.baseUrl) throw new Error('AI_API_URL is not set.');
+  if (!config.model) throw new Error('AI_MODEL is not set.');
+  if (!config.apiKey) throw new Error('AI_API_KEY is not set.');
+  return `${config.baseUrl.replace(/\/$/, '')}/chat/completions`;
+};
+
+const stringifyContentPart = (part) => {
+  if (typeof part === 'string') return part;
+  if (!isPlainObject(part)) return '';
+  if (typeof part.text === 'string') return part.text;
+  if (typeof part.content === 'string') return part.content;
+  if (typeof part.output_text === 'string') return part.output_text;
+  return '';
+};
+
+const readOpenAiCompatibleContent = (data) => {
+  const choice = data?.choices?.[0] || data?.data?.choices?.[0];
+  const message = choice?.message || choice?.delta || choice;
+  const content = message?.content ?? data?.output_text ?? data?.content;
+
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) return content.map(stringifyContentPart).join('');
+  if (isPlainObject(content)) return stringifyContentPart(content);
+  return '';
+};
+
+const compactResponsePreview = (data) => JSON.stringify(data)
+  .replace(/"content"\s*:\s*"[^"]{120,}"/g, '"content":"<long content omitted>"')
+  .replace(/"reasoning_content"\s*:\s*"[^"]{120,}"/g, '"reasoning_content":"<long reasoning omitted>"')
+  .slice(0, 500);
+
+const providerContentError = (config, data) => {
+  const choice = data?.choices?.[0] || data?.data?.choices?.[0];
+  const finishReason = choice?.finish_reason;
+  if (finishReason === 'length') {
+    return new CircuitGenerationError(
+      'provider_response',
+      `${config.provider} stopped because max_tokens was exhausted before returning final JSON. Increase AI_MAX_TOKENS or keep ZAI_THINKING_TYPE=disabled. Response preview: ${compactResponsePreview(data)}`,
+    );
+  }
+  return new CircuitGenerationError(
+    'provider_response',
+    `${config.provider} returned no assistant content. Response preview: ${compactResponsePreview(data)}`,
+  );
+};
+
+async function callOpenAiCompatible(config, prompt, history, currentDesign, memory, correction) {
+  const ollamaBody = buildOllamaRequestBody(prompt, history, false, currentDesign, memory, correction);
+  const response = await fetch(openAiCompatibleUrl(config), {
+    method: 'POST',
+    headers: openAiCompatibleHeaders(config),
+    body: JSON.stringify(buildOpenAiCompatibleBody(config, ollamaBody)),
+  });
+
+  if (!response.ok) throw new Error(`${config.provider} returned ${response.status}: ${await response.text()}`);
+  const data = await response.json();
+  const content = readOpenAiCompatibleContent(data);
+  if (!content) {
+    throw providerContentError(config, data);
+  }
+  return content;
+}
+
 export async function generateCircuitWithOllama(prompt, history = [], currentDesign = null, memory = null) {
+  const config = providerConfig();
+  if (config.provider !== 'ollama') {
+    return parseWithCorrectionRetry((correction) =>
+      callOpenAiCompatible(config, prompt, history, currentDesign, memory, correction));
+  }
+
   return parseWithCorrectionRetry(async (correction) => {
     const response = await fetch(ollamaUrl(), {
       method: 'POST',
@@ -542,6 +658,15 @@ export async function streamCircuitWithOllama(
   onContent = () => {},
   memory = null,
 ) {
+  const config = providerConfig();
+  if (config.provider !== 'ollama') {
+    return parseWithCorrectionRetry(async (correction, attempt) => {
+      const content = await callOpenAiCompatible(config, prompt, history, currentDesign, memory, correction);
+      onContent(content, { attempt, correcting: attempt > 0 });
+      return content;
+    });
+  }
+
   return parseWithCorrectionRetry(async (correction, attempt) => {
     const response = await fetch(ollamaUrl(), {
       method: 'POST',

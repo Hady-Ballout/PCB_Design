@@ -1102,9 +1102,27 @@ export const buildFallbackCircuitDiagram = (circuit, options = {}) => {
   const stubLength = GRID_SIZE * 2;
   const netLabels = [];
   const wires = draft.wires.map((wire) => {
+    if (wire.portId) {
+      const port = draft.ports.find((item) => item.id === wire.portId);
+      if (!port) return null;
+      const anchor = {
+        left: { x: port.x + stubLength, y: port.y },
+        right: { x: port.x - stubLength, y: port.y },
+        top: { x: port.x, y: port.y + stubLength },
+        bottom: { x: port.x, y: port.y - stubLength },
+      }[port.side] || { x: port.x + stubLength, y: port.y };
+      return {
+        ...wire,
+        routingMode: 'fallback',
+        points: [
+          { x: port.x, y: port.y },
+          anchor,
+        ],
+      };
+    }
     const component = draft.components.find((item) => item.ref === wire.ref);
     const pin = component?.pins.find((item) => item.pinIndex === wire.pin);
-    if (!component || !pin) return { ...wire, points: [] };
+    if (!component || !pin) return null;
     const direction = pinSide(component, pin);
     const labelWidth = wire.node === '0' ? 36 : textWidth(wire.node);
     const anchor = {
@@ -1141,7 +1159,7 @@ export const buildFallbackCircuitDiagram = (circuit, options = {}) => {
         { x: anchor.x, y: anchor.y },
       ],
     };
-  });
+  }).filter(Boolean);
   const bounds = [
     ...draft.components.map((component) => componentBounds(component)),
     ...draft.labels.map((label) => labelBounds(label)),
@@ -1176,6 +1194,11 @@ export const buildFallbackCircuitDiagram = (circuit, options = {}) => {
     ...wire,
     points: (wire.points || []).map(movePoint),
   }));
+  const shiftedPorts = draft.ports.map((port) => ({
+    ...port,
+    x: port.x + shiftX,
+    y: port.y + shiftY,
+  }));
   const shiftedNets = draft.nets.map((net) => ({
     ...net,
     ...(Number.isFinite(net.x) && Number.isFinite(net.y) ? movePoint(net) : {}),
@@ -1197,6 +1220,7 @@ export const buildFallbackCircuitDiagram = (circuit, options = {}) => {
     components,
     labels,
     nets: shiftedNets,
+    ports: shiftedPorts,
     netLabels: shiftedNetLabels,
     wires: shiftedWires,
     junctions: [],

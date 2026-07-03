@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DiagramLayoutError,
   LAYOUT_VERSION,
+  buildFallbackCircuitDiagram,
   findNearestLegalPlacement,
   layoutCircuitDiagram,
   repairDiagramLayout,
@@ -203,6 +204,23 @@ describe('schematic layout engine', () => {
     expect(diagram.wires.filter((wire) => wire.portId)).toHaveLength(2);
     expectNodePhysicallyConnected(diagram, 'OUT');
     expect(validateDiagramLayout(diagram)).toEqual({ ok: true, violations: [] });
+  });
+
+  it('builds fallback port stubs without empty wires', () => {
+    const diagram = buildFallbackCircuitDiagram({
+      ...fixtures[0],
+      schematic: {
+        externalTerminals: [
+          { net: 'VIN', label: 'VIN', type: 'input', side: 'left', explicit: true },
+          { net: 'OUT', label: 'OUT', type: 'output', side: 'right', explicit: true },
+        ],
+      },
+    });
+
+    expect(diagram.layoutMode).toBe('fallback');
+    expect(diagram.ports.map((port) => port.net).sort()).toEqual(['OUT', 'VIN']);
+    expect(diagram.wires.every((wire) => wire.points.length >= 2)).toBe(true);
+    expect(diagram.wires.filter((wire) => wire.portId)).toHaveLength(2);
   });
 
   it('reports near-parallel wires that violate the 16px clearance', () => {

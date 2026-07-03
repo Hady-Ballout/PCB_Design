@@ -1,4 +1,6 @@
 import {
+  DiagramLayoutError,
+  buildFallbackCircuitDiagram,
   buildCircuitDiagram,
   simulateCircuit,
   toDiagramSvg,
@@ -253,12 +255,25 @@ export function reconcileCircuitRevision(aiCircuit, prompt, existingCircuit = nu
   };
 }
 
-export function buildCircuitResponse(circuit, intent, source) {
+const buildInitialDiagram = (circuit, buildDiagram = buildCircuitDiagram) => {
+  try {
+    return buildDiagram(circuit);
+  } catch (error) {
+    if (!(error instanceof DiagramLayoutError)) throw error;
+    return {
+      ...buildFallbackCircuitDiagram(circuit),
+      layoutError: error.message,
+      layoutViolations: error.violations || [],
+    };
+  }
+};
+
+export function buildCircuitResponse(circuit, intent, source, options = {}) {
   const enrichedCircuit = {
     ...circuit,
     schematic: normalizeSchematicHints(circuit),
   };
-  const diagram = buildCircuitDiagram(enrichedCircuit);
+  const diagram = buildInitialDiagram(enrichedCircuit, options.buildDiagram);
   return {
     intent,
     circuit: enrichedCircuit,

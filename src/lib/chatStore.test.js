@@ -39,6 +39,24 @@ describe('chat store', () => {
     expect(loadChatStore(storage)).toMatchObject({ activeChatId: 'chat-1', chats: [{ id: 'chat-1' }] });
   });
 
+  it('hydrates editable circuit JSON from saved results', () => {
+    const storage = memoryStorage();
+    const circuit = {
+      title: 'JSON visible circuit',
+      type: 'debug',
+      supplyVoltage: 5,
+      components: [{ ref: 'R1', kind: 'resistor', value: '1k', footprint: '', nodes: ['A', '0'] }],
+      notes: [],
+    };
+    const chat = {
+      ...createChat({ id: 'json-chat', now: 10 }),
+      result: { circuit, diagram: null, spice: '', kicadNetlist: '' },
+    };
+    storage.setItem(CHAT_STORAGE_KEY, JSON.stringify({ chats: [chat], activeChatId: chat.id }));
+
+    expect(loadChatStore(storage).chats[0].editableCircuitJson).toContain('"ref": "R1"');
+  });
+
   it('builds compact AI context from prior user prompts and generated circuits', () => {
     const messages = [
       { role: 'user', content: 'Make a filter' },

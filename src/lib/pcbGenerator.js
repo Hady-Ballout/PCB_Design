@@ -1,6 +1,7 @@
 import {
   COMPONENT_CLEARANCE,
   DiagramLayoutError,
+  buildFallbackCircuitDiagram,
   diagramComponentsOverlap,
   findNearestLegalPlacement,
   layoutCircuitDiagram,
@@ -14,6 +15,7 @@ import {
 export {
   COMPONENT_CLEARANCE,
   DiagramLayoutError,
+  buildFallbackCircuitDiagram,
   diagramComponentsOverlap,
   findNearestLegalPlacement,
   layoutCircuitDiagram,

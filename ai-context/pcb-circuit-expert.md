@@ -41,25 +41,6 @@ Use only this top-level structure unless the application schema changes:
       "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
     }
   ],
-  "schematic": {
-    "version": 1,
-    "topology": "voltage_divider",
-    "primaryRef": "",
-    "externalTerminals": [
-      { "net": "VOUT", "label": "VOUT", "type": "output", "side": "right" }
-    ],
-    "netRoles": [
-      { "net": "VCC", "role": "supply", "side": "top" },
-      { "net": "VOUT", "role": "output", "side": "right" },
-      { "net": "0", "role": "ground", "side": "bottom" }
-    ],
-    "componentRoles": [
-      { "ref": "R1", "role": "upper_divider", "block": "divider", "side": "center", "orientation": "vertical", "order": 1, "pinRoles": { "1": "supply", "2": "output" } }
-    ],
-    "blocks": [
-      { "id": "divider", "role": "signal_conditioning", "refs": ["R1"], "side": "center", "order": 1 }
-    ]
-  },
   "notes": ["Short useful note."]
 }
 ```
@@ -85,15 +66,13 @@ Do not invent additional component kinds.
 
 ## Schematic Intent Metadata
 
-Use optional `schematic` metadata to help the layout engine draw a human-readable schematic. This metadata is visual/layout intent only; it must not add SPICE lines or change `components`.
+Use optional, compact `schematic` metadata only when it adds important layout intent that cannot be derived from component refs and node names. The application derives rich schematic defaults after generation, so most simple circuits should omit `schematic`. This metadata is visual/layout intent only; it must not add SPICE lines or change `components`.
 
 - `version` should be `1`.
 - `topology` should name the recognizable circuit pattern, such as `difference_amplifier`, `voltage_divider`, `rc_filter`, `opamp_buffer`, or `transistor_switch`.
 - `primaryRef` should identify the central component for circuits built around one part, such as `XU1` for an op amp.
 - `externalTerminals` should list intentional user-facing ports such as `VIN`, `VINP`, `VINN`, `VOUT`, `CTRL`, or test points, with `side` set to `left`, `right`, `top`, or `bottom`.
-- `netRoles` should classify important nets as `input`, `output`, `feedback`, `bias`, `supply`, `ground`, or `internal`.
-- `componentRoles` should classify parts as `primary`, `input_network`, `feedback`, `bias_network`, `load`, `source`, `supply`, or another concise role.
-- `blocks` should group related parts, such as `input_network`, `feedback_network`, `output_load`, or `power`.
+- Omit `netRoles`, `componentRoles`, and `blocks` unless the user request truly requires explicit layout grouping.
 
 For op-amp schematics, prefer:
 

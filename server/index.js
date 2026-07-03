@@ -13,6 +13,12 @@ loadEnv();
 const port = Number(process.env.PORT || process.env.API_PORT || 8787);
 const host = process.env.HOST || '127.0.0.1';
 const corsOrigin = process.env.CORS_ORIGIN || 'http://127.0.0.1:5173';
+const aiProviderName = () => process.env.AI_PROVIDER || 'ollama';
+const aiModelName = () => (
+  process.env.AI_PROVIDER && process.env.AI_PROVIDER !== 'ollama'
+    ? process.env.AI_MODEL
+    : process.env.OLLAMA_MODEL || 'llama3.2:latest'
+);
 
 const sendJson = (response, status, body) => {
   response.writeHead(status, {
@@ -61,10 +67,8 @@ const server = createServer(async (request, response) => {
   if (request.url === '/api/health') {
     sendJson(response, 200, {
       ok: true,
-      provider: process.env.AI_PROVIDER || 'ollama',
-      model: process.env.AI_PROVIDER && process.env.AI_PROVIDER !== 'ollama'
-        ? process.env.AI_MODEL
-        : process.env.OLLAMA_MODEL || 'llama3.2:latest',
+      provider: aiProviderName(),
+      model: aiModelName(),
     });
     return;
   }
@@ -168,7 +172,7 @@ const server = createServer(async (request, response) => {
       writeStreamEvent(response, {
         type: 'complete',
         data: {
-          ...buildCircuitResponse(circuit, { rawPrompt: prompt, type: circuit.type }, 'ollama'),
+          ...buildCircuitResponse(circuit, { rawPrompt: prompt, type: circuit.type }, aiProviderName()),
           reply: aiResponse.reply,
           memory: updatedMemory,
           ...(process.env.OLLAMA_CONTEXT_DIAGNOSTICS === '1' ? { contextDiagnostics } : {}),

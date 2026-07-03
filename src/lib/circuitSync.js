@@ -113,6 +113,102 @@ const spiceRefForComponent = (component) => {
 
 const voltageValue = (value) => (/v$/i.test(value) ? value : `${value}V`);
 
+const allowedCircuitKinds = new Set([
+  'resistor',
+  'capacitor',
+  'inductor',
+  'diode',
+  'led',
+  'bjt_npn',
+  'bjt_pnp',
+  'mosfet_n',
+  'mosfet_p',
+  'opamp',
+  'regulator',
+  'voltage_source',
+  'signal_source',
+  'load',
+]);
+
+export const parseCircuitJson = (source, baseCircuit = null) => {
+  let parsed;
+  try {
+    parsed = JSON.parse(String(source || ''));
+  } catch (error) {
+    return { ok: false, errors: [`JSON syntax error: ${error.message}`] };
+  }
+
+  const candidate = parsed?.circuit && typeof parsed.circuit === 'object' ? parsed.circuit : parsed;
+  const errors = [];
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    return { ok: false, errors: ['JSON must contain a circuit object.'] };
+  }
+  if (!Array.isArray(candidate.components) || candidate.components.length === 0) {
+    errors.push('Circuit JSON must include a non-empty components array.');
+  }
+  if (candidate.components?.some((component) => !component || typeof component !== 'object' || Array.isArray(component))) {
+    errors.push('Every component must be an object.');
+  }
+
+  const components = Array.isArray(candidate.components)
+    ? candidate.components
+      .filter((component) => component && typeof component === 'object' && !Array.isArray(component))
+      .map((component, index) => {
+        const label = `components[${index}]`;
+        if (typeof component.ref !== 'string' || !component.ref.trim()) errors.push(`${label}.ref must be a non-empty string.`);
+        if (!allowedCircuitKinds.has(component.kind)) errors.push(`${label}.kind is not supported.`);
+        if (typeof component.value !== 'string') errors.push(`${label}.value must be a string.`);
+        if (!Array.isArray(component.nodes) || component.nodes.length === 0) {
+          errors.push(`${label}.nodes must be a non-empty array.`);
+        } else if (component.nodes.some((node) => typeof node !== 'string' || !node.trim())) {
+          errors.push(`${label}.nodes must contain non-empty strings.`);
+        }
+        return {
+          ...component,
+          ref: String(component.ref || '').toUpperCase(),
+          kind: String(component.kind || ''),
+          value: String(component.value || ''),
+          footprint: String(component.footprint || ''),
+          nodes: Array.isArray(component.nodes) ? component.nodes.map(String) : [],
+        };
+      })
+    : [];
+
+  const duplicateRefs = components
+    .map((component) => component.ref)
+    .filter((ref, index, refs) => refs.indexOf(ref) !== index);
+  if (duplicateRefs.length) errors.push(`Component ${duplicateRefs[0]} is declared more than once.`);
+  if (candidate.supplyVoltage !== undefined && !Number.isFinite(Number(candidate.supplyVoltage))) {
+    errors.push('supplyVoltage must be a number.');
+  }
+  if (candidate.nodes !== undefined && (!Array.isArray(candidate.nodes) || candidate.nodes.some((node) => typeof node !== 'string'))) {
+    errors.push('nodes must be an array of strings when present.');
+  }
+  if (candidate.notes !== undefined && (!Array.isArray(candidate.notes) || candidate.notes.some((note) => typeof note !== 'string'))) {
+    errors.push('notes must be an array of strings when present.');
+  }
+  if (candidate.schematic !== undefined && (!candidate.schematic || typeof candidate.schematic !== 'object' || Array.isArray(candidate.schematic))) {
+    errors.push('schematic must be an object when present.');
+  }
+  if (errors.length) return { ok: false, errors };
+
+  const componentNodes = [...new Set(components.flatMap((component) => component.nodes))];
+  return {
+    ok: true,
+    errors: [],
+    circuit: {
+      ...(baseCircuit || {}),
+      title: String(candidate.title || baseCircuit?.title || 'JSON synchronized circuit'),
+      type: String(candidate.type || baseCircuit?.type || 'custom'),
+      supplyVoltage: Number(candidate.supplyVoltage ?? baseCircuit?.supplyVoltage ?? 5) || 5,
+      nodes: Array.isArray(candidate.nodes) && candidate.nodes.length ? candidate.nodes.map(String) : componentNodes,
+      components,
+      notes: Array.isArray(candidate.notes) ? candidate.notes.map(String) : baseCircuit?.notes || [],
+      ...(candidate.schematic ? { schematic: candidate.schematic } : {}),
+    },
+  };
+};
+
 export const parseSpiceNetlist = (source, baseCircuit) => {
   const baseComponents = baseCircuit?.components || [];
   const baseBySpiceRef = new Map(baseComponents.map((component) => [spiceRefForComponent(component), component]));

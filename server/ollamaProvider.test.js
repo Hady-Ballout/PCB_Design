@@ -84,8 +84,14 @@ const streamResponse = (content) => new Response(
   { status: 200, headers: { 'Content-Type': 'application/x-ndjson' } },
 );
 
+const openAiResponse = (content) => new Response(
+  JSON.stringify({ choices: [{ message: { content } }] }),
+  { status: 200, headers: { 'Content-Type': 'application/json' } },
+);
+
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe('Ollama circuit output', () => {
@@ -94,16 +100,18 @@ describe('Ollama circuit output', () => {
 
     expect(body.format).toEqual(AI_RESPONSE_SCHEMA);
     expect(body.format.properties.circuit).toEqual(CIRCUIT_SCHEMA);
-    expect(body.options).toMatchObject({ num_ctx: 8192, num_predict: 2400, temperature: 0 });
+    expect(body.options).toMatchObject({ num_ctx: 8192, num_predict: 4096, temperature: 0 });
     expect(body.format.properties.circuit.properties.schematic).toBeTruthy();
     expect(body.messages[0].content).toContain('opamp components must use value LM358');
     expect(body.messages[0].content).toContain('Use voltage_source for DC supplies');
-    expect(body.messages[0].content).toContain('schematic');
+    expect(body.messages[0].content).toContain('Omit schematic unless');
     expect(body.messages[1].content).toContain('A SPICE line like `V1 VIN 0 DC 1` must match a JSON `voltage_source`');
     expect(body.messages[1].content).toContain('Schematic Intent Metadata');
     expect(body.messages.at(-1).content).toContain('use LM358 as the SPICE subcircuit name');
     expect(body.messages.at(-1).content).toContain('use voltage_source for DC values');
-    expect(body.messages.at(-1).content).toContain('schematic.externalTerminals');
+    expect(body.messages.at(-1).content).toContain('Only include circuit.schematic');
+    expect(body.messages.at(-1).content).toContain('Omit netRoles, componentRoles, and blocks');
+    expect(body.messages.at(-1).content).not.toContain('"schematic":{"version"');
   });
 
   it('orders memory, canonical design, recent turns, and the new request', () => {
@@ -322,10 +330,26 @@ describe('Ollama circuit output', () => {
     expect(firstBody.format).toEqual(AI_RESPONSE_SCHEMA);
     expect(retryBody.messages.at(-1).content).toContain('previous response was rejected');
     expect(retryBody.messages.at(-1).content).toContain('top-level "reply", "circuit", and "spice"');
+    expect(retryBody.messages.at(-1).content).toContain('smaller complete response');
     expect(onContent).toHaveBeenLastCalledWith(
       JSON.stringify(validAiResponse),
       expect.objectContaining({ attempt: 1, correcting: true }),
     );
+  });
+
+  it('does not resend truncated JSON content during correction retry', async () => {
+    const longTruncatedContent = `{"reply":"${'partial response '.repeat(200)}"`;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(longTruncatedContent))
+      .mockResolvedValueOnce(streamResponse(JSON.stringify(validAiResponse)));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(streamCircuitWithOllama('Make an RC filter')).resolves.toEqual(validAiResponse);
+
+    const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(retryBody.messages.some((message) => message.role === 'assistant')).toBe(false);
+    expect(retryBody.messages.map((message) => message.content).join('\n')).not.toContain('partial response partial response');
+    expect(retryBody.messages.at(-1).content).toContain('Omit circuit.schematic unless');
   });
 
   it('retries once when AI SPICE does not match the JSON circuit', async () => {
@@ -353,6 +377,70 @@ describe('Ollama circuit output', () => {
     await expect(streamCircuitWithOllama('Make a filter')).rejects.toMatchObject({
       code: 'json_syntax',
       message: expect.stringContaining('after one automatic correction attempt'),
+    });
+  });
+
+  it('uses the OpenAI-compatible endpoint for Z.ai with JSON mode and thinking disabled', async () => {
+    vi.stubEnv('AI_PROVIDER', 'zai');
+    vi.stubEnv('AI_API_URL', 'https://open.bigmodel.cn/api/paas/v4');
+    vi.stubEnv('AI_MODEL', 'glm-5.2');
+    vi.stubEnv('AI_API_KEY', 'test-key');
+    const fetchMock = vi.fn().mockResolvedValueOnce(openAiResponse(JSON.stringify(validAiResponse)));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(streamCircuitWithOllama('Make an RC filter')).resolves.toEqual(validAiResponse);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer test-key' }),
+      }),
+    );
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toMatchObject({
+      model: 'glm-5.2',
+      max_tokens: 12000,
+      response_format: { type: 'json_object' },
+      thinking: { type: 'disabled' },
+      reasoning_effort: 'none',
+    });
+  });
+
+  it('reads array-style OpenAI-compatible assistant content', async () => {
+    vi.stubEnv('AI_PROVIDER', 'zai');
+    vi.stubEnv('AI_API_URL', 'https://open.bigmodel.cn/api/paas/v4');
+    vi.stubEnv('AI_MODEL', 'glm-5.2');
+    vi.stubEnv('AI_API_KEY', 'test-key');
+    const fetchMock = vi.fn().mockResolvedValueOnce(openAiResponse([
+      { type: 'text', text: JSON.stringify(validAiResponse) },
+    ]));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(streamCircuitWithOllama('Make an RC filter')).resolves.toEqual(validAiResponse);
+  });
+
+  it('reports length-stopped Z.ai reasoning output as an output budget problem', async () => {
+    vi.stubEnv('AI_PROVIDER', 'zai');
+    vi.stubEnv('AI_API_URL', 'https://open.bigmodel.cn/api/paas/v4');
+    vi.stubEnv('AI_MODEL', 'glm-5.2');
+    vi.stubEnv('AI_API_KEY', 'test-key');
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(
+      JSON.stringify({
+        choices: [{
+          finish_reason: 'length',
+          message: {
+            content: '',
+            reasoning_content: 'The user wants a difference amplifier circuit. '.repeat(20),
+          },
+        }],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(streamCircuitWithOllama('Make a difference amplifier')).rejects.toMatchObject({
+      code: 'provider_response',
+      message: expect.stringContaining('max_tokens was exhausted'),
     });
   });
 });

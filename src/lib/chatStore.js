@@ -37,12 +37,14 @@ export const createChat = ({ id = createId(), now = Date.now() } = {}) => ({
   pendingSpiceChange: null,
   editableKicadNetlist: '',
   pendingKicadChange: null,
+  editableCircuitJson: '',
   editedDiagram: null,
   simulationRun: null,
   error: '',
   simulationError: '',
   spiceSyncError: '',
   kicadSyncError: '',
+  circuitJsonSyncError: '',
 });
 
 export const chatTitleFromPrompt = (prompt) => {
@@ -105,6 +107,7 @@ const normalizeChat = (chat) => {
           proposed: String(chat.pendingKicadChange.proposed || ''),
         }
       : null,
+    editableCircuitJson: String(chat.editableCircuitJson || (chat.result?.circuit ? JSON.stringify(chat.result.circuit, null, 2) : '')),
     editedDiagram: chat.editedDiagram && typeof chat.editedDiagram === 'object'
       ? migrateDiagram(chat.editedDiagram, chat.result?.circuit)
       : null,
@@ -113,6 +116,7 @@ const normalizeChat = (chat) => {
     simulationError: '',
     spiceSyncError: '',
     kicadSyncError: '',
+    circuitJsonSyncError: '',
   };
 };
 

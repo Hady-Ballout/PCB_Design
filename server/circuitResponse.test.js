@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildCircuitResponse, normalizeAiCircuit, normalizeSchematicHints, reconcileCircuitRevision } from './circuitResponse.js';
+import { DiagramLayoutError } from '../src/lib/pcbGenerator.js';
 
 const differenceAmplifier = {
   title: 'Difference Amplifier',
@@ -104,8 +105,38 @@ describe('circuit revisions', () => {
     expect(response.diagram.layoutMode).toBeUndefined();
     expect(response.diagram.netLabels).toHaveLength(0);
     expect(response.circuit.schematic.primaryRef).toBe('XU1');
+    expect(response.circuit.schematic.externalTerminals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ net: 'VINP', type: 'input', side: 'left' }),
+      expect.objectContaining({ net: 'VINN', type: 'input', side: 'left' }),
+    ]));
     expect(response.diagram.ports.map((port) => port.net).sort()).toEqual(['VINN', 'VINP']);
     expect(response.diagram.wires.every((wire) => wire.points.length >= 2 && !wire.labelId)).toBe(true);
+    expect(response.diagramSvg).toContain('<svg');
+    expect(response.diagramSvg).toContain('class="diagram-port"');
+    expect(response.spice).toContain('XU1 OPP OPN VOUT VCC 0 LM358');
+    expect(response.kicadNetlist).toContain('name="VBIAS"');
+    expect(response.validation.ok).toBe(true);
+  });
+
+  it('falls back to labeled nets when generated schematic routing fails', () => {
+    const response = buildCircuitResponse(
+      differenceAmplifier,
+      { rawPrompt: 'design a difference amplifier', type: 'amplifier' },
+      'test',
+      {
+        buildDiagram: () => {
+          throw new DiagramLayoutError('Unable to create a collision-free schematic after 9 routing attempts.', [
+            { type: 'route_failed', wire: 'XU1-1-OPP' },
+          ]);
+        },
+      },
+    );
+
+    expect(response.diagram.layoutMode).toBe('fallback');
+    expect(response.diagram.layoutWarning).toContain('labeled nets');
+    expect(response.diagram.layoutError).toContain('collision-free schematic');
+    expect(response.diagram.layoutViolations).toEqual([expect.objectContaining({ type: 'route_failed' })]);
+    expect(response.diagram.wires.every((wire) => wire.points.length >= 2)).toBe(true);
     expect(response.diagramSvg).toContain('<svg');
     expect(response.spice).toContain('XU1 OPP OPN VOUT VCC 0 LM358');
     expect(response.kicadNetlist).toContain('name="VBIAS"');

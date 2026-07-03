@@ -3,6 +3,7 @@ import { buildCircuitDiagram, toKiCadNetlist, toSpice } from './pcbGenerator.js'
 import {
   circuitElectricalSignature,
   circuitFromDiagram,
+  parseCircuitJson,
   parseKiCadNetlist,
   parseSpiceNetlist,
   preserveDiagramLayout,
@@ -34,6 +35,36 @@ describe('circuit editor synchronization', () => {
       nodes: ['VIN', 'FILTERED'],
     });
     expect(parsed.circuit.components.find((part) => part.ref === 'C1').nodes).toEqual(['FILTERED', '0']);
+  });
+
+  it('parses circuit JSON edits back into the synchronized circuit', () => {
+    const editedJson = JSON.stringify({
+      ...circuit,
+      components: circuit.components.map((part) =>
+        part.ref === 'R1' ? { ...part, value: '4.7k', nodes: ['VIN', 'FILTERED'] } : part.ref === 'C1' ? { ...part, nodes: ['FILTERED', '0'] } : part,
+      ),
+    });
+    const parsed = parseCircuitJson(editedJson, circuit);
+
+    expect(parsed.ok).toBe(true);
+    expect(parsed.circuit.components.find((part) => part.ref === 'R1')).toMatchObject({
+      value: '4.7k',
+      nodes: ['VIN', 'FILTERED'],
+    });
+    const synchronized = synchronizeResult({ intent: {} }, parsed.circuit, buildCircuitDiagram(circuit));
+    expect(synchronized.spice).toContain('R1 VIN FILTERED 4.7k');
+    expect(synchronized.diagram.components.find((part) => part.ref === 'R1').value).toBe('4.7k');
+  });
+
+  it('pauses JSON synchronization for malformed or invalid circuit JSON', () => {
+    expect(parseCircuitJson('{ broken', circuit)).toMatchObject({
+      ok: false,
+      errors: [expect.stringContaining('JSON syntax error')],
+    });
+    expect(parseCircuitJson(JSON.stringify({ ...circuit, components: [] }), circuit)).toMatchObject({
+      ok: false,
+      errors: [expect.stringContaining('components array')],
+    });
   });
 
   it('parses SPICE value and connectivity edits back into the canvas circuit', () => {

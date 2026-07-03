@@ -9,6 +9,7 @@ import {
 import {
   circuitElectricalSignature,
   circuitFromDiagram,
+  parseCircuitJson,
   parseKiCadNetlist,
   parseSpiceNetlist,
   synchronizeResult,
@@ -56,6 +57,7 @@ const formatChatTime = (timestamp) => {
 
 const EDITOR_VIEW_LABELS = {
   spice: 'Spice',
+  json: 'JSON',
   canvas: 'Canvas',
 };
 
@@ -1176,12 +1178,14 @@ function App() {
   const pendingSpiceChange = activeChat?.pendingSpiceChange || null;
   const editableKicadNetlist = activeChat?.editableKicadNetlist || '';
   const pendingKicadChange = activeChat?.pendingKicadChange || null;
+  const editableCircuitJson = activeChat?.editableCircuitJson || '';
   const editedDiagram = activeChat?.editedDiagram || null;
   const simulationRun = activeChat?.simulationRun || null;
   const error = activeChat?.error || '';
   const simulationError = activeChat?.simulationError || '';
   const spiceSyncError = activeChat?.spiceSyncError || '';
   const kicadSyncError = activeChat?.kicadSyncError || '';
+  const circuitJsonSyncError = activeChat?.circuitJsonSyncError || '';
   const isGenerating = generatingChatId === activeChat?.id;
   const generationBusy = Boolean(generatingChatId);
   const sortedChats = useMemo(
@@ -1211,6 +1215,7 @@ function App() {
   };
   const setPrompt = (value) => setChatField('draft', value);
   const setEditableSpice = (value) => setChatField('editableSpice', value);
+  const setEditableCircuitJson = (value) => setChatField('editableCircuitJson', value);
   const setEditedDiagram = (value) => setChatField('editedDiagram', value);
   const setSimulationRun = (value) => setChatField('simulationRun', value);
   const setError = (value) => setChatField('error', value);
@@ -1236,10 +1241,12 @@ function App() {
           editedDiagram: synchronized.diagram,
           editableSpice: synchronized.spice,
           editableKicadNetlist: synchronized.kicadNetlist,
+          editableCircuitJson: JSON.stringify(synchronized.circuit, null, 2),
           simulationRun: null,
           simulationError: '',
           spiceSyncError: '',
           kicadSyncError: '',
+          circuitJsonSyncError: '',
           error: '',
         };
       } catch (layoutError) {
@@ -1327,7 +1334,12 @@ function App() {
         if (!parsed.ok) return { ...chat, spiceSyncError: parsed.errors.join(' ') };
 
         if (circuitElectricalSignature(parsed.circuit) === circuitElectricalSignature(chat.result.circuit)) {
-          return { ...chat, result: { ...chat.result, spice: source }, spiceSyncError: '' };
+          return {
+            ...chat,
+            result: { ...chat.result, spice: source },
+            editableCircuitJson: JSON.stringify(chat.result.circuit, null, 2),
+            spiceSyncError: '',
+          };
         }
 
         try {
@@ -1343,10 +1355,12 @@ function App() {
             result: synchronized,
             editedDiagram: synchronized.diagram,
             editableKicadNetlist: synchronized.kicadNetlist,
+            editableCircuitJson: JSON.stringify(synchronized.circuit, null, 2),
             simulationRun: null,
             simulationError: '',
             spiceSyncError: '',
             kicadSyncError: '',
+            circuitJsonSyncError: '',
           };
         } catch (layoutError) {
           return { ...chat, spiceSyncError: layoutError.message };
@@ -1377,6 +1391,7 @@ function App() {
           return {
             ...chat,
             result: { ...chat.result, kicadNetlist: source },
+            editableCircuitJson: JSON.stringify(chat.result.circuit, null, 2),
             kicadSyncError: '',
           };
         }
@@ -1394,9 +1409,11 @@ function App() {
             result: synchronized,
             editedDiagram: synchronized.diagram,
             editableSpice: synchronized.spice,
+            editableCircuitJson: JSON.stringify(synchronized.circuit, null, 2),
             simulationRun: null,
             simulationError: '',
             kicadSyncError: '',
+            circuitJsonSyncError: '',
           };
         } catch (layoutError) {
           return { ...chat, kicadSyncError: layoutError.message };
@@ -1406,6 +1423,51 @@ function App() {
 
     return () => window.clearTimeout(timer);
   }, [activeChat?.id, editableKicadNetlist, isGenerating, result?.kicadNetlist, pendingKicadChange]);
+
+  useEffect(() => {
+    if (!result || isGenerating || !activeChat) return undefined;
+    const canonicalJson = JSON.stringify(result.circuit, null, 2);
+    if (editableCircuitJson === canonicalJson) {
+      if (circuitJsonSyncError) setChatField('circuitJsonSyncError', '');
+      return undefined;
+    }
+
+    const chatId = activeChat.id;
+    const source = editableCircuitJson;
+    const timer = window.setTimeout(() => {
+      updateChat(chatId, (chat) => {
+        if (!chat.result || chat.editableCircuitJson !== source) return chat;
+        const parsed = parseCircuitJson(source, chat.result.circuit);
+        if (!parsed.ok) return { ...chat, circuitJsonSyncError: parsed.errors.join(' ') };
+
+        try {
+          const synchronized = synchronizeResult(
+            chat.result,
+            parsed.circuit,
+            chat.editedDiagram || chat.result.diagram,
+          );
+          return {
+            ...chat,
+            updatedAt: Date.now(),
+            result: synchronized,
+            editedDiagram: synchronized.diagram,
+            editableSpice: synchronized.spice,
+            editableKicadNetlist: synchronized.kicadNetlist,
+            editableCircuitJson: JSON.stringify(synchronized.circuit, null, 2),
+            simulationRun: null,
+            simulationError: '',
+            spiceSyncError: '',
+            kicadSyncError: '',
+            circuitJsonSyncError: '',
+          };
+        } catch (layoutError) {
+          return { ...chat, circuitJsonSyncError: layoutError.message };
+        }
+      });
+    }, 400);
+
+    return () => window.clearTimeout(timer);
+  }, [activeChat?.id, editableCircuitJson, isGenerating, result?.circuit, circuitJsonSyncError]);
 
   const manifest = useMemo(
     () =>
@@ -1421,6 +1483,10 @@ function App() {
         2,
       ),
     [result],
+  );
+  const circuitJson = useMemo(
+    () => editableCircuitJson || (result?.circuit ? JSON.stringify(result.circuit, null, 2) : ''),
+    [editableCircuitJson, result?.circuit],
   );
 
   const openEditorView = (view) => {
@@ -1502,8 +1568,10 @@ function App() {
       editableSpice: isRevision
         ? chat.editableSpice
         : '* AI is preparing the circuit...\n* Components will appear here as they are generated.',
+      editableCircuitJson: isRevision ? chat.editableCircuitJson : '',
       simulationRun: null,
       simulationError: '',
+      circuitJsonSyncError: '',
       messages: [...chat.messages, userMessage],
     }));
 
@@ -1559,11 +1627,13 @@ function App() {
         pendingKicadChange: currentDesign && currentDesign.kicadNetlist !== data.kicadNetlist
           ? { previous: currentDesign.kicadNetlist, proposed: data.kicadNetlist || '' }
           : null,
+        editableCircuitJson: JSON.stringify(data.circuit, null, 2),
         editedDiagram: cloneDiagram(data.diagram),
         simulationRun: null,
         simulationError: '',
         spiceSyncError: '',
         kicadSyncError: '',
+        circuitJsonSyncError: '',
         error: '',
       }));
       window.location.hash = '';
@@ -1573,6 +1643,9 @@ function App() {
         ...chat,
         updatedAt: Date.now(),
         editableSpice: currentDesign ? currentDesign.spice : chat.editableSpice,
+        editableCircuitJson: currentDesign
+          ? JSON.stringify(currentDesign.circuit, null, 2)
+          : chat.editableCircuitJson,
         error: requestError.message,
         messages: [
           ...chat.messages,
@@ -1725,6 +1798,8 @@ function App() {
       ...chat,
       pendingSpiceChange: null,
       pendingKicadChange: null,
+      editableCircuitJson: chat.result?.circuit ? JSON.stringify(chat.result.circuit, null, 2) : chat.editableCircuitJson,
+      circuitJsonSyncError: '',
     }));
   };
 
@@ -1744,8 +1819,10 @@ function App() {
           ...chat,
           editableSpice: previousSpice || chat.editableSpice,
           editableKicadNetlist: previousKicad || chat.editableKicadNetlist,
+          editableCircuitJson: chat.result?.circuit ? JSON.stringify(chat.result.circuit, null, 2) : chat.editableCircuitJson,
           pendingSpiceChange: null,
           pendingKicadChange: null,
+          circuitJsonSyncError: '',
         };
       }
 
@@ -1763,6 +1840,7 @@ function App() {
         result: synchronized,
         editableSpice: previousSpice || synchronized.spice,
         editableKicadNetlist: previousKicad || synchronized.kicadNetlist,
+        editableCircuitJson: JSON.stringify(synchronized.circuit, null, 2),
         editedDiagram: synchronized.diagram,
         pendingSpiceChange: null,
         pendingKicadChange: null,
@@ -1770,6 +1848,7 @@ function App() {
         simulationError: '',
         spiceSyncError: '',
         kicadSyncError: '',
+        circuitJsonSyncError: '',
       };
     });
   };
@@ -1954,6 +2033,49 @@ function App() {
     </div>
   );
 
+  const renderJsonView = () => (
+    <div className="editor-window-body code-window-body">
+      <div className="editor-header">
+        <div>
+          <h3>Circuit JSON</h3>
+          <p>{result ? '' : 'Generate a circuit to inspect its structured JSON.'}</p>
+        </div>
+        <div className="spice-editor-actions">
+          <button
+            onClick={() => {
+              setEditableCircuitJson(result?.circuit ? JSON.stringify(result.circuit, null, 2) : '');
+              setChatField('circuitJsonSyncError', '');
+            }}
+            disabled={!result || isGenerating}
+          >
+            Reset
+          </button>
+          <button
+            onClick={() => downloadText('circuit.json', circuitJson, 'application/json')}
+            disabled={!circuitJson || isGenerating}
+          >
+            Download
+          </button>
+        </div>
+      </div>
+      <textarea
+        className={`code-editor editor-window-code ${isGenerating ? 'live-code-editor' : ''}`}
+        value={circuitJson}
+        readOnly={isGenerating || !result}
+        onChange={(event) => {
+          setEditableCircuitJson(event.target.value);
+          setSimulationRun(null);
+          setSimulationError('');
+        }}
+        spellCheck="false"
+        rows={24}
+        aria-label="Editable circuit JSON"
+        placeholder="Generate a circuit to inspect and edit the JSON."
+      />
+      {circuitJsonSyncError && <p className="inline-error simulation-message">JSON sync paused: {circuitJsonSyncError}</p>}
+    </div>
+  );
+
   const renderEditorWindow = (view) => (
     <article
       className={`editor-window ${activeEditorView === view ? 'active' : ''}`}
@@ -1974,6 +2096,7 @@ function App() {
         </button>
       </header>
       {view === 'spice' && renderSpiceView()}
+      {view === 'json' && renderJsonView()}
       {view === 'canvas' && renderCanvasView()}
     </article>
   );
