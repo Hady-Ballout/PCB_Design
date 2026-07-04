@@ -14,7 +14,7 @@ npm run dev
 Frontend:
 
 ```text
-http://127.0.0.1:5173
+http://127.0.0.1:5174
 ```
 
 API:
@@ -22,6 +22,38 @@ API:
 ```text
 http://127.0.0.1:8787
 ```
+
+## Repository structure
+
+The code is organized into independent **feature chunks** so different areas can be
+worked on in parallel. Each chunk lives in its own folder and depends only on the
+shared `core` (never on another feature chunk).
+
+```
+src/
+  core/        Shared circuit engine + shared config/utils (schematicLayout ->
+               pcbGenerator -> circuitSync, lineDiff, config.js, download.js).
+               Depended on by everything; change only when the circuit model changes.
+  app/         App shell: App.jsx (layout + page routing + workspace state),
+               routing.js, generationStream.js. The integration point.
+  features/
+    auth/      auth.jsx + auth.css (self-contained; talks to /api/auth/*)
+    chat/      chatStore.js, chatFormat.js, ChatPanel.jsx
+    schematic/ CircuitDiagram.jsx, symbols.jsx, geometry.js
+    editors/   editorConfig.js (SPICE/JSON/Canvas editor windows live in app/App.jsx)
+    waveform/  WaveformChart.jsx
+
+server/
+  index.ts     HTTP hub (routes) + env.ts + types.ts (shared foundation)
+  auth/        auth.ts, db.ts, brevo.ts
+  ai/          ollamaProvider.ts, chatMemory.ts, circuitKnowledge.ts
+  circuit/     circuitResponse.ts, streamingCircuit.ts   (imports ../../src/core)
+  simulation/  simulator.ts
+```
+
+**Rule:** a feature chunk may import from `core` (frontend) / `types` (backend) but
+not from another feature chunk — cross-feature wiring goes through `app/App.jsx`
+(frontend) or `server/index.ts` (backend).
 
 ## Ollama setup
 

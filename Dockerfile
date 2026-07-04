@@ -13,7 +13,7 @@ RUN npm ci --omit=dev
 
 # Copy server source
 COPY server/ ./server/
-COPY src/lib/ ./src/lib/
+COPY src/core/ ./src/core/
 RUN ls -la /app/server/
 
 ENV NODE_ENV=production
