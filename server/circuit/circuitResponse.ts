@@ -7,7 +7,7 @@ import {
   toKiCadNetlist,
   toSpice,
   validateCircuit,
-} from '../src/core/pcbGenerator.js';
+} from '../../src/core/pcbGenerator.js';
 import type {
   Circuit,
   CircuitIntent,
@@ -19,7 +19,7 @@ import type {
   NetRole,
   SchematicBlock,
   SchematicHints,
-} from './types.js';
+} from '../types.js';
 
 const normalizeComponent = (component: Partial<Component>, index: number): Component => ({
   ref: String(component.ref || `X${index + 1}`).toUpperCase(),

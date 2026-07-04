@@ -1,6 +1,6 @@
 import pg from 'pg';
 import { randomBytes, scryptSync } from 'node:crypto';
-import type { LocalUser, QueryResult } from './types.js';
+import type { LocalUser, QueryResult } from '../types.js';
 
 let pool: pg.Pool | undefined;
 let localUsers: LocalUser[] = [];

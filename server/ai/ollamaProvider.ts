@@ -1,6 +1,6 @@
 import { normalizeChatMemory, sanitizeConversationHistory } from './chatMemory.js';
 import { circuitKnowledgePrompt } from './circuitKnowledge.js';
-import { parseSpiceNetlist } from '../src/core/circuitSync.js';
+import { parseSpiceNetlist } from '../../src/core/circuitSync.js';
 import type {
   ChatMemory,
   ChatMessage,
@@ -11,7 +11,7 @@ import type {
   ParsedCircuitResponse,
   ProviderConfig,
   StreamState,
-} from './types.js';
+} from '../types.js';
 
 const SYSTEM_PROMPT = `You are a JSON API for beginner-safe electronics circuit generation.
 Return exactly one valid JSON object and no other text.

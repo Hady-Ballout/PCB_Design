@@ -2,8 +2,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { addMissingSpiceModels } from '../src/core/pcbGenerator.js';
-import type { Circuit, SimulationResult, WaveformSeries } from './types.js';
+import { addMissingSpiceModels } from '../../src/core/pcbGenerator.js';
+import type { Circuit, SimulationResult, WaveformSeries } from '../types.js';
 
 const DEFAULT_TRAN = '.tran 10us 20ms';
 const getNgspiceCommand = (): string => process.env.NGSPICE_BINARY || (process.platform === 'win32' ? 'ngspice_con' : 'ngspice');

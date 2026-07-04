@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildCircuitResponse, normalizeAiCircuit, normalizeSchematicHints, reconcileCircuitRevision } from './circuitResponse.js';
-import { DiagramLayoutError } from '../src/core/pcbGenerator.js';
-import type { Circuit } from './types.js';
+import { DiagramLayoutError } from '../../src/core/pcbGenerator.js';
+import type { Circuit } from '../types.js';
 
 const differenceAmplifier: Circuit = {
   title: 'Difference Amplifier',

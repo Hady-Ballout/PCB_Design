@@ -1,6 +1,6 @@
 import { normalizeAiCircuit, reconcileCircuitRevision } from './circuitResponse.js';
-import { toSpice } from '../src/core/pcbGenerator.js';
-import type { Circuit, Component, StreamingSpiceResult } from './types.js';
+import { toSpice } from '../../src/core/pcbGenerator.js';
+import type { Circuit, Component, StreamingSpiceResult } from '../types.js';
 
 const readStringProperty = (text: string, name: string): string => {
   const match = String(text || '').match(new RegExp(`"${name}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`));

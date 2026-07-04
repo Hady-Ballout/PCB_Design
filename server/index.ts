@@ -1,12 +1,12 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { loadEnv } from './env.js';
-import { buildCircuitResponse, reconcileCircuitRevision } from './circuitResponse.js';
-import { normalizeChatMemory, sanitizeConversationHistory, updateChatMemory } from './chatMemory.js';
-import { streamCircuitWithOllama } from './ollamaProvider.js';
-import { runNgspiceSimulation } from './simulator.js';
-import { buildStreamingSpice } from './streamingCircuit.js';
-import { initDb } from './db.js';
-import { handleSignup, handleLogin, handleVerifyEmail, handleMe, verifyJwt } from './auth.js';
+import { buildCircuitResponse, reconcileCircuitRevision } from './circuit/circuitResponse.js';
+import { normalizeChatMemory, sanitizeConversationHistory, updateChatMemory } from './ai/chatMemory.js';
+import { streamCircuitWithOllama } from './ai/ollamaProvider.js';
+import { runNgspiceSimulation } from './simulation/simulator.js';
+import { buildStreamingSpice } from './circuit/streamingCircuit.js';
+import { initDb } from './auth/db.js';
+import { handleSignup, handleLogin, handleVerifyEmail, handleMe, verifyJwt } from './auth/auth.js';
 import type { ChatMemory, ChatMessage, Circuit, CurrentDesign, JwtPayload, StreamState } from './types.js';
 
 loadEnv();

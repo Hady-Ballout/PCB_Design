@@ -2,7 +2,7 @@ import { randomBytes, scryptSync, timingSafeEqual, createHmac } from 'node:crypt
 import type { IncomingMessage } from 'node:http';
 import { query } from './db.js';
 import { sendVerificationEmail } from './brevo.js';
-import type { AuthResult, JwtPayload } from './types.js';
+import type { AuthResult, JwtPayload } from '../types.js';
 
 // ── Password hashing (scrypt, no extra deps) ──
 

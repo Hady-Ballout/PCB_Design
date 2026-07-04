@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildSimulationDeck, chooseWaveformNodes, parseWaveformData } from './simulator.js';
-import type { Circuit } from './types.js';
+import type { Circuit } from '../types.js';
 
 const circuit: Partial<Circuit> = {
   components: [

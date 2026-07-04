@@ -1,4 +1,4 @@
-import type { ChatMemory, ChatMessage, Circuit } from './types.js';
+import type { ChatMemory, ChatMessage, Circuit } from '../types.js';
 
 const MEMORY_SUMMARY_LIMIT = 6000;
 const REQUEST_HISTORY_LIMIT = 12;

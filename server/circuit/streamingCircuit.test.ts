@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildStreamingSpice, extractCompleteComponents } from './streamingCircuit.js';
-import type { Circuit } from './types.js';
+import type { Circuit } from '../types.js';
 
 describe('streaming circuit helpers', () => {
   it('extracts only complete component objects from partial AI JSON', () => {
