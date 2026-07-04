@@ -599,7 +599,10 @@ export const toDiagramSvg = (diagram) => `<?xml version="1.0" encoding="UTF-8"?>
     const labels = component.symbolType === 'ground'
       ? ''
       : `<text class="diagram-text" x="${refLabel?.x || component.x}" y="${refLabel?.y || component.y - component.height / 2 - 12}" text-anchor="middle">${escapeXml(component.ref)}</text><text class="diagram-small" x="${valueLabel?.x || component.x}" y="${valueLabel?.y || component.y + component.height / 2 + 20}" text-anchor="middle">${escapeXml(component.value)}</text>`;
-    const pinLabels = component.symbolType === 'ground'
+    // Engineers don't number the two pins of a resistor/cap/source/diode, so
+    // only annotate pin numbers on multi-pin parts (op-amps, transistors) where
+    // they actually disambiguate. Numbering every passive reads as machine output.
+    const pinLabels = component.symbolType === 'ground' || (component.pins?.length ?? 0) <= 2
       ? ''
       : component.pins.map((pin) => `<text class="diagram-small" x="${pin.x}" y="${pin.y - 8}" text-anchor="middle">${pin.pinIndex}</text>`).join('');
     return `<g>${renderSymbolSvg(component)}${labels}${pinLabels}</g>`;

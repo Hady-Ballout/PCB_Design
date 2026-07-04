@@ -1,0 +1,129 @@
+/* Block-schematic view: React Flow canvas + component block cards. */
+.block-schematic {
+  flex: 1;
+  width: 100%;
+  min-height: 480px;
+  background: #0e141b;
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.block-schematic .react-flow__attribution {
+  background: transparent;
+}
+
+/* Wires are clickable; selecting one highlights it and dims the rest. */
+.block-schematic .react-flow__edge {
+  cursor: pointer;
+}
+
+.block-schematic.has-selection .react-flow__edge:not(.selected) {
+  opacity: 0.15;
+}
+
+.block-schematic .react-flow__edge.selected .react-flow__edge-path {
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.85));
+}
+
+.block-node {
+  min-width: 190px;
+  border: 1px solid #364050;
+  border-radius: 8px;
+  background: #1a232e;
+  color: #cdd6e0;
+  font: 12px Inter, Arial, sans-serif;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.block-node-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  background: #26313e;
+  border-bottom: 1px solid #364050;
+}
+
+.block-node-symbol {
+  display: block;
+  width: 48px;
+  height: 24px;
+  color: #f1c27d;
+}
+
+.block-node-sub {
+  color: #8a97a6;
+  font-size: 11px;
+}
+
+.block-node-pins {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+}
+
+.block-node-pin {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 4px 16px 4px 12px;
+}
+
+.block-node-pin-label {
+  color: #cdd6e0;
+}
+
+.block-node-pin.unconnected .block-node-pin-label {
+  color: #5c6672;
+}
+
+.block-node-pin-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #6b7787;
+}
+
+.block-node-pin.unconnected .block-node-pin-dot {
+  background: #3a434f;
+}
+
+/* Overlap both handles on the pin dot; keep them small and unobtrusive. */
+.block-node-handle.react-flow__handle {
+  width: 8px;
+  height: 8px;
+  right: 12px;
+  background: #6b7787;
+  border: none;
+}
+
+.ground-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: #8a97a6;
+}
+
+.ground-node-symbol {
+  width: 32px;
+  height: 26px;
+  stroke: #cdd6e0;
+  stroke-width: 2;
+}
+
+.ground-node-label {
+  font: 700 10px Inter, Arial, sans-serif;
+  letter-spacing: 0.04em;
+}
+
+.ground-node-handle.react-flow__handle {
+  width: 8px;
+  height: 8px;
+  top: 0;
+  background: #6b7787;
+  border: none;
+}

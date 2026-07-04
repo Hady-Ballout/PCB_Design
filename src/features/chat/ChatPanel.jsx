@@ -10,8 +10,6 @@ export function ChatPanel({
   sortedChats,
   activeChat,
   openChat,
-  exportAll,
-  result,
   isGenerating,
   messagesEndRef,
   prompt,
@@ -71,10 +69,8 @@ export function ChatPanel({
               <span aria-hidden="true">&larr;</span>
             </button>
             <div className="chat-conversation-title">
-              <p className="eyebrow">AI circuit assistant</p>
               <h1>{activeChat?.title}</h1>
             </div>
-            <button onClick={exportAll} disabled={!result} type="button">Export</button>
           </header>
 
           <section className="chat-thread" aria-label="Current conversation">
@@ -111,18 +107,25 @@ export function ChatPanel({
             </div>
 
             <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); generate(); }}>
-              <textarea
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                onKeyDown={handleComposerKeyDown}
-                rows={3}
-                placeholder="Message the circuit assistant..."
-                aria-label="Message the circuit assistant"
-              />
-              <div className="chat-composer-footer">
-                <small>Enter to send, Shift+Enter for a new line</small>
-                <button className="primary" type="submit" disabled={generationBusy || !prompt.trim()}>
-                  {isGenerating ? 'Sending...' : generationBusy ? 'AI busy...' : 'Send'}
+              <div className="chat-composer-input">
+                <textarea
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  onKeyDown={handleComposerKeyDown}
+                  rows={3}
+                  placeholder="Message the circuit assistant..."
+                  aria-label="Message the circuit assistant"
+                />
+                <button
+                  className="composer-send-button"
+                  type="submit"
+                  disabled={generationBusy || !prompt.trim()}
+                  aria-label={isGenerating ? 'Sending...' : generationBusy ? 'AI busy...' : 'Send message'}
+                  title={isGenerating ? 'Sending...' : generationBusy ? 'AI busy...' : 'Send message'}
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                    <path d="M3 11.5L21 3l-8.5 18-2.2-7.3L3 11.5z" fill="currentColor" />
+                  </svg>
                 </button>
               </div>
             </form>

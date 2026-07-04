@@ -27,6 +27,7 @@ import { ChatPanel } from '../features/chat/ChatPanel.jsx';
 import { EDITOR_SPLIT_STORAGE_KEY, EDITOR_VIEW_LABELS, loadEditorSplit } from '../features/editors/editorConfig.js';
 import { WaveformChart } from '../features/waveform/WaveformChart.jsx';
 import { CircuitDiagram } from '../features/schematic/CircuitDiagram.jsx';
+import { BlockSchematic } from '../features/blockSchematic/BlockSchematic.jsx';
 import { ComponentToolIcon } from '../features/schematic/symbols.jsx';
 import {
   ADD_COMPONENT_TOOLS,
@@ -50,6 +51,7 @@ function App() {
   const [pendingTerminal, setPendingTerminal] = useState(null);
   const [openEditorViews, setOpenEditorViews] = useState(['spice']);
   const [activeEditorView, setActiveEditorView] = useState('spice');
+  const [maximizedEditorView, setMaximizedEditorView] = useState(null);
   const [editorSplit, setEditorSplit] = useState(loadEditorSplit);
   const [resizingAxis, setResizingAxis] = useState(null);
   const [chatPanelView, setChatPanelView] = useState('conversation');
@@ -373,21 +375,6 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [activeChat?.id, editableCircuitJson, isGenerating, result?.circuit, circuitJsonSyncError]);
 
-  const manifest = useMemo(
-    () =>
-      JSON.stringify(
-        {
-          name: result?.circuit.title,
-          sourcePrompt: result?.intent.rawPrompt,
-          generatedAt: new Date().toISOString(),
-          files: ['generated.cir', 'generated.svg', 'circuit.json'],
-          ngspice: result?.simulation.command,
-        },
-        null,
-        2,
-      ),
-    [result],
-  );
   const circuitJson = useMemo(
     () => editableCircuitJson || (result?.circuit ? JSON.stringify(result.circuit, null, 2) : ''),
     [editableCircuitJson, result?.circuit],
@@ -396,12 +383,20 @@ function App() {
   const openEditorView = (view) => {
     setOpenEditorViews((current) => (current.includes(view) ? current : [...current, view]));
     setActiveEditorView(view);
+    // While one window is maximized, selecting a tab swaps the full-screen view (browser-tab behavior).
+    setMaximizedEditorView((current) => (current ? view : current));
   };
 
   const closeEditorView = (view) => {
     const next = openEditorViews.filter((item) => item !== view);
     setOpenEditorViews(next);
     if (activeEditorView === view) setActiveEditorView(next.at(-1) || null);
+    if (maximizedEditorView === view) setMaximizedEditorView(null);
+  };
+
+  const toggleMaximizeEditorView = (view) => {
+    setActiveEditorView(view);
+    setMaximizedEditorView((current) => (current === view ? null : view));
   };
 
   const startEditorResize = (axis, event) => {
@@ -590,14 +585,6 @@ function App() {
     } finally {
       setIsSimulating(false);
     }
-  };
-
-  const exportAll = () => {
-    if (!result) return;
-    downloadText('generated.cir', editableSpice);
-    downloadText('generated.svg', toDiagramSvg(editedDiagram || result.diagram), 'image/svg+xml');
-    downloadText('circuit.json', JSON.stringify(result.circuit, null, 2), 'application/json');
-    downloadText('README-export.json', manifest, 'application/json');
   };
 
   const addDiagramComponent = (type) => {
@@ -980,30 +967,69 @@ function App() {
     </div>
   );
 
-  const renderEditorWindow = (view) => (
-    <article
-      className={`editor-window ${activeEditorView === view ? 'active' : ''}`}
-      key={view}
-      onMouseDown={() => setActiveEditorView(view)}
-    >
-      <header className="editor-window-titlebar">
-        <strong>{EDITOR_VIEW_LABELS[view]}</strong>
-        <button
-          className="editor-window-close"
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={() => closeEditorView(view)}
-          type="button"
-          aria-label={`Close ${EDITOR_VIEW_LABELS[view]}`}
-          title={`Close ${EDITOR_VIEW_LABELS[view]}`}
-        >
-          &times;
-        </button>
-      </header>
-      {view === 'spice' && renderSpiceView()}
-      {view === 'json' && renderJsonView()}
-      {view === 'canvas' && renderCanvasView()}
-    </article>
+  const renderBlockSchematicView = () => (
+    <div className="editor-window-body canvas-window-body">
+      {!result ? (
+        <div className="editor-window-empty">
+          <strong>No schematic available</strong>
+          <p>Generate a circuit to view its block schematic.</p>
+        </div>
+      ) : (
+        <BlockSchematic circuit={result.circuit} />
+      )}
+    </div>
   );
+
+  const renderEditorWindow = (view) => {
+    const isMaximized = maximizedEditorView === view;
+    return (
+      <article
+        className={`editor-window ${activeEditorView === view ? 'active' : ''} ${isMaximized ? 'maximized' : ''}`}
+        key={view}
+        onMouseDown={() => setActiveEditorView(view)}
+      >
+        <header className="editor-window-titlebar">
+          <strong>{EDITOR_VIEW_LABELS[view]}</strong>
+          <div className="editor-window-controls">
+            <button
+              className="editor-window-control"
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={() => toggleMaximizeEditorView(view)}
+              type="button"
+              aria-pressed={isMaximized}
+              aria-label={`${isMaximized ? 'Restore' : 'Maximize'} ${EDITOR_VIEW_LABELS[view]}`}
+              title={isMaximized ? 'Restore' : 'Maximize'}
+            >
+              {isMaximized ? (
+                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+                  <rect x="2.5" y="5" width="8.5" height="8.5" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                  <path d="M5.5 5V3.2A1.7 1.7 0 0 1 7.2 1.5h6A1.3 1.3 0 0 1 14.5 2.8v6a1.7 1.7 0 0 1-1.7 1.7H11" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+                  <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                </svg>
+              )}
+            </button>
+            <button
+              className="editor-window-control editor-window-close"
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={() => closeEditorView(view)}
+              type="button"
+              aria-label={`Close ${EDITOR_VIEW_LABELS[view]}`}
+              title={`Close ${EDITOR_VIEW_LABELS[view]}`}
+            >
+              &times;
+            </button>
+          </div>
+        </header>
+        {view === 'spice' && renderSpiceView()}
+        {view === 'json' && renderJsonView()}
+        {view === 'canvas' && renderCanvasView()}
+        {view === 'blockSchematic' && renderBlockSchematicView()}
+      </article>
+    );
+  };
 
   const adjustEditorSplit = (axis, amount) => {
     const minimum = axis === 'columns' ? 25 : 32;
@@ -1041,6 +1067,14 @@ function App() {
   );
 
   const renderEditorLayout = () => {
+    if (maximizedEditorView && openEditorViews.includes(maximizedEditorView)) {
+      return (
+        <section className="editor-window-layout single maximized">
+          {renderEditorWindow(maximizedEditorView)}
+        </section>
+      );
+    }
+
     if (openEditorViews.length === 1) {
       return <section className="editor-window-layout single">{renderEditorWindow(openEditorViews[0])}</section>;
     }
@@ -1141,8 +1175,6 @@ function App() {
           sortedChats={sortedChats}
           activeChat={activeChat}
           openChat={openChat}
-          exportAll={exportAll}
-          result={result}
           isGenerating={isGenerating}
           messagesEndRef={messagesEndRef}
           prompt={prompt}
@@ -1154,22 +1186,7 @@ function App() {
         />
 
         <section className="main-panel editor-workbench">
-          <header className="result-header workbench-header">
-            <div>
-              <h2>{isGenerating ? 'Writing SPICE deck' : result?.circuit.title || 'Open an editor window'}</h2>
-            </div>
-            <div className="result-actions">
-              {isGenerating && <div className="status streaming-status">Generating...</div>}
-              {!isGenerating && result && (
-                <div className={`status ${result.validation.ok ? 'ok' : 'error'}`}>
-                  {result.validation.ok ? 'Validated' : 'Needs attention'}
-                </div>
-              )}
-            </div>
-          </header>
-
           <nav className="editor-launchbar" aria-label="Editor windows">
-            <span>Open views</span>
             {Object.entries(EDITOR_VIEW_LABELS).map(([view, label]) => {
               const isOpen = openEditorViews.includes(view);
               return (

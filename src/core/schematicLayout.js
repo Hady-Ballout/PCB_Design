@@ -6,6 +6,33 @@ const CANVAS_MARGIN = 60;
 const MAX_ROUTE_STATES = 6000;
 const MAX_EXPANSIONS = 8;
 const PLACEMENT_CLEARANCE = COMPONENT_CLEARANCE + WIRE_CLEARANCE * 4;
+// Placement grid for the signal-flow columns. Same-rank parts share a column
+// (COLUMN_STRIDE apart horizontally) and stack ROW_STRIDE apart vertically.
+// Tidy placement: parts in a rank share the rank's lane and fan into a tight,
+// aligned 2-column block. Ranks with one part stay a single clean column. This
+// is what makes most schematics read as deliberate signal-flow columns.
+const TIDY_GRID = {
+  columnStart: 160,
+  rowStart: 220,
+  columnStride: 380,
+  rankBandStride: 360,
+  rowStride: 190,
+  subColumns: 1,
+  subColumnStride: 190,
+};
+// Fallback "spread" placement (the original wide 3-column-per-rank fan-out).
+// Denser feedback circuits (e.g. an op-amp whose input parts rank to its right)
+// can't route as tidy rank-separated columns, so when the tidy pass fails we
+// retry with this looser grid, which interleaves adjacent ranks enough to route.
+const SPREAD_GRID = {
+  columnStart: 180,
+  rowStart: 260,
+  columnStride: 320,
+  rankBandStride: 300,
+  rowStride: 190,
+  subColumns: 3,
+  subColumnStride: 220,
+};
 
 export class DiagramLayoutError extends Error {
   constructor(message, violations = []) {
@@ -951,9 +978,18 @@ const buildDraft = (circuit, options = {}) => {
     const hasGround = nodes.includes('0');
     const isTwoPin = nodes.length <= 2;
     let orientation = 'horizontal';
+    // Human schematics read as clean signal-flow columns. Parts in the same rank
+    // sit in the rank's vertical lane, stacked evenly. Ranks with several parts
+    // fan into a tight, aligned 2-column block (not the old 3-wide, wide-stride
+    // scatter) so the router keeps 2-D breathing room while the result still
+    // reads as orderly pairs rather than random placement. Ranks with one part
+    // stay a single clean column.
+    const grid = options.spread ? SPREAD_GRID : TIDY_GRID;
+    const subColumn = row % grid.subColumns;
+    const subRow = Math.floor(row / grid.subColumns);
     let preferred = {
-      x: CANVAS_MARGIN + 180 + visualColumn * 320 + (row % 3) * 220,
-      y: 260 + rankBand * 300 + Math.floor(row / 3) * 190,
+      x: CANVAS_MARGIN + grid.columnStart + visualColumn * grid.columnStride + subColumn * grid.subColumnStride,
+      y: grid.rowStart + rankBand * grid.rankBandStride + subRow * grid.rowStride,
     };
     let componentWidth = size.width;
     let componentHeight = size.height;
@@ -1048,10 +1084,14 @@ const buildDraft = (circuit, options = {}) => {
     const connections = placed.flatMap((component) => component.pins
       .filter((pin) => pin.node === name)
       .map((pin) => ({ ref: component.ref, pin: pin.pinIndex, x: pin.x, y: pin.y })));
+    // Anchor the ground rail just below the lowest grounded pin, not at the
+    // canvas bottom. A local rail keeps ground drops short and clustered under
+    // the parts they belong to (how an engineer draws it) instead of routing
+    // every ground wire the full height of the sheet into a void.
     const position = name === '0'
       ? {
           x: snap(connections.reduce((sum, item) => sum + item.x, 0) / Math.max(1, connections.length)),
-          y: Math.max(120, requiredHeight - 120),
+          y: snap(Math.max(120, ...connections.map((item) => item.y)) + 90),
         }
       : netPositions.get(name);
     return {
@@ -1484,7 +1524,48 @@ const bridgesForWires = (wires) => {
   return bridges;
 };
 
-const routeWithExpansion = (diagram) => {
+// After routing succeeds the canvas is usually far larger than the drawn
+// circuit (placement/expansion budget leaves the content floating in a void).
+// Trim width/height down to a tight box around the actual geometry plus a
+// margin so the schematic fills its frame the way a hand-drawn sheet does.
+// Resize-only: no coordinate is moved, so a validated layout stays valid.
+const MIN_CANVAS_WIDTH = 700;
+const MIN_CANVAS_HEIGHT = 500;
+const GROUND_GLYPH_DROP = 34;
+const cropDiagramToContent = (diagram) => {
+  let maxX = 0;
+  let maxY = 0;
+  const extend = (x, y) => {
+    if (Number.isFinite(x) && x > maxX) maxX = x;
+    if (Number.isFinite(y) && y > maxY) maxY = y;
+  };
+  for (const component of diagram.components || []) {
+    const bounds = componentBounds(component);
+    extend(bounds.right, bounds.bottom);
+  }
+  for (const label of diagram.labels || []) {
+    const bounds = labelBounds(label);
+    extend(bounds.right, bounds.bottom);
+  }
+  for (const label of diagram.netLabels || []) {
+    const bounds = netLabelBounds(label);
+    extend(bounds.right, bounds.bottom);
+  }
+  for (const port of diagram.ports || []) extend(port.x + (port.labelWidth || 60), port.y + 30);
+  for (const junction of diagram.junctions || []) extend(junction.x, junction.y);
+  for (const wire of diagram.wires || []) {
+    for (const point of wire.points || []) extend(point.x, point.y + GROUND_GLYPH_DROP);
+  }
+  const width = Math.max(MIN_CANVAS_WIDTH, snap(maxX + CANVAS_MARGIN));
+  const height = Math.max(MIN_CANVAS_HEIGHT, snap(maxY + CANVAS_MARGIN));
+  return {
+    ...diagram,
+    width: Math.min(diagram.width, width),
+    height: Math.min(diagram.height, height),
+  };
+};
+
+const routeWithExpansion = (diagram, { maxExpansions = MAX_EXPANSIONS } = {}) => {
   let current = structuredClone(diagram);
   let lastViolations = [];
   let failedNode = null;
@@ -1499,7 +1580,7 @@ const routeWithExpansion = (diagram) => {
     points: [],
   }));
 
-  for (let attempt = 0; attempt <= MAX_EXPANSIONS; attempt += 1) {
+  for (let attempt = 0; attempt <= maxExpansions; attempt += 1) {
     if (failedNode) {
       const offsets = [
         { x: 80, y: 0 },
@@ -1546,7 +1627,7 @@ const routeWithExpansion = (diagram) => {
           bridges,
         };
         const validation = validateDiagramLayout(candidate);
-        if (validation.ok) return candidate;
+        if (validation.ok) return cropDiagramToContent(candidate);
         lastViolations = validation.violations;
       } else {
         lastViolations = [{ type: 'route_failed', wire: failed.id }];
@@ -1558,12 +1639,27 @@ const routeWithExpansion = (diagram) => {
   }
 
   throw new DiagramLayoutError(
-    `Unable to create a collision-free schematic after ${MAX_EXPANSIONS + 1} routing attempts.`,
+    `Unable to create a collision-free schematic after ${maxExpansions + 1} routing attempts.`,
     lastViolations.length ? lastViolations : [{ type: 'route_failed' }],
   );
 };
 
-export const layoutCircuitDiagram = (circuit, options = {}) => routeWithExpansion(buildDraft(circuit, options));
+// Tidy single-column placement is the preferred, most human-looking layout, but
+// it can't route every topology (feedback loops, op-amp inputs fed from the
+// right). We give the tidy pass only a small expansion budget so it bails
+// quickly, then retry with the looser spread grid — which interleaves ranks
+// enough to route the dense cases the engine always used to handle — at the
+// full budget before ever falling back to labeled-net stubs.
+const TIDY_EXPANSION_BUDGET = 0;
+export const layoutCircuitDiagram = (circuit, options = {}) => {
+  if (options.spread) return routeWithExpansion(buildDraft(circuit, options));
+  try {
+    return routeWithExpansion(buildDraft(circuit, options), { maxExpansions: TIDY_EXPANSION_BUDGET });
+  } catch (error) {
+    if (!(error instanceof DiagramLayoutError)) throw error;
+    return routeWithExpansion(buildDraft(circuit, { ...options, spread: true }));
+  }
+};
 
 export const routeDiagramWire = (diagram, wire) => {
   if (wire.points?.length) return wire.points;

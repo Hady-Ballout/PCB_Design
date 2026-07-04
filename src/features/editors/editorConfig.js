@@ -3,6 +3,7 @@ export const EDITOR_VIEW_LABELS = {
   spice: 'Spice',
   json: 'JSON',
   canvas: 'Canvas',
+  blockSchematic: 'new schematic test',
 };
 
 export const EDITOR_SPLIT_STORAGE_KEY = 'prompt-to-pcb-editor-split-v1';
