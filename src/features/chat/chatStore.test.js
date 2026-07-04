@@ -8,7 +8,7 @@ import {
   migrateChatDiagram,
   saveChatStore,
 } from './chatStore.js';
-import { LAYOUT_VERSION, layoutCircuitDiagram } from '../core/schematicLayout.js';
+import { LAYOUT_VERSION, layoutCircuitDiagram } from '../../core/schematicLayout.js';
 
 const memoryStorage = () => {
   const values = new Map();

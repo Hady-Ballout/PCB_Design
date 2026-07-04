@@ -1,4 +1,4 @@
-import { LAYOUT_VERSION, layoutCircuitDiagram, repairDiagramLayout } from '../core/schematicLayout.js';
+import { LAYOUT_VERSION, layoutCircuitDiagram, repairDiagramLayout } from '../../core/schematicLayout.js';
 
 export const CHAT_STORAGE_KEY = 'prompt-to-pcb-chats-v1';
 

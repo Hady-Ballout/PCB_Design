@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-
-const API_BASE = import.meta.env.VITE_API_URL || '';
+import { API_BASE } from '../../core/config.js';
 
 // ── Auth Context ──
 
