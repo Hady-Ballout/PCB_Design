@@ -25,7 +25,7 @@ describe('chat memory', () => {
   });
 
   it('keeps the recent server-owned history window', () => {
-    const history = Array.from({ length: 15 }, (_, index) => ({ role: 'user', content: `Turn ${index + 1}` }));
+    const history = Array.from({ length: 15 }, (_, index) => ({ role: 'user' as const, content: `Turn ${index + 1}` }));
     const sanitized = sanitizeConversationHistory(history);
 
     expect(sanitized).toHaveLength(chatMemoryLimits.history);
@@ -35,7 +35,7 @@ describe('chat memory', () => {
   it('retains older requirements while recording the latest confirmed design', () => {
     let memory = { summary: 'Latest request: Requirement 1', updatedAt: 1 };
     for (let index = 2; index <= 8; index += 1) {
-      memory = updateChatMemory(memory, `Requirement ${index}`, circuit, index);
+      memory = updateChatMemory(memory, `Requirement ${index}`, circuit as any, index);
     }
 
     expect(memory.summary).toContain('Requirement 1');

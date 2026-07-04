@@ -13,13 +13,26 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     if (!token) { setLoading(false); return; }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
     fetch(`${API_BASE}/api/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
     })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((data) => setUser(data.user))
       .catch(() => { localStorage.removeItem('pcb_token'); setToken(null); })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        clearTimeout(timeoutId);
+        setLoading(false);
+      });
+
+    return () => {
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
   }, [token]);
 
   const login = (newToken, userData) => {
@@ -101,7 +114,10 @@ export function LoginPage() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (event) => {
+    event?.preventDefault();
+    if (submitting) return;
+
     setError('');
     setSubmitting(true);
     try {
@@ -110,10 +126,10 @@ export function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error); return; }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(data.error || 'Unable to log in. Please try again.'); return; }
       login(data.token, data.user);
-      window.location.hash = 'workspace';
+      window.location.hash = '';
     } catch {
       setError('Network error. Please try again.');
     } finally {
@@ -123,7 +139,7 @@ export function LoginPage() {
 
   return (
     <main className="auth-page">
-      <div className="auth-card">
+      <form className="auth-card" onSubmit={handleSubmit} noValidate>
         <h2>Log in to PCB Pilot</h2>
         {error && <div className="auth-error">{error}</div>}
         <label className="auth-label">
@@ -134,6 +150,7 @@ export function LoginPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             autoComplete="email"
+            required
           />
         </label>
         <label className="auth-label">
@@ -144,16 +161,16 @@ export function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
-            onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+            required
           />
         </label>
-        <button className="btn btn-primary auth-submit" onClick={handleSubmit} disabled={submitting}>
+        <button className="btn btn-primary auth-submit" type="submit" disabled={submitting}>
           {submitting ? 'Logging in...' : 'Log in'}
         </button>
         <p className="auth-switch">
           Don&rsquo;t have an account? <a href="#signup">Sign up</a>
         </p>
-      </div>
+      </form>
     </main>
   );
 }
@@ -168,7 +185,10 @@ export function SignupPage() {
   const [success, setSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (event) => {
+    event?.preventDefault();
+    if (submitting) return;
+
     setError('');
     if (password !== confirm) { setError('Passwords do not match.'); return; }
     setSubmitting(true);
@@ -178,8 +198,8 @@ export function SignupPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error); return; }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setError(data.error || 'Unable to create account. Please try again.'); return; }
       setSuccess(true);
     } catch {
       setError('Network error. Please try again.');
@@ -204,7 +224,7 @@ export function SignupPage() {
 
   return (
     <main className="auth-page">
-      <div className="auth-card">
+      <form className="auth-card" onSubmit={handleSubmit} noValidate>
         <h2>Create your account</h2>
         {error && <div className="auth-error">{error}</div>}
         <label className="auth-label">
@@ -215,6 +235,7 @@ export function SignupPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             autoComplete="email"
+            required
           />
         </label>
         <label className="auth-label">
@@ -226,6 +247,8 @@ export function SignupPage() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="At least 8 characters"
             autoComplete="new-password"
+            minLength={8}
+            required
           />
         </label>
         <label className="auth-label">
@@ -236,16 +259,17 @@ export function SignupPage() {
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
             autoComplete="new-password"
-            onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
+            minLength={8}
+            required
           />
         </label>
-        <button className="btn btn-primary auth-submit" onClick={handleSubmit} disabled={submitting}>
+        <button className="btn btn-primary auth-submit" type="submit" disabled={submitting}>
           {submitting ? 'Creating account...' : 'Sign up'}
         </button>
         <p className="auth-switch">
           Already have an account? <a href="#login">Log in</a>
         </p>
-      </div>
+      </form>
     </main>
   );
 }

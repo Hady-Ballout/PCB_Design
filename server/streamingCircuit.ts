@@ -1,7 +1,8 @@
 import { normalizeAiCircuit, reconcileCircuitRevision } from './circuitResponse.js';
 import { toSpice } from '../src/lib/pcbGenerator.js';
+import type { Circuit, Component, StreamingSpiceResult } from './types.js';
 
-const readStringProperty = (text, name) => {
+const readStringProperty = (text: string, name: string): string => {
   const match = String(text || '').match(new RegExp(`"${name}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"`));
   if (!match) return '';
   try {
@@ -11,19 +12,19 @@ const readStringProperty = (text, name) => {
   }
 };
 
-const readNumberProperty = (text, name) => {
+const readNumberProperty = (text: string, name: string): number => {
   const match = String(text || '').match(new RegExp(`"${name}"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)`));
   return match ? Number(match[1]) : 0;
 };
 
-export const extractCompleteComponents = (text) => {
+export const extractCompleteComponents = (text: string): Partial<Component>[] => {
   const source = String(text || '');
   const propertyIndex = source.search(/"components"\s*:/);
   if (propertyIndex === -1) return [];
   const arrayStart = source.indexOf('[', propertyIndex);
   if (arrayStart === -1) return [];
 
-  const components = [];
+  const components: Partial<Component>[] = [];
   let objectStart = -1;
   let objectDepth = 0;
   let inString = false;
@@ -65,7 +66,11 @@ export const extractCompleteComponents = (text) => {
   return components;
 };
 
-export const buildStreamingSpice = (text, prompt = '', existingCircuit = null) => {
+export const buildStreamingSpice = (
+  text: string,
+  prompt = '',
+  existingCircuit: Circuit | null = null,
+): StreamingSpiceResult => {
   const title = readStringProperty(text, 'title') || 'AI generated circuit';
   const components = extractCompleteComponents(text);
   if (components.length === 0 && !existingCircuit?.components?.length) {
@@ -81,11 +86,11 @@ export const buildStreamingSpice = (text, prompt = '', existingCircuit = null) =
     type: readStringProperty(text, 'type') || 'ai_generated',
     supplyVoltage: readNumberProperty(text, 'supplyVoltage') || 5,
     components,
-    notes: [],
+    notes: [] as string[],
   };
   const circuit = existingCircuit?.components?.length
     ? reconcileStreamingRevision(partialCircuit, existingCircuit, prompt)
-    : normalizeAiCircuit(partialCircuit, prompt);
+    : normalizeAiCircuit(partialCircuit as Record<string, unknown>, prompt);
 
   return {
     componentCount: circuit.components.length,
@@ -94,8 +99,12 @@ export const buildStreamingSpice = (text, prompt = '', existingCircuit = null) =
   };
 };
 
-const reconcileStreamingRevision = (partialCircuit, existingCircuit, prompt) => {
-  if (partialCircuit.components.length === 0) return normalizeAiCircuit(existingCircuit, prompt);
+const reconcileStreamingRevision = (
+  partialCircuit: { title: string; type: string; supplyVoltage: number; components: Partial<Component>[]; notes: string[] },
+  existingCircuit: Circuit,
+  prompt: string,
+): Circuit => {
+  if (partialCircuit.components.length === 0) return normalizeAiCircuit(existingCircuit as unknown as Record<string, unknown>, prompt);
 
   const partialByRef = new Map(
     partialCircuit.components.map((component) => [String(component.ref || '').toUpperCase(), component]),
@@ -113,5 +122,5 @@ const reconcileStreamingRevision = (partialCircuit, existingCircuit, prompt) => 
     type: partialCircuit.type === 'ai_generated' ? existingCircuit.type : partialCircuit.type,
     supplyVoltage: partialCircuit.supplyVoltage || existingCircuit.supplyVoltage,
     components: mergedComponents,
-  }, prompt, existingCircuit);
+  } as Record<string, unknown>, prompt, existingCircuit);
 };

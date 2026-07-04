@@ -1,18 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { buildSimulationDeck, chooseWaveformNodes, parseWaveformData } from './simulator.js';
+import type { Circuit } from './types.js';
 
-const circuit = {
+const circuit: Partial<Circuit> = {
   components: [
-    { ref: 'V1', nodes: ['VIN', '0'] },
-    { ref: 'R1', nodes: ['VIN', 'VOUT'] },
-    { ref: 'C1', nodes: ['VOUT', '0'] },
-    { ref: 'RLOAD', nodes: ['VOUT', '0'] },
+    { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VIN', '0'], footprint: '' },
+    { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VIN', 'VOUT'], footprint: '' },
+    { ref: 'C1', kind: 'capacitor', value: '100nF', nodes: ['VOUT', '0'], footprint: '' },
+    { ref: 'RLOAD', kind: 'load', value: '10k', nodes: ['VOUT', '0'], footprint: '' },
   ],
 };
 
 describe('ngspice simulator helpers', () => {
   it('chooses useful non-ground waveform nodes', () => {
-    expect(chooseWaveformNodes(circuit)).toEqual(['VIN', 'VOUT']);
+    expect(chooseWaveformNodes(circuit as Circuit)).toEqual(['VIN', 'VOUT']);
   });
 
   it('adds batch control commands to a SPICE deck', () => {
@@ -24,15 +25,15 @@ describe('ngspice simulator helpers', () => {
   });
 
   it('injects the built-in LM358 model into older op amp decks', () => {
-    const opampCircuit = {
+    const opampCircuit: Partial<Circuit> = {
       components: [
-        { ref: 'XU1', kind: 'opamp', nodes: ['0', 'N1', 'VOUT', 'VCC', 'VEE'] },
+        { ref: 'XU1', kind: 'opamp', value: 'LM358', nodes: ['0', 'N1', 'VOUT', 'VCC', 'VEE'], footprint: '' },
       ],
     };
     const deck = buildSimulationDeck(
       '* op amp\nXU1 0 N1 VOUT VCC VEE LM358\n.end',
       ['VOUT'],
-      opampCircuit,
+      opampCircuit as Circuit,
     );
 
     expect(deck).toContain('.subckt LM358 INP INN OUT VCC VEE');

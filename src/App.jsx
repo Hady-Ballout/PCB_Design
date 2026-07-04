@@ -4,6 +4,7 @@ import {
   chatTitleFromPrompt,
   createChat,
   loadChatStore,
+  migrateChatDiagram,
   saveChatStore,
 } from './lib/chatStore.js';
 import {
@@ -26,6 +27,18 @@ import { AuthProvider, useAuth, HomePage, LoginPage, SignupPage, VerifyPage } fr
 import './auth.css';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
+
+const AUTH_PAGES = new Set(['login', 'signup']);
+const PUBLIC_PAGES = new Set(['home', 'login', 'signup', 'verify']);
+
+const pageFromHash = () => {
+  const hash = window.location.hash;
+  if (hash.startsWith('#verify')) return 'verify';
+  if (hash === '#login') return 'login';
+  if (hash === '#signup') return 'signup';
+  if (hash === '#waveform') return 'waveform';
+  return 'workspace';
+};
 
 const downloadText = (filename, text, mime = 'text/plain') => {
   const blob = new Blob([text], { type: mime });
@@ -1158,14 +1171,7 @@ function App() {
   const [editorSplit, setEditorSplit] = useState(loadEditorSplit);
   const [resizingAxis, setResizingAxis] = useState(null);
   const [chatPanelView, setChatPanelView] = useState('conversation');
-  const [page, setPage] = useState(() => {
-    const hash = window.location.hash;
-    if (hash.startsWith('#verify')) return 'verify';
-    if (hash === '#login') return 'login';
-    if (hash === '#signup') return 'signup';
-    if (hash === '#waveform') return 'waveform';
-    return 'workspace';
-  });
+  const [page, setPage] = useState(pageFromHash);
   const [generatingChatId, setGeneratingChatId] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const messagesEndRef = useRef(null);
@@ -1272,29 +1278,45 @@ function App() {
 
   useEffect(() => {
     const syncPageFromHash = () => {
-      const hash = window.location.hash;
-      if (hash.startsWith('#verify')) {
-        setPage('verify');
-        return;
-      }
-      if (hash === '#login') {
-        setPage('login');
-        return;
-      }
-      if (hash === '#signup') {
-        setPage('signup');
-        return;
-      }
-      if (hash === '#waveform') {
-        setPage('waveform');
-        return;
-      }
-      setPage('workspace');
+      setPage(pageFromHash());
     };
 
     window.addEventListener('hashchange', syncPageFromHash);
     return () => window.removeEventListener('hashchange', syncPageFromHash);
   }, []);
+
+  useEffect(() => {
+    if (loading) return;
+
+    if (!user && !PUBLIC_PAGES.has(page)) {
+      if (window.location.hash !== '#login') {
+        window.location.hash = 'login';
+      } else {
+        setPage('login');
+      }
+      return;
+    }
+
+    if (user && AUTH_PAGES.has(page)) {
+      if (window.location.hash) {
+        window.location.hash = '';
+      } else {
+        setPage('workspace');
+      }
+    }
+  }, [loading, user, page]);
+
+  useEffect(() => {
+    const active = chatStore.chats.find((c) => c.id === chatStore.activeChatId);
+    if (!active) return;
+    const migrated = migrateChatDiagram(active);
+    if (migrated !== active) {
+      setChatStore((prev) => ({
+        ...prev,
+        chats: prev.chats.map((c) => (c.id === active.id ? migrated : c)),
+      }));
+    }
+  }, [chatStore.activeChatId]);
 
   useEffect(() => {
     if (result?.diagram && !activeChat?.editedDiagram) {
@@ -2172,17 +2194,15 @@ function App() {
 
   if (loading) return <div className="loading-screen">Loading...</div>;
 
-  if (page === 'home') return <HomePage />;
-  if (page === 'login') return <LoginPage />;
-  if (page === 'signup') return <SignupPage />;
-  if (page === 'verify') return <VerifyPage />;
+  const visiblePage = user && AUTH_PAGES.has(page) ? 'workspace' : page;
 
-  if (!user) {
-    window.location.hash = 'login';
-    return null;
-  }
+  if (!user && !PUBLIC_PAGES.has(visiblePage)) return <LoginPage />;
+  if (visiblePage === 'home') return <HomePage />;
+  if (visiblePage === 'login') return <LoginPage />;
+  if (visiblePage === 'signup') return <SignupPage />;
+  if (visiblePage === 'verify') return <VerifyPage />;
 
-  if (page === 'waveform') {
+  if (visiblePage === 'waveform') {
     return (
       <main className="app-shell waveform-page-shell">
         <section className="waveform-page">

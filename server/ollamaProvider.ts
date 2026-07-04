@@ -1,6 +1,17 @@
 import { normalizeChatMemory, sanitizeConversationHistory } from './chatMemory.js';
 import { circuitKnowledgePrompt } from './circuitKnowledge.js';
 import { parseSpiceNetlist } from '../src/lib/circuitSync.js';
+import type {
+  ChatMemory,
+  ChatMessage,
+  Circuit,
+  CorrectionContext,
+  CurrentDesign,
+  OllamaRequestBody,
+  ParsedCircuitResponse,
+  ProviderConfig,
+  StreamState,
+} from './types.js';
 
 const SYSTEM_PROMPT = `You are a JSON API for beginner-safe electronics circuit generation.
 Return exactly one valid JSON object and no other text.
@@ -91,7 +102,7 @@ const SCHEMATIC_SCHEMA = {
       },
     },
   },
-};
+} as const;
 
 export const CIRCUIT_SCHEMA = {
   type: 'object',
@@ -110,20 +121,9 @@ export const CIRCUIT_SCHEMA = {
           kind: {
             type: 'string',
             enum: [
-              'resistor',
-              'capacitor',
-              'inductor',
-              'diode',
-              'led',
-              'bjt_npn',
-              'bjt_pnp',
-              'mosfet_n',
-              'mosfet_p',
-              'opamp',
-              'regulator',
-              'voltage_source',
-              'signal_source',
-              'load',
+              'resistor', 'capacitor', 'inductor', 'diode', 'led',
+              'bjt_npn', 'bjt_pnp', 'mosfet_n', 'mosfet_p',
+              'opamp', 'regulator', 'voltage_source', 'signal_source', 'load',
             ],
           },
           value: { type: 'string' },
@@ -137,7 +137,7 @@ export const CIRCUIT_SCHEMA = {
     schematic: SCHEMATIC_SCHEMA,
   },
   required: ['title', 'type', 'supplyVoltage', 'nodes', 'components', 'notes'],
-};
+} as const;
 
 export const AI_RESPONSE_SCHEMA = {
   type: 'object',
@@ -147,9 +147,9 @@ export const AI_RESPONSE_SCHEMA = {
     spice: { type: 'string' },
   },
   required: ['reply', 'circuit', 'spice'],
-};
+} as const;
 
-function findBalancedJson(text) {
+function findBalancedJson(text: string): { jsonText: string; balanced: boolean } {
   const start = text.indexOf('{');
   if (start === -1) return { jsonText: '', balanced: false };
 
@@ -159,14 +159,8 @@ function findBalancedJson(text) {
 
   for (let index = start; index < text.length; index += 1) {
     const char = text[index];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (char === '\\' && inString) {
-      escaped = true;
-      continue;
-    }
+    if (escaped) { escaped = false; continue; }
+    if (char === '\\' && inString) { escaped = true; continue; }
     if (char === '"') inString = !inString;
     if (inString) continue;
 
@@ -179,18 +173,27 @@ function findBalancedJson(text) {
 }
 
 class CircuitGenerationError extends Error {
-  constructor(code, message, cause) {
+  code: string;
+  constructor(code: string, message: string, cause?: Error) {
     super(message, cause ? { cause } : undefined);
     this.name = 'CircuitGenerationError';
     this.code = code;
   }
 }
 
-const isPlainObject = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
-const cleanReply = (value) => String(value || '').trim().replace(/\s+/g, ' ').slice(0, 1200);
+const cleanReply = (value: unknown): string => String(value || '').trim().replace(/\s+/g, ' ').slice(0, 1200);
 
-const describeComponent = (component) => {
+interface ComponentLike {
+  ref?: string;
+  kind?: string;
+  value?: string;
+  nodes?: string[];
+}
+
+const describeComponent = (component: ComponentLike): string => {
   const ref = String(component?.ref || '').toUpperCase();
   const kind = String(component?.kind || 'component');
   const value = String(component?.value || 'unknown value');
@@ -198,8 +201,8 @@ const describeComponent = (component) => {
   return `${ref}: ${kind}, value=${value}, nodes=${nodes}`;
 };
 
-const currentCircuitInventory = (circuit) => {
-  const components = Array.isArray(circuit?.components) ? circuit.components : [];
+const currentCircuitInventory = (circuit: Circuit | null | undefined): string => {
+  const components = Array.isArray(circuit?.components) ? circuit!.components : [];
   if (!components.length) return '';
   const refs = components.map((component) => String(component.ref || '').toUpperCase()).filter(Boolean);
   const loadRefs = components
@@ -218,36 +221,36 @@ const currentCircuitInventory = (circuit) => {
   ].filter(Boolean).join('\n');
 };
 
-export function validateCircuitResponse(circuit) {
-  const errors = [];
+export function validateCircuitResponse(circuit: Record<string, unknown>): string[] {
+  const errors: string[] = [];
   if (!isPlainObject(circuit)) return ['response must be a JSON object'];
 
   if (typeof circuit.title !== 'string') errors.push('title must be a string');
   if (typeof circuit.type !== 'string') errors.push('type must be a string');
   if (!Number.isFinite(circuit.supplyVoltage)) errors.push('supplyVoltage must be a number');
-  if (!Array.isArray(circuit.nodes) || circuit.nodes.length === 0 || circuit.nodes.some((node) => typeof node !== 'string')) {
+  if (!Array.isArray(circuit.nodes) || (circuit.nodes as unknown[]).length === 0 || (circuit.nodes as unknown[]).some((node: unknown) => typeof node !== 'string')) {
     errors.push('nodes must be a non-empty array of strings');
   }
-  if (!Array.isArray(circuit.notes) || circuit.notes.some((note) => typeof note !== 'string')) {
+  if (!Array.isArray(circuit.notes) || (circuit.notes as unknown[]).some((note: unknown) => typeof note !== 'string')) {
     errors.push('notes must be an array of strings');
   }
   if (circuit.schematic !== undefined && !isPlainObject(circuit.schematic)) {
     errors.push('schematic must be an object when present');
   }
-  if (!Array.isArray(circuit.components) || circuit.components.length === 0) {
+  if (!Array.isArray(circuit.components) || (circuit.components as unknown[]).length === 0) {
     errors.push('components must be a non-empty array');
   } else {
     const allowedKinds = new Set(CIRCUIT_SCHEMA.properties.components.items.properties.kind.enum);
-    circuit.components.forEach((component, index) => {
+    (circuit.components as Record<string, unknown>[]).forEach((component, index) => {
       const label = `components[${index}]`;
       if (!isPlainObject(component)) {
         errors.push(`${label} must be an object`);
         return;
       }
       if (typeof component.ref !== 'string' || !component.ref) errors.push(`${label}.ref must be a non-empty string`);
-      if (!allowedKinds.has(component.kind)) errors.push(`${label}.kind is not supported`);
+      if (!allowedKinds.has(component.kind as string)) errors.push(`${label}.kind is not supported`);
       if (typeof component.value !== 'string' || !component.value) errors.push(`${label}.value must be a non-empty string`);
-      if (!Array.isArray(component.nodes) || component.nodes.length === 0 || component.nodes.some((node) => typeof node !== 'string')) {
+      if (!Array.isArray(component.nodes) || (component.nodes as unknown[]).length === 0 || (component.nodes as unknown[]).some((node: unknown) => typeof node !== 'string')) {
         errors.push(`${label}.nodes must be a non-empty array of strings`);
       }
       if (typeof component.footprint !== 'string') errors.push(`${label}.footprint must be a string`);
@@ -260,19 +263,19 @@ export function validateCircuitResponse(circuit) {
 const OPAMP_MODEL = 'LM358';
 const OPAMP_MODEL_ALIASES = new Set(['', 'GENERIC', 'OPAMP', 'UNKNOWN']);
 
-const normalizeOpampModel = (value) => {
+const normalizeOpampModel = (value: unknown): string => {
   const normalized = String(value || '').trim().toUpperCase();
   return OPAMP_MODEL_ALIASES.has(normalized) || normalized === OPAMP_MODEL ? OPAMP_MODEL : normalized;
 };
 
-const isSourceKind = (kind) => kind === 'voltage_source' || kind === 'signal_source';
+const isSourceKind = (kind: string): boolean => kind === 'voltage_source' || kind === 'signal_source';
 
-const voltageValue = (value) => {
+const voltageValue = (value: string): string => {
   const text = String(value || '').trim();
   return /v$/i.test(text) ? text : `${text}V`;
 };
 
-const sourceExpressionKind = (value) => {
+const sourceExpressionKind = (value: string): string | null => {
   const expression = String(value || '').trim();
   if (/^(SINE|SIN|PULSE|PWL|EXP|AC)\b/i.test(expression)) return 'signal_source';
   if (/^DC\b/i.test(expression)) return 'voltage_source';
@@ -280,24 +283,26 @@ const sourceExpressionKind = (value) => {
   return null;
 };
 
-const normalizeSourceComponent = (component) => {
+interface SourceComponent {
+  kind: string;
+  value: string;
+  [key: string]: unknown;
+}
+
+const normalizeSourceComponent = (component: SourceComponent): SourceComponent => {
   if (!isSourceKind(component.kind)) return component;
   const expression = String(component.value || '').trim();
   const kind = sourceExpressionKind(expression) || component.kind;
   const dcMatch = expression.match(/^DC\s+(.+)$/i);
   if (kind === 'voltage_source') {
-    return {
-      ...component,
-      kind,
-      value: voltageValue(dcMatch ? dcMatch[1] : expression),
-    };
+    return { ...component, kind, value: voltageValue(dcMatch ? dcMatch[1] : expression) };
   }
   return { ...component, kind, value: expression };
 };
 
-export const normalizeCircuitForValidation = (circuit) => ({
+export const normalizeCircuitForValidation = (circuit: Record<string, unknown>): Record<string, unknown> => ({
   ...circuit,
-  components: (circuit.components || []).map((component) => {
+  components: ((circuit.components as SourceComponent[]) || []).map((component) => {
     const normalizedSource = normalizeSourceComponent(component);
     return normalizedSource.kind === 'opamp'
       ? { ...normalizedSource, value: OPAMP_MODEL }
@@ -305,22 +310,29 @@ export const normalizeCircuitForValidation = (circuit) => ({
   }),
 });
 
-const normalizeSignatureValue = (component) => (
+const normalizeSignatureValue = (component: { kind: string; value: string }): string => (
   component.kind === 'opamp'
     ? normalizeOpampModel(component.value)
     : String(component.value || '').trim().toUpperCase()
 );
 
-const electricalSignature = (circuit) => (
-  circuit?.components || []
+interface SignatureEntry {
+  ref: string;
+  kind: string;
+  value: string;
+  nodes: string[];
+}
+
+const electricalSignature = (circuit: Record<string, unknown> | null | undefined): SignatureEntry[] => (
+  (circuit?.components as ComponentLike[]) || []
 ).map((component) => ({
   ref: String(component.ref || '').toUpperCase(),
   kind: String(component.kind || ''),
-  value: normalizeSignatureValue(component),
+  value: normalizeSignatureValue(component as { kind: string; value: string }),
   nodes: (component.nodes || []).map((node) => String(node)),
 })).sort((a, b) => a.ref.localeCompare(b.ref));
 
-const describeSignatureMismatch = (expected, actual) => {
+const describeSignatureMismatch = (expected: SignatureEntry[], actual: SignatureEntry[]): string => {
   const expectedByRef = new Map(expected.map((component) => [component.ref, component]));
   const actualByRef = new Map(actual.map((component) => [component.ref, component]));
   const missing = expected.filter((component) => !actualByRef.has(component.ref)).map((component) => component.ref);
@@ -345,7 +357,7 @@ const describeSignatureMismatch = (expected, actual) => {
   return 'SPICE does not match the JSON circuit.';
 };
 
-export function validateAiSpice(spice, circuit) {
+export function validateAiSpice(spice: unknown, circuit: Record<string, unknown>): void {
   if (typeof spice !== 'string' || !spice.trim()) {
     throw new CircuitGenerationError('spice_validation', 'AI response must include a non-empty spice string.');
   }
@@ -365,7 +377,7 @@ export function validateAiSpice(spice, circuit) {
   }
 }
 
-export function parseCircuitResponse(text) {
+export function parseCircuitResponse(text: string): ParsedCircuitResponse {
   const trimmed = text.trim();
   const { jsonText, balanced } = findBalancedJson(trimmed);
   if (!jsonText) {
@@ -375,11 +387,11 @@ export function parseCircuitResponse(text) {
     throw new CircuitGenerationError('json_truncated', 'AI response ended before the JSON object was complete.');
   }
 
-  let responseObject;
+  let responseObject: Record<string, unknown>;
   try {
     responseObject = JSON.parse(jsonText);
   } catch (error) {
-    throw new CircuitGenerationError('json_syntax', `AI returned malformed JSON: ${error.message}`, error);
+    throw new CircuitGenerationError('json_syntax', `AI returned malformed JSON: ${(error as Error).message}`, error as Error);
   }
 
   if (!isPlainObject(responseObject)) {
@@ -393,7 +405,7 @@ export function parseCircuitResponse(text) {
     throw new CircuitGenerationError('schema_validation', 'AI response must include a circuit object.');
   }
 
-  const circuit = responseObject.circuit;
+  const circuit = responseObject.circuit as Record<string, unknown>;
   const validationErrors = validateCircuitResponse(circuit);
   if (validationErrors.length) {
     throw new CircuitGenerationError(
@@ -404,15 +416,15 @@ export function parseCircuitResponse(text) {
   const normalizedCircuit = normalizeCircuitForValidation(circuit);
   validateAiSpice(responseObject.spice, normalizedCircuit);
 
-  return { reply, circuit: normalizedCircuit, spice: responseObject.spice };
+  return { reply, circuit: normalizedCircuit as unknown as Circuit, spice: responseObject.spice as string };
 }
 
-const positiveIntegerOption = (value, fallback) => {
-  const parsed = Number.parseInt(value, 10);
+const positiveIntegerOption = (value: string | undefined, fallback: number): number => {
+  const parsed = Number.parseInt(value || '', 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-const providerConfig = () => {
+const providerConfig = (): ProviderConfig => {
   const provider = String(process.env.AI_PROVIDER || 'ollama').toLowerCase();
   if (provider === 'ollama') {
     return {
@@ -432,13 +444,13 @@ const providerConfig = () => {
 };
 
 export const buildOllamaRequestBody = (
-  prompt,
-  history,
-  stream,
-  currentDesign = null,
-  memory = null,
-  correction = null,
-) => {
+  prompt: string,
+  history: ChatMessage[],
+  stream: boolean,
+  currentDesign: CurrentDesign | null = null,
+  memory: Partial<ChatMemory> | null = null,
+  correction: CorrectionContext | null = null,
+): OllamaRequestBody => {
   const conversation = sanitizeConversationHistory(history)
     .map((message) => ({
       role: message.role,
@@ -471,7 +483,7 @@ export const buildOllamaRequestBody = (
   return {
     model: process.env.OLLAMA_MODEL || 'llama3.2:latest',
     stream,
-    format: AI_RESPONSE_SCHEMA,
+    format: AI_RESPONSE_SCHEMA as unknown as Record<string, unknown>,
     options: {
       num_ctx: positiveIntegerOption(process.env.OLLAMA_NUM_CTX, 8192),
       num_predict: positiveIntegerOption(process.env.OLLAMA_NUM_PREDICT, 4096),
@@ -502,49 +514,47 @@ This is a follow-up whenever canonical design context is present. Preserve all p
   };
 };
 
-const authHeaders = (apiKey = '') => {
-  const headers = { 'Content-Type': 'application/json' };
+const authHeaders = (apiKey = ''): Record<string, string> => {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
   return headers;
 };
 
-const ollamaHeaders = () => authHeaders(process.env.OLLAMA_API_KEY);
+const ollamaHeaders = (): Record<string, string> => authHeaders(process.env.OLLAMA_API_KEY);
 
 const retryableOutputCodes = new Set([
-  'json_missing',
-  'json_truncated',
-  'json_syntax',
-  'schema_validation',
-  'spice_validation',
+  'json_missing', 'json_truncated', 'json_syntax', 'schema_validation', 'spice_validation',
 ]);
 
-const finalOutputError = (error) => new CircuitGenerationError(
+const finalOutputError = (error: CircuitGenerationError): CircuitGenerationError => new CircuitGenerationError(
   error.code || 'invalid_output',
   `Circuit generation failed after one automatic correction attempt. ${error.message}`,
   error,
 );
 
-const parseWithCorrectionRetry = async (requestAttempt) => {
-  let correction = null;
+const parseWithCorrectionRetry = async (
+  requestAttempt: (correction: CorrectionContext | null, attempt: number) => Promise<string>,
+): Promise<ParsedCircuitResponse> => {
+  let correction: CorrectionContext | null = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const content = await requestAttempt(correction, attempt);
     try {
       return parseCircuitResponse(content);
     } catch (error) {
-      if (attempt === 1 || !retryableOutputCodes.has(error.code)) throw finalOutputError(error);
-      correction = { content, error: error.message };
+      if (attempt === 1 || !retryableOutputCodes.has((error as CircuitGenerationError).code)) throw finalOutputError(error as CircuitGenerationError);
+      correction = { content, error: (error as Error).message };
     }
   }
   throw new CircuitGenerationError('invalid_output', 'Circuit generation did not return a usable response.');
 };
 
-const ollamaUrl = () => `${(process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '')}/api/chat`;
+const ollamaUrl = (): string => `${(process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '')}/api/chat`;
 
-const isZaiProvider = (provider) => new Set(['zai', 'zhipu', 'bigmodel']).has(provider);
+const isZaiProvider = (provider: string): boolean => new Set(['zai', 'zhipu', 'bigmodel']).has(provider);
 
-const shouldUseJsonResponseFormat = () => process.env.AI_RESPONSE_FORMAT !== 'text';
+const shouldUseJsonResponseFormat = (): boolean => process.env.AI_RESPONSE_FORMAT !== 'text';
 
-const buildOpenAiCompatibleBody = (config, ollamaBody) => ({
+const buildOpenAiCompatibleBody = (config: ProviderConfig, ollamaBody: OllamaRequestBody): Record<string, unknown> => ({
   model: config.model,
   temperature: ollamaBody.options.temperature,
   max_tokens: positiveIntegerOption(process.env.AI_MAX_TOKENS, isZaiProvider(config.provider) ? 12000 : 4096),
@@ -558,7 +568,7 @@ const buildOpenAiCompatibleBody = (config, ollamaBody) => ({
   messages: ollamaBody.messages,
 });
 
-const openAiCompatibleHeaders = (config) => {
+const openAiCompatibleHeaders = (config: ProviderConfig): Record<string, string> => {
   const headers = authHeaders(config.apiKey);
   if (config.provider === 'openrouter') {
     headers['HTTP-Referer'] = 'https://pcb-pilot.web.app';
@@ -567,14 +577,14 @@ const openAiCompatibleHeaders = (config) => {
   return headers;
 };
 
-const openAiCompatibleUrl = (config) => {
+const openAiCompatibleUrl = (config: ProviderConfig): string => {
   if (!config.baseUrl) throw new Error('AI_API_URL is not set.');
   if (!config.model) throw new Error('AI_MODEL is not set.');
   if (!config.apiKey) throw new Error('AI_API_KEY is not set.');
   return `${config.baseUrl.replace(/\/$/, '')}/chat/completions`;
 };
 
-const stringifyContentPart = (part) => {
+const stringifyContentPart = (part: unknown): string => {
   if (typeof part === 'string') return part;
   if (!isPlainObject(part)) return '';
   if (typeof part.text === 'string') return part.text;
@@ -583,10 +593,11 @@ const stringifyContentPart = (part) => {
   return '';
 };
 
-const readOpenAiCompatibleContent = (data) => {
-  const choice = data?.choices?.[0] || data?.data?.choices?.[0];
-  const message = choice?.message || choice?.delta || choice;
-  const content = message?.content ?? data?.output_text ?? data?.content;
+const readOpenAiCompatibleContent = (data: Record<string, unknown>): string => {
+  const choice = (data?.choices as Record<string, unknown>[])?.[0]
+    || ((data?.data as Record<string, unknown>)?.choices as Record<string, unknown>[])?.[0];
+  const message = (choice?.message || choice?.delta || choice) as Record<string, unknown> | undefined;
+  const content = message?.content ?? (data as Record<string, unknown>)?.output_text ?? (data as Record<string, unknown>)?.content;
 
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.map(stringifyContentPart).join('');
@@ -594,14 +605,15 @@ const readOpenAiCompatibleContent = (data) => {
   return '';
 };
 
-const compactResponsePreview = (data) => JSON.stringify(data)
+const compactResponsePreview = (data: Record<string, unknown>): string => JSON.stringify(data)
   .replace(/"content"\s*:\s*"[^"]{120,}"/g, '"content":"<long content omitted>"')
   .replace(/"reasoning_content"\s*:\s*"[^"]{120,}"/g, '"reasoning_content":"<long reasoning omitted>"')
   .slice(0, 500);
 
-const providerContentError = (config, data) => {
-  const choice = data?.choices?.[0] || data?.data?.choices?.[0];
-  const finishReason = choice?.finish_reason;
+const providerContentError = (config: ProviderConfig, data: Record<string, unknown>): CircuitGenerationError => {
+  const choice = (data?.choices as Record<string, unknown>[])?.[0]
+    || ((data?.data as Record<string, unknown>)?.choices as Record<string, unknown>[])?.[0];
+  const finishReason = (choice as Record<string, unknown>)?.finish_reason;
   if (finishReason === 'length') {
     return new CircuitGenerationError(
       'provider_response',
@@ -614,7 +626,14 @@ const providerContentError = (config, data) => {
   );
 };
 
-async function callOpenAiCompatible(config, prompt, history, currentDesign, memory, correction) {
+async function callOpenAiCompatible(
+  config: ProviderConfig,
+  prompt: string,
+  history: ChatMessage[],
+  currentDesign: CurrentDesign | null,
+  memory: Partial<ChatMemory> | null,
+  correction: CorrectionContext | null,
+): Promise<string> {
   const ollamaBody = buildOllamaRequestBody(prompt, history, false, currentDesign, memory, correction);
   const response = await fetch(openAiCompatibleUrl(config), {
     method: 'POST',
@@ -623,7 +642,7 @@ async function callOpenAiCompatible(config, prompt, history, currentDesign, memo
   });
 
   if (!response.ok) throw new Error(`${config.provider} returned ${response.status}: ${await response.text()}`);
-  const data = await response.json();
+  const data = await response.json() as Record<string, unknown>;
   const content = readOpenAiCompatibleContent(data);
   if (!content) {
     throw providerContentError(config, data);
@@ -631,7 +650,12 @@ async function callOpenAiCompatible(config, prompt, history, currentDesign, memo
   return content;
 }
 
-export async function generateCircuitWithOllama(prompt, history = [], currentDesign = null, memory = null) {
+export async function generateCircuitWithOllama(
+  prompt: string,
+  history: ChatMessage[] = [],
+  currentDesign: CurrentDesign | null = null,
+  memory: Partial<ChatMemory> | null = null,
+): Promise<ParsedCircuitResponse> {
   const config = providerConfig();
   if (config.provider !== 'ollama') {
     return parseWithCorrectionRetry((correction) =>
@@ -646,18 +670,18 @@ export async function generateCircuitWithOllama(prompt, history = [], currentDes
     });
 
     if (!response.ok) throw new Error(`Ollama returned ${response.status}: ${await response.text()}`);
-    const data = await response.json();
-    return data.message?.content || '';
+    const data = await response.json() as Record<string, unknown>;
+    return (data.message as Record<string, unknown>)?.content as string || '';
   });
 }
 
 export async function streamCircuitWithOllama(
-  prompt,
-  history = [],
-  currentDesign = null,
-  onContent = () => {},
-  memory = null,
-) {
+  prompt: string,
+  history: ChatMessage[] = [],
+  currentDesign: CurrentDesign | null = null,
+  onContent: (content: string, state: StreamState) => void = () => {},
+  memory: Partial<ChatMemory> | null = null,
+): Promise<ParsedCircuitResponse> {
   const config = providerConfig();
   if (config.provider !== 'ollama') {
     return parseWithCorrectionRetry(async (correction, attempt) => {
@@ -682,9 +706,9 @@ export async function streamCircuitWithOllama(
     let buffered = '';
     let content = '';
 
-    const consumeLine = (line) => {
+    const consumeLine = (line: string): void => {
       if (!line.trim()) return;
-      const event = JSON.parse(line);
+      const event = JSON.parse(line) as { error?: string; message?: { content?: string } };
       if (event.error) throw new Error(event.error);
       const token = event.message?.content || '';
       if (!token) return;

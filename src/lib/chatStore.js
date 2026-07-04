@@ -77,7 +77,7 @@ const normalizeChat = (chat) => {
   if (!chat || typeof chat !== 'object') return null;
   const base = createChat({ id: String(chat.id || createId()), now: Number(chat.createdAt) || Date.now() });
   const result = chat.result && typeof chat.result === 'object'
-    ? { ...chat.result, diagram: migrateDiagram(chat.result.diagram, chat.result.circuit) }
+    ? { ...chat.result }
     : null;
   return {
     ...base,
@@ -109,7 +109,7 @@ const normalizeChat = (chat) => {
       : null,
     editableCircuitJson: String(chat.editableCircuitJson || (chat.result?.circuit ? JSON.stringify(chat.result.circuit, null, 2) : '')),
     editedDiagram: chat.editedDiagram && typeof chat.editedDiagram === 'object'
-      ? migrateDiagram(chat.editedDiagram, chat.result?.circuit)
+      ? chat.editedDiagram
       : null,
     simulationRun: null,
     error: '',
@@ -153,6 +153,31 @@ export const saveChatStore = (store, storage = globalThis.localStorage) => {
   } catch {
     return false;
   }
+};
+
+export const migrateChatDiagram = (chat) => {
+  if (!chat) return chat;
+  let changed = false;
+  let result = chat.result;
+  let editedDiagram = chat.editedDiagram;
+
+  if (result?.diagram) {
+    const migrated = migrateDiagram(result.diagram, result.circuit);
+    if (migrated !== result.diagram) {
+      result = { ...result, diagram: migrated };
+      changed = true;
+    }
+  }
+
+  if (editedDiagram) {
+    const migrated = migrateDiagram(editedDiagram, result?.circuit);
+    if (migrated !== editedDiagram) {
+      editedDiagram = migrated;
+      changed = true;
+    }
+  }
+
+  return changed ? { ...chat, result, editedDiagram } : chat;
 };
 
 export const buildConversationContext = (messages) =>

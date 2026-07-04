@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildStreamingSpice, extractCompleteComponents } from './streamingCircuit.js';
+import type { Circuit } from './types.js';
 
 describe('streaming circuit helpers', () => {
   it('extracts only complete component objects from partial AI JSON', () => {
@@ -33,10 +34,11 @@ describe('streaming circuit helpers', () => {
   });
 
   it('edits an existing streamed circuit instead of starting from an empty deck', () => {
-    const existing = {
+    const existing: Circuit = {
       title: 'Existing filter',
       type: 'low_pass',
       supplyVoltage: 5,
+      nodes: ['IN', 'OUT', '0'],
       components: [
         { ref: 'V1', kind: 'signal_source', value: 'SINE(0 1 100)', nodes: ['IN', '0'], footprint: '' },
         { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['IN', 'OUT'], footprint: '' },

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-export function loadEnv() {
+export function loadEnv(): void {
   for (const file of ['.env', '.env.local']) {
     const path = resolve(process.cwd(), file);
     if (!existsSync(path)) continue;

@@ -1,10 +1,10 @@
-export async function sendVerificationEmail(to, token) {
+export async function sendVerificationEmail(to: string, token: string): Promise<void> {
   const apiKey = process.env.BREVO_API_KEY;
   if (!apiKey) throw new Error('BREVO_API_KEY is not set.');
 
   const senderEmail = process.env.BREVO_SENDER_EMAIL || 'noreply@pcbpilot.com';
   const senderName = process.env.BREVO_SENDER_NAME || 'PCB Pilot';
-  const frontendUrl = process.env.CORS_ORIGIN || 'http://127.0.0.1:5173';
+  const frontendUrl = process.env.CORS_ORIGIN || 'http://127.0.0.1:5174';
   const verifyLink = `${frontendUrl}/#verify?token=${token}`;
 
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {

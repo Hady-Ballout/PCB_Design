@@ -1,17 +1,18 @@
 import pg from 'pg';
 import { randomBytes, scryptSync } from 'node:crypto';
+import type { LocalUser, QueryResult } from './types.js';
 
-let pool;
-let localUsers = [];
+let pool: pg.Pool | undefined;
+let localUsers: LocalUser[] = [];
 let nextLocalUserId = 1;
 
-function hashPassword(password) {
+function hashPassword(password: string): string {
   const salt = randomBytes(16).toString('hex');
   const hash = scryptSync(password, salt, 64).toString('hex');
   return `${salt}:${hash}`;
 }
 
-function getPool() {
+function getPool(): pg.Pool {
   if (!pool) {
     pool = new pg.Pool({
       connectionString: process.env.DATABASE_URL,
@@ -21,11 +22,11 @@ function getPool() {
   return pool;
 }
 
-function localResult(rows = []) {
+function localResult<T = Record<string, unknown>>(rows: T[] = []): QueryResult<T> {
   return { rows };
 }
 
-function seedLocalAdmin() {
+function seedLocalAdmin(): void {
   const email = String(process.env.LOCAL_ADMIN_EMAIL || 'admin@local.test').trim().toLowerCase();
   const password = String(process.env.LOCAL_ADMIN_PASSWORD || 'PcbPilotLocal!2026');
 
@@ -39,7 +40,7 @@ function seedLocalAdmin() {
   }];
 }
 
-export async function initDb() {
+export async function initDb(): Promise<void> {
   if (!process.env.DATABASE_URL) {
     seedLocalAdmin();
     console.log('Local auth initialized without DATABASE_URL.');
@@ -59,8 +60,8 @@ export async function initDb() {
   console.log('Database initialized.');
 }
 
-export function query(text, params) {
-  if (process.env.DATABASE_URL) return getPool().query(text, params);
+export function query(text: string, params: unknown[]): Promise<QueryResult> | QueryResult {
+  if (process.env.DATABASE_URL) return getPool().query(text, params) as Promise<QueryResult>;
 
   const normalized = text.replace(/\s+/g, ' ').trim();
 
@@ -74,9 +75,9 @@ export function query(text, params) {
     localUsers.push({
       id: nextLocalUserId++,
       email,
-      password_hash: params[1],
+      password_hash: params[1] as string,
       verified: false,
-      verify_token: params[2],
+      verify_token: params[2] as string,
       created_at: new Date().toISOString(),
     });
     return localResult([]);

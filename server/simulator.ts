@@ -3,35 +3,42 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { addMissingSpiceModels } from '../src/lib/pcbGenerator.js';
+import type { Circuit, SimulationResult, WaveformSeries } from './types.js';
 
 const DEFAULT_TRAN = '.tran 10us 20ms';
-const getNgspiceCommand = () => process.env.NGSPICE_BINARY || (process.platform === 'win32' ? 'ngspice_con' : 'ngspice');
-const getTranCommand = (spice) => {
+const getNgspiceCommand = (): string => process.env.NGSPICE_BINARY || (process.platform === 'win32' ? 'ngspice_con' : 'ngspice');
+const getTranCommand = (spice: string): string => {
   const match = String(spice || '').match(/^\s*\.tran\s+(.+)$/im);
   return match ? `tran ${match[1].trim()}` : DEFAULT_TRAN.replace(/^\./, '');
 };
 
-const runProcess = (command, args, options = {}) =>
+interface ProcessResult {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+const runProcess = (command: string, args: string[], options: Record<string, unknown> = {}): Promise<ProcessResult> =>
   new Promise((resolve) => {
     const child = spawn(command, args, options);
     let stdout = '';
     let stderr = '';
 
-    child.stdout.on('data', (chunk) => {
+    child.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
     });
-    child.stderr.on('data', (chunk) => {
+    child.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString();
     });
-    child.on('error', (error) => {
+    child.on('error', (error: Error) => {
       resolve({ code: -1, stdout, stderr: error.message });
     });
-    child.on('close', (code) => {
+    child.on('close', (code: number | null) => {
       resolve({ code, stdout, stderr });
     });
   });
 
-export const chooseWaveformNodes = (circuit) => {
+export const chooseWaveformNodes = (circuit: Circuit | null | undefined): string[] => {
   const nodes = [...new Set((circuit?.components ?? []).flatMap((part) => part.nodes ?? []))]
     .map(String)
     .filter((node) => node && node !== '0');
@@ -40,7 +47,7 @@ export const chooseWaveformNodes = (circuit) => {
   return [...new Set([...preferred, ...nodes])].slice(0, 4);
 };
 
-export const buildSimulationDeck = (spice, nodes, circuit = null) => {
+export const buildSimulationDeck = (spice: string, nodes: string[], circuit: Circuit | null = null): string => {
   const withRequiredModels = addMissingSpiceModels(spice, circuit);
   const withoutEnd = withRequiredModels
     .replace(/\.control[\s\S]*?\.endc/gi, '')
@@ -64,7 +71,7 @@ export const buildSimulationDeck = (spice, nodes, circuit = null) => {
     .join('\n');
 };
 
-export const parseWaveformData = (raw, requestedNodes = []) => {
+export const parseWaveformData = (raw: string, requestedNodes: string[] = []): WaveformSeries[] => {
   const lines = String(raw || '')
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -93,7 +100,7 @@ export const parseWaveformData = (raw, requestedNodes = []) => {
   }));
 };
 
-export async function runNgspiceSimulation({ circuit, spice }) {
+export async function runNgspiceSimulation({ circuit, spice }: { circuit: Circuit; spice: string }): Promise<SimulationResult> {
   const nodes = chooseWaveformNodes(circuit);
   if (nodes.length === 0) {
     return {
@@ -155,7 +162,7 @@ export async function runNgspiceSimulation({ circuit, spice }) {
   } catch (error) {
     return {
       ok: false,
-      errors: [error.message],
+      errors: [(error as Error).message],
       warnings: [],
       rawOutput,
       waveform: { xLabel: 'Time (s)', yLabel: 'Voltage (V)', series: [] },

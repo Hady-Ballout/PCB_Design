@@ -1,6 +1,0 @@
-
-> prompt-to-pcb-generator@0.1.0 dev
-> node scripts/dev.mjs
-
-Local auth initialized without DATABASE_URL.
-Prompt-to-PCB API listening on http://127.0.0.1:8787

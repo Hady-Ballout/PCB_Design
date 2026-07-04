@@ -2,6 +2,7 @@ node_modules/
 dist/
 .vite/
 coverage/
+*.log
 *.local
 .env
 .env.local

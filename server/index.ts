@@ -1,4 +1,4 @@
-import { createServer } from 'node:http';
+import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { loadEnv } from './env.js';
 import { buildCircuitResponse, reconcileCircuitRevision } from './circuitResponse.js';
 import { normalizeChatMemory, sanitizeConversationHistory, updateChatMemory } from './chatMemory.js';
@@ -7,20 +7,21 @@ import { runNgspiceSimulation } from './simulator.js';
 import { buildStreamingSpice } from './streamingCircuit.js';
 import { initDb } from './db.js';
 import { handleSignup, handleLogin, handleVerifyEmail, handleMe, verifyJwt } from './auth.js';
+import type { ChatMemory, ChatMessage, Circuit, CurrentDesign, JwtPayload, StreamState } from './types.js';
 
 loadEnv();
 
 const port = Number(process.env.PORT || process.env.API_PORT || 8787);
 const host = process.env.HOST || '127.0.0.1';
-const corsOrigin = process.env.CORS_ORIGIN || 'http://127.0.0.1:5173';
-const aiProviderName = () => process.env.AI_PROVIDER || 'ollama';
-const aiModelName = () => (
+const corsOrigin = process.env.CORS_ORIGIN || 'http://127.0.0.1:5174';
+const aiProviderName = (): string => process.env.AI_PROVIDER || 'ollama';
+const aiModelName = (): string => (
   process.env.AI_PROVIDER && process.env.AI_PROVIDER !== 'ollama'
-    ? process.env.AI_MODEL
+    ? process.env.AI_MODEL || ''
     : process.env.OLLAMA_MODEL || 'llama3.2:latest'
 );
 
-const sendJson = (response, status, body) => {
+const sendJson = (response: ServerResponse, status: number, body: unknown): void => {
   response.writeHead(status, {
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': corsOrigin,
@@ -30,14 +31,14 @@ const sendJson = (response, status, body) => {
   response.end(JSON.stringify(body));
 };
 
-const readJsonBody = async (request) => {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
+const readJsonBody = async (request: IncomingMessage): Promise<Record<string, unknown>> => {
+  const chunks: Buffer[] = [];
+  for await (const chunk of request) chunks.push(chunk as Buffer);
   const raw = Buffer.concat(chunks).toString('utf8');
   return raw ? JSON.parse(raw) : {};
 };
 
-const startJsonStream = (response) => {
+const startJsonStream = (response: ServerResponse): void => {
   response.writeHead(200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
@@ -47,18 +48,18 @@ const startJsonStream = (response) => {
   });
 };
 
-const writeStreamEvent = (response, event) => {
+const writeStreamEvent = (response: ServerResponse, event: unknown): void => {
   response.write(`${JSON.stringify(event)}\n`);
 };
 
-function getUser(request) {
+function getUser(request: IncomingMessage): JwtPayload | null {
   const auth = request.headers.authorization || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!token) return null;
   return verifyJwt(token);
 }
 
-const server = createServer(async (request, response) => {
+const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
   if (request.method === 'OPTIONS') {
     sendJson(response, 204, {});
     return;
@@ -79,7 +80,7 @@ const server = createServer(async (request, response) => {
       const result = await handleSignup(body);
       sendJson(response, result.status, result.body);
     } catch (error) {
-      sendJson(response, 500, { error: error.message });
+      sendJson(response, 500, { error: (error as Error).message });
     }
     return;
   }
@@ -90,7 +91,7 @@ const server = createServer(async (request, response) => {
       const result = await handleLogin(body);
       sendJson(response, result.status, result.body);
     } catch (error) {
-      sendJson(response, 500, { error: error.message });
+      sendJson(response, 500, { error: (error as Error).message });
     }
     return;
   }
@@ -98,10 +99,10 @@ const server = createServer(async (request, response) => {
   if (request.url?.startsWith('/api/auth/verify') && request.method === 'POST') {
     try {
       const body = await readJsonBody(request);
-      const result = await handleVerifyEmail(body.token);
+      const result = await handleVerifyEmail(body.token as string | undefined);
       sendJson(response, result.status, result.body);
     } catch (error) {
-      sendJson(response, 500, { error: error.message });
+      sendJson(response, 500, { error: (error as Error).message });
     }
     return;
   }
@@ -111,7 +112,7 @@ const server = createServer(async (request, response) => {
       const result = await handleMe(request);
       sendJson(response, result.status, result.body);
     } catch (error) {
-      sendJson(response, 500, { error: error.message });
+      sendJson(response, 500, { error: (error as Error).message });
     }
     return;
   }
@@ -131,9 +132,9 @@ const server = createServer(async (request, response) => {
         return;
       }
 
-      const messages = Array.isArray(body.messages) ? body.messages : [];
-      const currentDesign = body.currentDesign?.circuit ? body.currentDesign : null;
-      const memory = normalizeChatMemory(body.memory);
+      const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
+      const currentDesign = (body.currentDesign as CurrentDesign)?.circuit ? body.currentDesign as CurrentDesign : null;
+      const memory = normalizeChatMemory(body.memory as Partial<ChatMemory> | null);
       const contextDiagnostics = {
         contextTurnCount: sanitizeConversationHistory(messages).length,
         revision: Boolean(currentDesign),
@@ -150,8 +151,8 @@ const server = createServer(async (request, response) => {
       });
 
       let lastSpiceEvent = '';
-      const aiResponse = await streamCircuitWithOllama(prompt, messages, currentDesign, (content, streamState) => {
-        const partial = buildStreamingSpice(content, prompt, currentDesign?.circuit);
+      const aiResponse = await streamCircuitWithOllama(prompt, messages, currentDesign, (content: string, streamState: StreamState) => {
+        const partial = buildStreamingSpice(content, prompt, currentDesign?.circuit ?? null);
         const eventKey = `${streamState.attempt}:${partial.spice}`;
         if (eventKey === lastSpiceEvent) return;
         lastSpiceEvent = eventKey;
@@ -162,12 +163,12 @@ const server = createServer(async (request, response) => {
           ...partial,
         });
       }, memory);
-      const circuit = reconcileCircuitRevision(aiResponse.circuit, prompt, currentDesign?.circuit);
-      let updatedMemory = memory;
+      const circuit = reconcileCircuitRevision(aiResponse.circuit as unknown as Record<string, unknown>, prompt, currentDesign?.circuit ?? null);
+      let updatedMemory: ChatMemory = memory;
       try {
         updatedMemory = updateChatMemory(memory, prompt, circuit);
       } catch (memoryError) {
-        console.error(`[chat-memory] ${memoryError.message}`);
+        console.error(`[chat-memory] ${(memoryError as Error).message}`);
       }
       writeStreamEvent(response, {
         type: 'complete',
@@ -180,13 +181,13 @@ const server = createServer(async (request, response) => {
       });
       response.end();
     } catch (error) {
-      const errorCode = error.code || 'generation_failed';
-      console.error(`[circuit-generation:${errorCode}] ${error.message}`);
+      const errorCode = (error as Error & { code?: string }).code || 'generation_failed';
+      console.error(`[circuit-generation:${errorCode}] ${(error as Error).message}`);
       if (response.headersSent) {
-        writeStreamEvent(response, { type: 'error', code: errorCode, error: error.message });
+        writeStreamEvent(response, { type: 'error', code: errorCode, error: (error as Error).message });
         response.end();
       } else {
-        sendJson(response, 500, { code: errorCode, error: error.message });
+        sendJson(response, 500, { code: errorCode, error: (error as Error).message });
       }
     }
     return;
@@ -201,12 +202,12 @@ const server = createServer(async (request, response) => {
       }
 
       const simulation = await runNgspiceSimulation({
-        circuit: body.circuit,
-        spice: body.spice,
+        circuit: body.circuit as Circuit,
+        spice: body.spice as string,
       });
       sendJson(response, simulation.ok ? 200 : 422, simulation);
     } catch (error) {
-      sendJson(response, 500, { error: error.message });
+      sendJson(response, 500, { error: (error as Error).message });
     }
     return;
   }

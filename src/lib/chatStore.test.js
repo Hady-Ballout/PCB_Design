@@ -5,6 +5,7 @@ import {
   chatTitleFromPrompt,
   createChat,
   loadChatStore,
+  migrateChatDiagram,
   saveChatStore,
 } from './chatStore.js';
 import { LAYOUT_VERSION, layoutCircuitDiagram } from './schematicLayout.js';
@@ -121,7 +122,7 @@ describe('chat store', () => {
     };
     storage.setItem(CHAT_STORAGE_KEY, JSON.stringify({ chats: [chat], activeChatId: chat.id }));
 
-    const loaded = loadChatStore(storage).chats[0];
+    const loaded = migrateChatDiagram(loadChatStore(storage).chats[0]);
     expect(loaded.result.circuit).toEqual(circuit);
     expect(loaded.result.diagram.layoutVersion).toBe(LAYOUT_VERSION);
     expect(loaded.editedDiagram.layoutVersion).toBe(LAYOUT_VERSION);

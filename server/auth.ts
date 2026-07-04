@@ -1,16 +1,18 @@
 import { randomBytes, scryptSync, timingSafeEqual, createHmac } from 'node:crypto';
+import type { IncomingMessage } from 'node:http';
 import { query } from './db.js';
 import { sendVerificationEmail } from './brevo.js';
+import type { AuthResult, JwtPayload } from './types.js';
 
 // ── Password hashing (scrypt, no extra deps) ──
 
-function hashPassword(password) {
+function hashPassword(password: string): string {
   const salt = randomBytes(16).toString('hex');
   const hash = scryptSync(password, salt, 64).toString('hex');
   return `${salt}:${hash}`;
 }
 
-function verifyPassword(password, stored) {
+function verifyPassword(password: string, stored: string): boolean {
   const [salt, hash] = stored.split(':');
   const buf = Buffer.from(hash, 'hex');
   const attempt = scryptSync(password, salt, 64);
@@ -19,11 +21,11 @@ function verifyPassword(password, stored) {
 
 // ── JWT (minimal, no dependency) ──
 
-function base64url(data) {
+function base64url(data: string | Record<string, unknown>): string {
   return Buffer.from(typeof data === 'string' ? data : JSON.stringify(data)).toString('base64url');
 }
 
-function signJwt(payload) {
+function signJwt(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
   const secret = process.env.JWT_SECRET;
   if (!secret) throw new Error('JWT_SECRET is not set.');
 
@@ -31,13 +33,13 @@ function signJwt(payload) {
   const body = base64url({
     ...payload,
     iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7, // 7 days
+    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7,
   });
   const signature = createHmac('sha256', secret).update(`${header}.${body}`).digest('base64url');
   return `${header}.${body}.${signature}`;
 }
 
-export function verifyJwt(token) {
+export function verifyJwt(token: string): JwtPayload | null {
   const secret = process.env.JWT_SECRET;
   if (!secret) throw new Error('JWT_SECRET is not set.');
 
@@ -48,7 +50,7 @@ export function verifyJwt(token) {
   const expected = createHmac('sha256', secret).update(`${header}.${body}`).digest('base64url');
   if (signature !== expected) return null;
 
-  const payload = JSON.parse(Buffer.from(body, 'base64url').toString());
+  const payload: JwtPayload = JSON.parse(Buffer.from(body, 'base64url').toString());
   if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
 
   return payload;
@@ -56,7 +58,7 @@ export function verifyJwt(token) {
 
 // ── Route handlers ──
 
-export async function handleSignup(body) {
+export async function handleSignup(body: Record<string, unknown>): Promise<AuthResult> {
   const email = String(body.email || '').trim().toLowerCase();
   const password = String(body.password || '');
 
@@ -78,13 +80,13 @@ export async function handleSignup(body) {
   try {
     await sendVerificationEmail(email, verifyToken);
   } catch (err) {
-    console.error('Failed to send verification email:', err.message);
+    console.error('Failed to send verification email:', (err as Error).message);
   }
 
   return { status: 201, body: { message: 'Account created. Check your email to verify.' } };
 }
 
-export async function handleLogin(body) {
+export async function handleLogin(body: Record<string, unknown>): Promise<AuthResult> {
   const email = String(body.email || '').trim().toLowerCase();
   const password = String(body.password || '');
 
@@ -93,7 +95,7 @@ export async function handleLogin(body) {
   const result = await query('SELECT id, email, password_hash, verified FROM users WHERE email = $1', [email]);
   if (result.rows.length === 0) return { status: 401, body: { error: 'Invalid email or password.' } };
 
-  const user = result.rows[0];
+  const user = result.rows[0] as { id: number; email: string; password_hash: string; verified: boolean };
   if (!verifyPassword(password, user.password_hash)) return { status: 401, body: { error: 'Invalid email or password.' } };
   if (!user.verified) return { status: 403, body: { error: 'Please verify your email before logging in.' } };
 
@@ -101,7 +103,7 @@ export async function handleLogin(body) {
   return { status: 200, body: { token, user: { id: user.id, email: user.email } } };
 }
 
-export async function handleVerifyEmail(tokenValue) {
+export async function handleVerifyEmail(tokenValue: string | undefined): Promise<AuthResult> {
   if (!tokenValue) return { status: 400, body: { error: 'Verification token is required.' } };
 
   const result = await query('SELECT id FROM users WHERE verify_token = $1', [tokenValue]);
@@ -111,7 +113,7 @@ export async function handleVerifyEmail(tokenValue) {
   return { status: 200, body: { message: 'Email verified. You can now log in.' } };
 }
 
-export async function handleMe(request) {
+export async function handleMe(request: IncomingMessage): Promise<AuthResult> {
   const auth = request.headers.authorization || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   if (!token) return { status: 401, body: { error: 'Not authenticated.' } };
