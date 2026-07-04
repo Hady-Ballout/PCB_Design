@@ -7,7 +7,7 @@ import {
   toKiCadNetlist,
   toSpice,
   validateCircuit,
-} from '../src/lib/pcbGenerator.js';
+} from '../src/core/pcbGenerator.js';
 import type {
   Circuit,
   CircuitIntent,

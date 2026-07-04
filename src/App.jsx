@@ -14,15 +14,15 @@ import {
   parseKiCadNetlist,
   parseSpiceNetlist,
   synchronizeResult,
-} from './lib/circuitSync.js';
-import { toDiagramSvg } from './lib/pcbGenerator.js';
-import { changedLineIndexes } from './lib/lineDiff.js';
+} from './core/circuitSync.js';
+import { toDiagramSvg } from './core/pcbGenerator.js';
+import { changedLineIndexes } from './core/lineDiff.js';
 import {
   findNearestLegalPlacement,
   layoutCircuitDiagram,
   rerouteAffectedNets,
   routeDiagramWire,
-} from './lib/schematicLayout.js';
+} from './core/schematicLayout.js';
 import { AuthProvider, useAuth, HomePage, LoginPage, SignupPage, VerifyPage } from './auth.jsx';
 import './auth.css';
 

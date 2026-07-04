@@ -1,6 +1,6 @@
 import { normalizeChatMemory, sanitizeConversationHistory } from './chatMemory.js';
 import { circuitKnowledgePrompt } from './circuitKnowledge.js';
-import { parseSpiceNetlist } from '../src/lib/circuitSync.js';
+import { parseSpiceNetlist } from '../src/core/circuitSync.js';
 import type {
   ChatMemory,
   ChatMessage,
