@@ -38,10 +38,14 @@ const runProcess = (command: string, args: string[], options: Record<string, unk
     });
   });
 
+// Node names are interpolated into an ngspice control block, so restrict them to
+// a strict allowlist — anything else could smuggle newlines/`shell` into the deck.
+const SAFE_NODE = /^[A-Za-z0-9_]+$/;
+
 export const chooseWaveformNodes = (circuit: Circuit | null | undefined): string[] => {
   const nodes = [...new Set((circuit?.components ?? []).flatMap((part) => part.nodes ?? []))]
     .map(String)
-    .filter((node) => node && node !== '0');
+    .filter((node) => node && node !== '0' && SAFE_NODE.test(node));
 
   const preferred = nodes.filter((node) => /(^|_)(v?out|out|load|fb|ctrl|vin)(_|$)/i.test(node));
   return [...new Set([...preferred, ...nodes])].slice(0, 4);
@@ -50,7 +54,10 @@ export const chooseWaveformNodes = (circuit: Circuit | null | undefined): string
 export const buildSimulationDeck = (spice: string, nodes: string[], circuit: Circuit | null = null): string => {
   const withRequiredModels = addMissingSpiceModels(spice, circuit);
   const withoutEnd = withRequiredModels
-    .replace(/\.control[\s\S]*?\.endc/gi, '')
+    // Drop any caller-supplied control block. The alternation removes a normal
+    // `.control ... .endc` pair, and a dangling `.control` with no `.endc`
+    // (which would otherwise be captured by our appended footer) through EOF.
+    .replace(/\.control[\s\S]*?(?:\.endc|$)/gi, '')
     .replace(/^\s*\.end\s*$/gim, '')
     .trim();
   const plotVectors = nodes.map((node) => `v(${node})`).join(' ');
@@ -100,6 +107,18 @@ export const parseWaveformData = (raw: string, requestedNodes: string[] = []): W
   }));
 };
 
+// Translate ngspice's cryptic convergence output into an actionable message.
+const diagnoseNgspiceFailure = (rawOutput: string): string | null => {
+  const singular = rawOutput.match(/singular matrix:\s*check node\s+(\S+)/i);
+  if (singular) {
+    return `Node "${singular[1]}" looks floating or disconnected — ngspice reported a singular matrix. Every node needs at least two connections and a DC path to ground; e.g. an op-amp's + input must be tied to a reference (ground or a bias divider), not left dangling.`;
+  }
+  if (/Timestep too small|operating point could not be simulated|gmin stepping failed|source stepping failed/i.test(rawOutput)) {
+    return 'The DC operating point did not converge. This usually means a node is floating, a feedback path is missing, or the circuit has no DC path to ground.';
+  }
+  return null;
+};
+
 export async function runNgspiceSimulation({ circuit, spice }: { circuit: Circuit; spice: string }): Promise<SimulationResult> {
   const nodes = chooseWaveformNodes(circuit);
   if (nodes.length === 0) {
@@ -125,9 +144,12 @@ export async function runNgspiceSimulation({ circuit, spice }: { circuit: Circui
 
     if (result.code !== 0) {
       const missing = /ENOENT|not found|not recognized/i.test(rawOutput);
+      const diagnosis = diagnoseNgspiceFailure(rawOutput);
       return {
         ok: false,
-        errors: [missing ? `Ngspice was not found. Install Ngspice and make sure ${command} is available on PATH.` : 'Ngspice failed to simulate this circuit.'],
+        errors: [missing
+          ? `Ngspice was not found. Install Ngspice and make sure ${command} is available on PATH.`
+          : diagnosis || 'Ngspice failed to simulate this circuit.'],
         warnings: [],
         rawOutput,
         waveform: { xLabel: 'Time (s)', yLabel: 'Voltage (V)', series: [] },
@@ -138,9 +160,10 @@ export async function runNgspiceSimulation({ circuit, spice }: { circuit: Circui
     try {
       waveformRaw = await readFile(waveformPath, 'utf8');
     } catch {
+      const diagnosis = diagnoseNgspiceFailure(rawOutput);
       return {
         ok: false,
-        errors: ['Ngspice completed, but did not create waveform.dat. Check the Ngspice log for the circuit or vector error.'],
+        errors: [diagnosis || 'Ngspice completed, but did not create waveform.dat. Check the Ngspice log for the circuit or vector error.'],
         warnings: [],
         rawOutput,
         waveform: { xLabel: 'Time (s)', yLabel: 'Voltage (V)', series: [] },

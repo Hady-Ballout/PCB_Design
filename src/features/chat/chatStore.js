@@ -69,7 +69,13 @@ const migrateDiagram = (diagram, circuit = null) => {
   try {
     return repairDiagramLayout(diagram, circuit ? { circuit } : {});
   } catch {
-    return circuit ? layoutCircuitDiagram(circuit) : diagram;
+    // A full re-layout can itself fail to route; never let that crash app
+    // startup — fall back to the stored diagram as-is.
+    try {
+      return circuit ? layoutCircuitDiagram(circuit) : diagram;
+    } catch {
+      return diagram;
+    }
   }
 };
 

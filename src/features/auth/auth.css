@@ -280,11 +280,6 @@
   .home-pipeline { flex-direction: column; align-items: center; }
   .pipeline-arrow { transform: rotate(90deg); }
   .auth-card { padding: 28px 20px; }
-  .app-user-bar {
-    justify-content: flex-end;
-    margin-bottom: 12px;
-    position: static;
-  }
 }
 
 /* Floating user bar inside the authenticated workspace shell */
@@ -337,7 +332,7 @@
 
 .btn-primary:disabled {
   background: var(--color-primary-border);
-  color: var(--color-page);
+  color: #4a2416;
 }
 
 .btn-outline {

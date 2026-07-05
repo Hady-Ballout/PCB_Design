@@ -38,7 +38,10 @@ Component refs must be SPICE-compatible because the program will simulate them w
 Use simple Ngspice-friendly values such as 1k, 100nF, 10uF, 5V, and SINE(0 1 1k).
 Use voltage_source for DC supplies and fixed DC input biases. Use signal_source only for waveform or time-varying sources such as SINE(...), PULSE(...), PWL(...), EXP(...), or AC.
 If SPICE uses "V... ... DC value", the matching JSON component kind must be voltage_source. If SPICE uses a waveform source, the matching JSON component kind must be signal_source.
-The SPICE netlist must use the exact same component refs, values, and node names as circuit.components.`;
+The SPICE netlist must use the exact same component refs, values, and node names as circuit.components.
+Every node except ground "0" must connect to at least two component pins and have a DC path to ground; never leave a node floating.
+Both op-amp inputs must be connected: wire the inverting input to the feedback/summing network, and the non-inverting input to a reference node — ground "0" for a dual-supply design, or a mid-rail bias-divider node for a single-supply design. Never put an op-amp input on a node that no other component uses.
+When you create a reference or bias node (for example a divider midpoint), connect the op-amp input to that exact node name. Do not invent a separate, otherwise-unused input node.`;
 
 const SCHEMATIC_SCHEMA = {
   type: 'object',
@@ -532,18 +535,50 @@ const finalOutputError = (error: CircuitGenerationError): CircuitGenerationError
   error,
 );
 
+// Detect the classic simulation-killer: an op-amp input sitting on a node no
+// other component uses (floating high-impedance input → singular matrix). Kept
+// deliberately narrow so it never rejects a legitimately driven output node.
+const floatingOpampInputCorrection = (circuit: Circuit): string | null => {
+  const components = Array.isArray(circuit?.components) ? circuit.components : [];
+  const nodeUse = new Map<string, number>();
+  for (const part of components) {
+    for (const node of part.nodes || []) nodeUse.set(String(node), (nodeUse.get(String(node)) || 0) + 1);
+  }
+  const problems: string[] = [];
+  for (const part of components) {
+    if (part.kind !== 'opamp') continue;
+    const [plus, minus] = (part.nodes || []).map(String);
+    ([['non-inverting (+)', plus], ['inverting (-)', minus]] as const).forEach(([label, node]) => {
+      if (!node || node === '0') return; // a grounded input is fine
+      if ((nodeUse.get(node) || 0) < 2) problems.push(`${part.ref}'s ${label} input (node "${node}")`);
+    });
+  }
+  if (!problems.length) return null;
+  return `Floating op-amp input(s): ${problems.join('; ')} connect to no other component. Each op-amp input must join the rest of the circuit: the inverting input to the feedback/summing network, and the non-inverting input to a reference node — ground "0" or a mid-rail bias-divider node. Reuse the existing reference node name for that input; do not leave it on its own node. Return the corrected circuit and matching SPICE.`;
+};
+
 const parseWithCorrectionRetry = async (
   requestAttempt: (correction: CorrectionContext | null, attempt: number) => Promise<string>,
 ): Promise<ParsedCircuitResponse> => {
   let correction: CorrectionContext | null = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const content = await requestAttempt(correction, attempt);
+    let parsed: ParsedCircuitResponse;
     try {
-      return parseCircuitResponse(content);
+      parsed = parseCircuitResponse(content);
     } catch (error) {
       if (attempt === 1 || !retryableOutputCodes.has((error as CircuitGenerationError).code)) throw finalOutputError(error as CircuitGenerationError);
       correction = { content, error: (error as Error).message };
+      continue;
     }
+    // Semantic connectivity check: retry once with a targeted correction, but
+    // never hard-fail on it — accept the circuit (with its warnings) otherwise.
+    const floating = floatingOpampInputCorrection(parsed.circuit);
+    if (floating && attempt === 0) {
+      correction = { content, error: floating };
+      continue;
+    }
+    return parsed;
   }
   throw new CircuitGenerationError('invalid_output', 'Circuit generation did not return a usable response.');
 };
@@ -716,15 +751,19 @@ export async function streamCircuitWithOllama(
       onContent(content, { attempt, correcting: attempt > 0 });
     };
 
-    while (true) {
-      const { done, value } = await reader.read();
-      buffered += decoder.decode(value || new Uint8Array(), { stream: !done });
-      const lines = buffered.split(/\r?\n/);
-      buffered = lines.pop() || '';
-      lines.forEach(consumeLine);
-      if (done) break;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        buffered += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const lines = buffered.split(/\r?\n/);
+        buffered = lines.pop() || '';
+        lines.forEach(consumeLine);
+        if (done) break;
+      }
+      if (buffered.trim()) consumeLine(buffered);
+    } finally {
+      reader.cancel().catch(() => {});
     }
-    if (buffered.trim()) consumeLine(buffered);
     return content;
   });
 }

@@ -5,6 +5,7 @@ export const PUBLIC_PAGES = new Set(['home', 'login', 'signup', 'verify']);
 export const pageFromHash = () => {
   const hash = window.location.hash;
   if (hash.startsWith('#verify')) return 'verify';
+  if (hash === '#home') return 'home';
   if (hash === '#login') return 'login';
   if (hash === '#signup') return 'signup';
   if (hash === '#waveform') return 'waveform';

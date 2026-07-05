@@ -11,6 +11,11 @@ import type { ChatMemory, ChatMessage, Circuit, CurrentDesign, JwtPayload, Strea
 
 loadEnv();
 
+if (!process.env.JWT_SECRET) {
+  console.error('JWT_SECRET is not set. Refusing to start without a signing secret.');
+  process.exit(1);
+}
+
 const port = Number(process.env.PORT || process.env.API_PORT || 8787);
 const host = process.env.HOST || '127.0.0.1';
 const corsOrigin = process.env.CORS_ORIGIN || 'http://127.0.0.1:5174';
@@ -31,12 +36,35 @@ const sendJson = (response: ServerResponse, status: number, body: unknown): void
   response.end(JSON.stringify(body));
 };
 
+const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES || 4 * 1024 * 1024);
+
+class HttpError extends Error {
+  constructor(public statusCode: number, message: string) {
+    super(message);
+  }
+}
+
 const readJsonBody = async (request: IncomingMessage): Promise<Record<string, unknown>> => {
   const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(chunk as Buffer);
+  let total = 0;
+  for await (const chunk of request) {
+    total += (chunk as Buffer).length;
+    if (total > MAX_BODY_BYTES) {
+      request.destroy();
+      throw new HttpError(413, 'Request body is too large.');
+    }
+    chunks.push(chunk as Buffer);
+  }
   const raw = Buffer.concat(chunks).toString('utf8');
-  return raw ? JSON.parse(raw) : {};
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new HttpError(400, 'Request body is not valid JSON.');
+  }
 };
+
+const statusFor = (error: unknown): number => (error instanceof HttpError ? error.statusCode : 500);
 
 const startJsonStream = (response: ServerResponse): void => {
   response.writeHead(200, {
@@ -80,7 +108,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       const result = await handleSignup(body);
       sendJson(response, result.status, result.body);
     } catch (error) {
-      sendJson(response, 500, { error: (error as Error).message });
+      sendJson(response, statusFor(error), { error: (error as Error).message });
     }
     return;
   }
@@ -91,7 +119,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       const result = await handleLogin(body);
       sendJson(response, result.status, result.body);
     } catch (error) {
-      sendJson(response, 500, { error: (error as Error).message });
+      sendJson(response, statusFor(error), { error: (error as Error).message });
     }
     return;
   }
@@ -102,7 +130,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       const result = await handleVerifyEmail(body.token as string | undefined);
       sendJson(response, result.status, result.body);
     } catch (error) {
-      sendJson(response, 500, { error: (error as Error).message });
+      sendJson(response, statusFor(error), { error: (error as Error).message });
     }
     return;
   }
@@ -112,7 +140,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       const result = await handleMe(request);
       sendJson(response, result.status, result.body);
     } catch (error) {
-      sendJson(response, 500, { error: (error as Error).message });
+      sendJson(response, statusFor(error), { error: (error as Error).message });
     }
     return;
   }
@@ -187,7 +215,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         writeStreamEvent(response, { type: 'error', code: errorCode, error: (error as Error).message });
         response.end();
       } else {
-        sendJson(response, 500, { code: errorCode, error: (error as Error).message });
+        sendJson(response, statusFor(error), { code: errorCode, error: (error as Error).message });
       }
     }
     return;
@@ -207,7 +235,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       });
       sendJson(response, simulation.ok ? 200 : 422, simulation);
     } catch (error) {
-      sendJson(response, 500, { error: (error as Error).message });
+      sendJson(response, statusFor(error), { error: (error as Error).message });
     }
     return;
   }

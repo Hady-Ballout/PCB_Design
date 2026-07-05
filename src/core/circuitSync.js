@@ -16,7 +16,7 @@ const decodeXml = (value) =>
     if (code[0] === '#') {
       const radix = code[1].toLowerCase() === 'x' ? 16 : 10;
       const number = Number.parseInt(code.replace(/^#x?/i, ''), radix);
-      return Number.isFinite(number) ? String.fromCodePoint(number) : entity;
+      return Number.isFinite(number) && number >= 0 && number <= 0x10ffff ? String.fromCodePoint(number) : entity;
     }
     return { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }[code.toLowerCase()] || entity;
   });
@@ -82,13 +82,14 @@ const kindFromRef = (ref) => {
   if (normalized.startsWith('L')) return 'inductor';
   if (normalized.startsWith('D')) return 'diode';
   if (normalized.startsWith('Q')) return 'bjt_npn';
+  if (normalized.startsWith('M')) return 'mosfet_n';
   if (normalized.startsWith('X') || normalized.startsWith('U')) return 'opamp';
   return 'generic';
 };
 
 const defaultPinCount = (kind) => {
   if (kind === 'opamp') return 5;
-  if (kind === 'bjt_npn' || kind === 'bjt_pnp') return 3;
+  if (kind === 'bjt_npn' || kind === 'bjt_pnp' || kind === 'mosfet_n' || kind === 'mosfet_p') return 3;
   return 2;
 };
 
@@ -105,6 +106,8 @@ const spiceRefForComponent = (component) => {
     led: 'D',
     bjt_npn: 'Q',
     bjt_pnp: 'Q',
+    mosfet_n: 'M',
+    mosfet_p: 'M',
     opamp: 'X',
   };
   const prefix = prefixByKind[component.kind] || 'X';
@@ -273,6 +276,12 @@ export const parseSpiceNetlist = (source, baseCircuit) => {
         continue;
       }
       record = { kind: base?.kind || 'bjt_npn', nodes: tokens.slice(1, 4), value: base?.value || tokens[4] };
+    } else if (prefix === 'M') {
+      if (tokens.length < 5) {
+        errors.push(`Line ${index + 1}: ${tokens[0]} needs drain, gate, source, and a model.`);
+        continue;
+      }
+      record = { kind: base?.kind || 'mosfet_n', nodes: tokens.slice(1, 4), value: base?.value || tokens.at(-1) };
     } else if (prefix === 'X') {
       if (tokens.length < 7) {
         errors.push(`Line ${index + 1}: ${tokens[0]} needs five op-amp nodes and a model.`);
@@ -362,13 +371,11 @@ const diagramHasCompleteConnectivity = (diagram, circuit) => {
     const pin = index + 1;
     if (isUnconnectedTerminal(node, component.ref, pin)) return true;
     const wire = automaticWires.get(`${component.ref}:${pin}:${node}`);
-    if (node === '0') return Boolean(wire && wire.points?.length >= 2);
-    return Boolean(
-      wire
-      && wire.points?.length >= 2
-      && wire.labelId
-      && netLabels.has(wire.labelId),
-    );
+    if (!wire || !(wire.points?.length >= 2)) return false;
+    if (node === '0') return true;
+    // Routed wires connect directly and carry no label; only labeled-net
+    // (fallback) wires must resolve to an existing net label.
+    return wire.labelId ? netLabels.has(wire.labelId) : true;
   }));
 };
 

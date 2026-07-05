@@ -49,8 +49,8 @@ export function WaveformChart({ waveform }) {
   const colors = ['#49c878', '#5aa7ff', '#ffd56d', '#c792ea'];
   const scaleX = (x) => margin.left + ((x - xMin) / Math.max(xMax - xMin, Number.EPSILON)) * plotWidth;
   const scaleY = (y) => margin.top + plotHeight - ((y - yMin) / Math.max(yMax - yMin, Number.EPSILON)) * plotHeight;
-  const xTicks = [xMin, xMin + (xMax - xMin) / 2, xMax];
-  const yTicks = [yMinRaw, yMinRaw + (yMaxRaw - yMinRaw) / 2, yMaxRaw];
+  const xTicks = [...new Set([xMin, xMin + (xMax - xMin) / 2, xMax])];
+  const yTicks = [...new Set([yMinRaw, yMinRaw + (yMaxRaw - yMinRaw) / 2, yMaxRaw])];
   const selectedSet = new Set(selectedNames);
   const zoom = (factor) => {
     const span = xMax - xMin;

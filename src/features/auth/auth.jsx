@@ -13,22 +13,29 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     if (!token) { setLoading(false); return; }
 
+    let cancelled = false;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
 
     fetch(`${API_BASE}/api/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },
       signal: controller.signal,
     })
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((data) => setUser(data.user))
-      .catch(() => { localStorage.removeItem('pcb_token'); setToken(null); })
-      .finally(() => {
-        clearTimeout(timeoutId);
-        setLoading(false);
-      });
+      .then((r) => {
+        // Only a genuine rejection of the token should clear the session; a
+        // network/timeout/abort failure must leave the stored token intact.
+        if (r.status === 401 || r.status === 403) {
+          if (!cancelled) { localStorage.removeItem('pcb_token'); setToken(null); }
+          return null;
+        }
+        return r.ok ? r.json() : null;
+      })
+      .then((data) => { if (!cancelled && data?.user) setUser(data.user); })
+      .catch(() => { /* offline/aborted: keep the token and retry on next load */ })
+      .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => {
+      cancelled = true;
       clearTimeout(timeoutId);
       controller.abort();
     };

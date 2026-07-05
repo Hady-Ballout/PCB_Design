@@ -223,6 +223,22 @@ Inverting gain: `gain = -Rf/Rin`.
 - Do not request output beyond the rails.
 - For single-supply AC circuits, bias around a midpoint reference when needed.
 - Use `LM358` for the op amp component value and for the final token of the `XU1 ... LM358` SPICE line.
+- Both op-amp inputs must connect to the rest of the circuit. Never place an input on a node that no other component uses. The inverting input joins the feedback/summing resistors; the non-inverting input goes to a reference — `"0"` (dual supply) or a mid-rail divider node (single supply).
+- When you build a bias divider, wire the op-amp input to that **same** divider node. Do not create a second, unconnected input node.
+
+Worked example — single-supply inverting amplifier biased to mid-rail. The `+` input and the divider midpoint are the **same** node `VBIAS`:
+
+```
+V1    VCC   0     DC 5          ; supply
+R1    VCC   VBIAS 10k           ; divider top
+R2    VBIAS 0     10k           ; divider bottom -> VBIAS = 2.5V
+C1    VBIAS 0     100nF         ; decouple the reference
+RIN   VIN   INV   10k           ; input resistor into the summing node
+RF    INV   VOUT  10k           ; feedback
+XU1   VBIAS INV   VOUT VCC 0 LM358   ; + input = VBIAS (NOT a new node), - input = INV
+```
+
+Here `INV` connects to RIN, RF, and XU1 (three pins) and `VBIAS` connects to R1, R2, C1, and XU1 (four pins) — no node is left floating.
 
 ### 5 V to 3.3 V Regulator
 

@@ -173,10 +173,10 @@ function App() {
     if (loading) return;
 
     if (!user && !PUBLIC_PAGES.has(page)) {
-      if (window.location.hash !== '#login') {
-        window.location.hash = 'login';
+      if (window.location.hash !== '#home') {
+        window.location.hash = 'home';
       } else {
-        setPage('login');
+        setPage('home');
       }
       return;
     }
@@ -207,6 +207,14 @@ function App() {
       setEditedDiagram(cloneDiagram(result.diagram));
     }
   }, [result?.diagram, activeChat?.editedDiagram]);
+
+  // Seed the editable JSON when a result first appears (keyed on the circuit,
+  // so clearing the field by hand never snaps the text back).
+  useEffect(() => {
+    if (result?.circuit && !editableCircuitJson) {
+      setEditableCircuitJson(JSON.stringify(result.circuit, null, 2));
+    }
+  }, [result?.circuit]);
 
   useEffect(() => {
     setDiagramSelection(null);
@@ -381,7 +389,13 @@ function App() {
   );
 
   const openEditorView = (view) => {
-    setOpenEditorViews((current) => (current.includes(view) ? current : [...current, view]));
+    setOpenEditorViews((current) => {
+      if (current.includes(view)) return current;
+      const next = [...current, view];
+      // The layout renders at most three windows; evict the oldest so a fourth
+      // never becomes an active tab with no visible window.
+      return next.length > 3 ? next.slice(next.length - 3) : next;
+    });
     setActiveEditorView(view);
     // While one window is maximized, selecting a tab swaps the full-screen view (browser-tab behavior).
     setMaximizedEditorView((current) => (current ? view : current));
@@ -447,6 +461,7 @@ function App() {
         }
       : null;
     const isRevision = Boolean(currentDesign);
+    const previousSpice = editableSpice;
     const userMessage = {
       id: messageId(),
       role: 'user',
@@ -468,6 +483,8 @@ function App() {
         ? chat.editableSpice
         : '* AI is preparing the circuit...\n* Components will appear here as they are generated.',
       editableCircuitJson: isRevision ? chat.editableCircuitJson : '',
+      pendingSpiceChange: null,
+      pendingKicadChange: null,
       simulationRun: null,
       simulationError: '',
       circuitJsonSyncError: '',
@@ -487,7 +504,7 @@ function App() {
       });
 
       if (!response.ok) {
-        const failed = await response.json();
+        const failed = await response.json().catch(() => ({}));
         throw new Error(failed.error || `Generation failed with HTTP ${response.status}.`);
       }
       const contentType = response.headers.get('content-type') || '';
@@ -541,7 +558,7 @@ function App() {
       updateChat(chatId, (chat) => ({
         ...chat,
         updatedAt: Date.now(),
-        editableSpice: currentDesign ? currentDesign.spice : chat.editableSpice,
+        editableSpice: currentDesign ? currentDesign.spice : previousSpice,
         editableCircuitJson: currentDesign
           ? JSON.stringify(currentDesign.circuit, null, 2)
           : chat.editableCircuitJson,
@@ -573,7 +590,7 @@ function App() {
         headers: authHeaders(),
         body: JSON.stringify({ circuit: result.circuit, spice: editableSpice }),
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => ({ ok: false, errors: [`Simulation failed with HTTP ${response.status}.`] }));
       updateChat(chatId, (chat) => ({ ...chat, simulationRun: data }));
       if (!response.ok || !data.ok) {
         throw new Error(data.errors?.join(' ') || data.error || `Simulation failed with HTTP ${response.status}.`);
@@ -768,7 +785,9 @@ function App() {
   );
 
   const renderChangedCode = (text, changedLines, label) => {
-    const lastChangedLine = Math.max(...changedLines);
+    const lastChangedLine = changedLines.size
+      ? Math.max(...changedLines)
+      : text.split('\n').length - 1;
     return (
       <pre className="code-editor editor-window-code netlist-diff" aria-label={`Pending ${label} changes`}>
         {text.split('\n').map((line, index) => {
@@ -815,7 +834,7 @@ function App() {
           >
             <span aria-hidden="true">{isSimulating ? '...' : '\u25B6'}</span>
           </button>
-          <button onClick={() => setEditableSpice(result?.spice || '')} disabled={!result || isGenerating || Boolean(pendingSpiceChange)}>Reset</button>
+          <button onClick={() => { setEditableSpice(result?.spice || ''); setSimulationRun(null); setSimulationError(''); }} disabled={!result || isGenerating || Boolean(pendingSpiceChange)}>Reset</button>
           <button onClick={() => downloadText('generated.cir', editableSpice)} disabled={!editableSpice || isGenerating}>Download</button>
         </div>
       </div>
@@ -951,7 +970,7 @@ function App() {
       </div>
       <textarea
         className={`code-editor editor-window-code ${isGenerating ? 'live-code-editor' : ''}`}
-        value={circuitJson}
+        value={editableCircuitJson}
         readOnly={isGenerating || !result}
         onChange={(event) => {
           setEditableCircuitJson(event.target.value);
@@ -1112,7 +1131,7 @@ function App() {
 
   const visiblePage = user && AUTH_PAGES.has(page) ? 'workspace' : page;
 
-  if (!user && !PUBLIC_PAGES.has(visiblePage)) return <LoginPage />;
+  if (!user && !PUBLIC_PAGES.has(visiblePage)) return <HomePage />;
   if (visiblePage === 'home') return <HomePage />;
   if (visiblePage === 'login') return <LoginPage />;
   if (visiblePage === 'signup') return <SignupPage />;

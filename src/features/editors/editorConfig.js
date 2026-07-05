@@ -1,9 +1,9 @@
 // Shared editor-window labels and split-pane persistence.
 export const EDITOR_VIEW_LABELS = {
-  spice: 'Spice',
+  spice: 'SPICE',
   json: 'JSON',
   canvas: 'Canvas',
-  blockSchematic: 'new schematic test',
+  blockSchematic: 'Block schematic',
 };
 
 export const EDITOR_SPLIT_STORAGE_KEY = 'prompt-to-pcb-editor-split-v1';

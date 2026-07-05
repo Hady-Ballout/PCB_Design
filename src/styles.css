@@ -1,32 +1,32 @@
 :root {
-  --color-page: #151a18;
-  --color-panel: #1c241f;
-  --color-surface: #243026;
-  --color-surface-soft: #202822;
-  --color-canvas: #18201c;
-  --color-code: #202822;
-  --color-primary: #49c878;
-  --color-primary-hover: #5fe190;
-  --color-primary-pressed: #2fa85f;
-  --color-primary-soft: #173824;
-  --color-primary-border: #3ea969;
-  --color-text: #e4ece7;
-  --color-text-muted: #a8b8ad;
-  --color-text-subtle: #77877d;
-  --color-border: #33443a;
-  --color-border-soft: #27352d;
-  --color-chart-bg: #18201c;
-  --color-diagram-bg: #19221d;
-  --color-diagram-grid-small: #24342b;
-  --color-diagram-grid-large: #31473a;
-  --color-error-bg: #3a1d1d;
-  --color-error-text: #ff8a7f;
-  --color-error-border: #6d3530;
-  --color-warning-bg: #423414;
-  --color-warning-text: #ffd56d;
+  --color-page: #ffffff;
+  --color-panel: #ffffff;
+  --color-surface: #f4f1ea;
+  --color-surface-soft: #ffffff;
+  --color-canvas: #faf9f5;
+  --color-code: #f4f1ea;
+  --color-primary: #d97757;
+  --color-primary-hover: #c2643f;
+  --color-primary-pressed: #a8532f;
+  --color-primary-soft: #fbe9e0;
+  --color-primary-border: #e7ac8d;
+  --color-text: #262521;
+  --color-text-muted: #6b6459;
+  --color-text-subtle: #8f887a;
+  --color-border: #dad5c9;
+  --color-border-soft: #ece8de;
+  --color-chart-bg: #faf9f5;
+  --color-diagram-bg: #fbfbf7;
+  --color-diagram-grid-small: #ece7dd;
+  --color-diagram-grid-large: #ddd5c6;
+  --color-error-bg: #fdecea;
+  --color-error-text: #b3261e;
+  --color-error-border: #c23b3b;
+  --color-warning-bg: #ffe58a;
+  --color-warning-text: #6b4e00;
   color: var(--color-text);
   background: var(--color-page);
-  color-scheme: dark;
+  color-scheme: light;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.5;
 }
@@ -59,7 +59,7 @@ button:hover {
 }
 
 button:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.68;
 }
 
@@ -105,7 +105,7 @@ button.primary {
   gap: 14px;
   height: calc(100vh - 48px);
   order: 2;
-  min-height: 680px;
+  min-height: min(680px, calc(100vh - 48px));
   overflow: hidden;
   padding: 18px;
   position: sticky;
@@ -193,7 +193,7 @@ h3 {
 }
 
 .chat-conversation-title h1 {
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -430,7 +430,7 @@ textarea {
 }
 
 .live-spice-panel {
-  border-color: #91aa99;
+  border-color: var(--color-primary-border);
 }
 
 .live-code-editor,
@@ -618,7 +618,7 @@ textarea {
 }
 
 .editor-resize-handle:focus-visible {
-  outline: 2px solid #23533a;
+  outline: 2px solid var(--color-primary);
   outline-offset: -2px;
 }
 
@@ -783,7 +783,7 @@ textarea {
   border: 1px solid #aeb6ad;
   border-radius: 6px;
   color: #17201a;
-  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-family: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
   font-size: 13px;
   min-height: 34px;
   padding: 6px 10px;
@@ -814,7 +814,7 @@ pre {
   background: #eef0ea;
   border-radius: 6px;
   color: #17201a;
-  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-family: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 }
 
 code {
@@ -1128,9 +1128,10 @@ pre {
   stroke-width: 2;
 }
 
+/* Wires share the symbol ink and weight — one pen for the whole drawing. */
 .diagram-wire {
-  stroke: #617066;
-  stroke-width: 1.5;
+  stroke: #17201a;
+  stroke-width: 2;
 }
 
 .diagram-wire.pending {
@@ -1158,10 +1159,10 @@ pre {
 
 .diagram-bridge-arc {
   fill: none;
-  stroke: #617066;
+  stroke: #17201a;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 1.5;
+  stroke-width: 2;
 }
 
 .diagram-fill {
@@ -1280,7 +1281,7 @@ pre {
   border: 1px solid #d8d9d2;
   border-radius: 6px;
   color: #17201a;
-  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-family: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
   font-size: 13px;
   line-height: 1.45;
   margin-top: 16px;
@@ -1351,7 +1352,7 @@ pre {
 .netlist-review-button {
   color: #ffffff;
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 700;
   height: 24px;
   min-width: 24px;
   padding: 0;
@@ -1432,7 +1433,7 @@ button.primary:hover,
 }
 
 .text-button {
-  color: var(--color-primary-hover);
+  color: var(--color-primary-pressed);
 }
 
 .main-panel,
@@ -1485,13 +1486,18 @@ button.primary:hover,
 }
 
 .chat-message,
-.chat-artifact-chip,
 .editor-window-titlebar,
 .waveform-toolbar,
 .trace-picker label,
 .cursor-box {
   background: var(--color-surface-soft);
   border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+.chat-artifact-chip {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   color: var(--color-text);
 }
 
@@ -1502,7 +1508,7 @@ button.primary:hover,
 }
 
 .chat-message.user .chat-message-meta time {
-  color: #244b31;
+  color: #3a1c10;
 }
 
 .chat-artifact-chip span,
@@ -1575,12 +1581,12 @@ pre,
 
 .component-value-editor input:focus {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px rgba(73, 200, 120, 0.2);
+  box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.2);
 }
 
 .simulation-ok {
   background: var(--color-primary-soft);
-  color: var(--color-primary-hover);
+  color: var(--color-primary-pressed);
 }
 
 .inline-error {
@@ -1637,20 +1643,13 @@ pre,
 
 .diagram-wire,
 .diagram-symbol,
-.diagram-ground {
+.diagram-ground,
+.diagram-bridge-arc {
   stroke: var(--color-text);
-}
-
-.diagram-wire {
-  stroke: var(--color-text-muted);
 }
 
 .diagram-bridge-clear {
   stroke: var(--color-diagram-bg);
-}
-
-.diagram-bridge-arc {
-  stroke: var(--color-text-muted);
 }
 
 .diagram-wire.pending,
@@ -1671,7 +1670,11 @@ pre,
   stroke: var(--color-text);
 }
 
-.diagram-node,
+/* Junction and node dots are drawn with the same ink as the wires they join. */
+.diagram-node {
+  fill: var(--color-text);
+}
+
 .terminal-dot.selected {
   fill: var(--color-primary);
 }
@@ -1679,6 +1682,18 @@ pre,
 .diagram-net {
   fill: var(--color-surface);
   stroke: var(--color-border);
+}
+
+/* Net names read as plain hand-lettered flags; the box only appears as an
+   affordance when hovered or selected. */
+.editable-net .diagram-net {
+  fill: transparent;
+  stroke: transparent;
+}
+
+.diagram-port .diagram-net {
+  fill: var(--color-diagram-bg);
+  stroke: var(--color-text-muted);
 }
 
 .diagram-text {

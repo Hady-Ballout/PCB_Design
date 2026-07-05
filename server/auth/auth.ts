@@ -16,8 +16,12 @@ function verifyPassword(password: string, stored: string): boolean {
   const [salt, hash] = stored.split(':');
   const buf = Buffer.from(hash, 'hex');
   const attempt = scryptSync(password, salt, 64);
-  return timingSafeEqual(buf, attempt);
+  return buf.length === attempt.length && timingSafeEqual(buf, attempt);
 }
+
+// A throwaway hash used to spend the same scrypt time on a login miss as on a
+// hit, so response latency does not reveal whether an email is registered.
+const DUMMY_PASSWORD_HASH = hashPassword('password-enumeration-guard');
 
 // ── JWT (minimal, no dependency) ──
 
@@ -48,9 +52,16 @@ export function verifyJwt(token: string): JwtPayload | null {
   const [header, body, signature] = parts;
 
   const expected = createHmac('sha256', secret).update(`${header}.${body}`).digest('base64url');
-  if (signature !== expected) return null;
+  const signatureBuf = Buffer.from(signature);
+  const expectedBuf = Buffer.from(expected);
+  if (signatureBuf.length !== expectedBuf.length || !timingSafeEqual(signatureBuf, expectedBuf)) return null;
 
-  const payload: JwtPayload = JSON.parse(Buffer.from(body, 'base64url').toString());
+  let payload: JwtPayload;
+  try {
+    payload = JSON.parse(Buffer.from(body, 'base64url').toString());
+  } catch {
+    return null;
+  }
   if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) return null;
 
   return payload;
@@ -93,7 +104,10 @@ export async function handleLogin(body: Record<string, unknown>): Promise<AuthRe
   if (!email || !password) return { status: 400, body: { error: 'Email and password are required.' } };
 
   const result = await query('SELECT id, email, password_hash, verified FROM users WHERE email = $1', [email]);
-  if (result.rows.length === 0) return { status: 401, body: { error: 'Invalid email or password.' } };
+  if (result.rows.length === 0) {
+    verifyPassword(password, DUMMY_PASSWORD_HASH);
+    return { status: 401, body: { error: 'Invalid email or password.' } };
+  }
 
   const user = result.rows[0] as { id: number; email: string; password_hash: string; verified: boolean };
   if (!verifyPassword(password, user.password_hash)) return { status: 401, body: { error: 'Invalid email or password.' } };

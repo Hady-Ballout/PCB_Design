@@ -5,6 +5,10 @@ export const downloadText = (filename, text, mime = 'text/plain') => {
   const link = document.createElement('a');
   link.href = url;
   link.download = filename;
+  // Firefox/Safari require the anchor in the DOM and can abort the download if
+  // the object URL is revoked before the browser has fetched the blob.
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 };

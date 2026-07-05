@@ -8,7 +8,7 @@ React 19 + Vite 7, no router library — page switching is a tiny hash-based rou
 | File | Role |
 |---|---|
 | `pcbGenerator.js` (~690 ln) | `validateCircuit`, `toSpice`, `toKiCadNetlist`, `toDiagramSvg`, `simulateCircuit` metadata, `addMissingSpiceModels` (injects the built-in `LM358` subcircuit), `buildCircuitDiagram` |
-| `schematicLayout.js` (~1750 ln) | Diagram layout engine: `layoutCircuitDiagram`, `routeDiagramWire`, `rerouteAffectedNets`, `repairDiagramLayout`, `validateDiagramLayout`, collision/clearance helpers. Current layout version: `LAYOUT_VERSION = 4` |
+| `schematicLayout.js` (~1900 ln) | Diagram layout engine: `layoutCircuitDiagram`, `routeDiagramWire`, `rerouteAffectedNets`, `repairDiagramLayout`, `validateDiagramLayout`, collision/clearance helpers. Current layout version: `LAYOUT_VERSION = 5` |
 | `circuitSync.js` (~815 ln) | Bidirectional sync between the canonical circuit model and each editable view: `parseSpiceNetlist`, `parseKiCadNetlist`, `parseCircuitJson`, `circuitFromDiagram`, `circuitElectricalSignature`, `synchronizeResult`, `preserveDiagramLayout` |
 | `lineDiff.js` | `changedLineIndexes` — used to highlight changed SPICE lines in AI-proposal review mode |
 | `config.js` | `API_BASE` from `VITE_API_URL` |
@@ -31,6 +31,20 @@ read like an engineer drew it rather than a machine scattered parts:
    vertical lane using `TIDY_GRID` — a single clean column per rank (ranks with
    several parts fan into a tight aligned block). This is the preferred, most
    hand-drawn-looking layout.
+   - **Pin alignment.** Before placing a part, `alignmentRow` looks for an
+     already-placed pin on a shared net and lines the part up with the row that
+     pin escapes on, so series passives, op-amp inputs, and BJT bases connect in
+     one straight run instead of a staircase. Alignment stays within the part's
+     own rank band (long chains wrap into serpentine bands and must not collapse
+     onto one endless row). Multi-pin side pins (op-amp inputs, BJT C/E) sit a
+     grid multiple from the component center so aligned wires meet them without
+     an off-grid jog at the pin.
+   - **Upright grounded passives.** A grounded 2-pin part that flips vertical
+     also swaps its body to portrait so the vertical zigzag glyph fits.
+   - **Labels hug their part.** `makeComponentLabels` prefers spots just past
+     the body box / pin-escape reach (26px above/below, 40px beside horizontal
+     parts, 10px beside vertical ones); the outward ring search is a last
+     resort, since text floating away from its part reads as machine layout.
 3. **Route + validate.** `routeWithExpansion` runs the grid A\* router and
    `validateDiagramLayout`. The tidy pass gets a small expansion budget
    (`TIDY_EXPANSION_BUDGET`) so it bails quickly on topologies it can't route
@@ -47,10 +61,15 @@ read like an engineer drew it rather than a machine scattered parts:
    tight box around the drawn geometry (resize-only, never moves a coordinate, so
    a validated layout stays valid) so the schematic fills its frame.
 
-`toDiagramSvg` (in `pcbGenerator.js`) renders pin-number labels only on
-multi-pin parts (op-amps, transistors); two-pin passives are left unnumbered the
-way a schematic normally is. Layout tuning constants (`TIDY_GRID`, `SPREAD_GRID`,
-clearances, `CANVAS_MARGIN`) live at the top of `schematicLayout.js`.
+`toDiagramSvg` (in `pcbGenerator.js`) and the canvas (`CircuitDiagram.jsx`)
+render pin-number labels only on multi-pin parts that need them (op amps,
+generic symbols); two-pin passives are unnumbered the way a schematic normally
+is, and BJTs rely on their C/B/E letters. The canvas draws wires, symbols,
+junction dots, and bridge arcs in a single ink (`--color-text`), reserving the
+accent color for hover/selection; net-label pills are invisible until
+hovered/selected so net names read as plain text flags. Layout tuning constants
+(`TIDY_GRID`, `SPREAD_GRID`, clearances, `CANVAS_MARGIN`) live at the top of
+`schematicLayout.js`.
 
 ## `src/app` — app shell
 

@@ -171,13 +171,15 @@ const orderNonGroundNets = (circuit) => {
 
 const textWidth = (text) => Math.max(58, Math.min(120, String(text).length * 8 + 24));
 
+// Grid-aligned pin offsets, kept in sync with pinPoint in schematicLayout.js.
+const snapPin = (value) => Math.round(value / 20) * 20;
+
 const pinPoint = (component, pinIndex, node, netPosition) => {
   if (component.symbolType === 'bjt_npn' || component.symbolType === 'bjt_pnp') {
-    const collectorY = component.y - component.height / 2 + 18;
-    const emitterY = component.y + component.height / 2 - 18;
-    if (pinIndex === 1) return { x: component.x + component.width / 2, y: collectorY };
+    const reach = snapPin(component.height / 2 - 18);
+    if (pinIndex === 1) return { x: component.x + component.width / 2, y: component.y - reach };
     if (pinIndex === 2) return { x: component.x - component.width / 2, y: component.y };
-    if (pinIndex === 3) return { x: component.x + component.width / 2, y: emitterY };
+    if (pinIndex === 3) return { x: component.x + component.width / 2, y: component.y + reach };
   }
 
   if (component.symbolType === 'opamp') {
@@ -185,8 +187,9 @@ const pinPoint = (component, pinIndex, node, netPosition) => {
     const right = component.x + component.width / 2;
     const top = component.y - component.height / 2;
     const bottom = component.y + component.height / 2;
-    if (pinIndex === 1) return { x: left, y: component.y + component.height * 0.22 };
-    if (pinIndex === 2) return { x: left, y: component.y - component.height * 0.22 };
+    const inputSpread = snapPin(component.height * 0.22);
+    if (pinIndex === 1) return { x: left, y: component.y + inputSpread };
+    if (pinIndex === 2) return { x: left, y: component.y - inputSpread };
     if (pinIndex === 3) return { x: right, y: component.y };
     if (pinIndex === 4) return { x: component.x, y: top };
     if (pinIndex === 5) return { x: component.x, y: bottom };
@@ -599,10 +602,13 @@ export const toDiagramSvg = (diagram) => `<?xml version="1.0" encoding="UTF-8"?>
     const labels = component.symbolType === 'ground'
       ? ''
       : `<text class="diagram-text" x="${refLabel?.x || component.x}" y="${refLabel?.y || component.y - component.height / 2 - 12}" text-anchor="middle">${escapeXml(component.ref)}</text><text class="diagram-small" x="${valueLabel?.x || component.x}" y="${valueLabel?.y || component.y + component.height / 2 + 20}" text-anchor="middle">${escapeXml(component.value)}</text>`;
-    // Engineers don't number the two pins of a resistor/cap/source/diode, so
-    // only annotate pin numbers on multi-pin parts (op-amps, transistors) where
-    // they actually disambiguate. Numbering every passive reads as machine output.
-    const pinLabels = component.symbolType === 'ground' || (component.pins?.length ?? 0) <= 2
+    // Engineers don't number the two pins of a resistor/cap/source/diode, and
+    // BJTs already carry C/B/E letters, so only annotate pin numbers on parts
+    // where they disambiguate (op amps, generic multi-pin symbols).
+    const pinLabels = component.symbolType === 'ground'
+      || component.symbolType === 'bjt_npn'
+      || component.symbolType === 'bjt_pnp'
+      || (component.pins?.length ?? 0) <= 2
       ? ''
       : component.pins.map((pin) => `<text class="diagram-small" x="${pin.x}" y="${pin.y - 8}" text-anchor="middle">${pin.pinIndex}</text>`).join('');
     return `<g>${renderSymbolSvg(component)}${labels}${pinLabels}</g>`;
@@ -622,12 +628,18 @@ export const toSpice = (circuit) => {
     if (part.kind === 'diode') lines.push(`${ref} ${a} ${b} DGEN`);
     if (part.kind === 'led') lines.push(`${ref} ${a} ${b} DRED`);
     if (part.kind === 'bjt_npn') lines.push(`${ref} ${a} ${b} ${c} Q2N2222`);
+    if (part.kind === 'bjt_pnp') lines.push(`${ref} ${a} ${b} ${c} Q2N3906`);
+    if (part.kind === 'mosfet_n') lines.push(`${ref} ${a} ${b} ${c} ${c} MNMOS`);
+    if (part.kind === 'mosfet_p') lines.push(`${ref} ${a} ${b} ${c} ${c} MPMOS`);
     if (part.kind === 'opamp') lines.push(`${ref} ${a} ${b} ${c} ${d} ${e} LM358`);
     if (part.kind === 'regulator') lines.push(`${ref} ${regulatorOutputNode(part.nodes)} 0 DC ${regulatorVoltage(part.value)}`);
   }
   lines.push('.model DGEN D(IS=1e-14 RS=1 N=1)');
   lines.push('.model DRED D(IS=1e-20 N=2 RS=10 CJO=2p BV=5 IBV=10u)');
   lines.push('.model Q2N2222 NPN(IS=1e-14 BF=200 VAF=100)');
+  if (circuit.components.some((part) => part.kind === 'bjt_pnp')) lines.push('.model Q2N3906 PNP(IS=1e-14 BF=200 VAF=100)');
+  if (circuit.components.some((part) => part.kind === 'mosfet_n')) lines.push('.model MNMOS NMOS(LEVEL=1 KP=20u VTO=2)');
+  if (circuit.components.some((part) => part.kind === 'mosfet_p')) lines.push('.model MPMOS PMOS(LEVEL=1 KP=10u VTO=-2)');
   if (circuit.components.some((part) => part.kind === 'opamp')) lines.push(LM358_SUBCIRCUIT);
   lines.push('.tran 0.1ms 20ms');
   lines.push('.op');

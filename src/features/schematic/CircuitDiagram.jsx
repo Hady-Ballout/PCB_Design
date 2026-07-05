@@ -201,7 +201,7 @@ export function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pe
       dragFrameRef.current = 0;
     }
     releasePointer(event);
-    if (drag.type === 'component') {
+    if (drag.type === 'component' || drag.type === 'netLabel') {
       onChange((current) => {
         if (!current) return current;
         try {
@@ -319,6 +319,11 @@ export function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pe
           const refLabel = diagram.labels?.find((label) => label.ref === component.ref && label.kind === 'ref');
           const valueLabel = diagram.labels?.find((label) => label.ref === component.ref && label.kind === 'value');
           const isGroundComponent = component.symbolType === 'ground';
+          // BJTs already carry C/B/E letters; numbering those pins too just
+          // stacks glyphs. Numbers stay on op amps and generic multi-pin parts.
+          const showsPinNumbers = component.pinCount > 2
+            && component.symbolType !== 'bjt_npn'
+            && component.symbolType !== 'bjt_pnp';
           return (
           <g
             key={component.ref}
@@ -345,7 +350,7 @@ export function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pe
                   cy={pin.y}
                   r="6"
                 />
-                {!isGroundComponent && (
+                {!isGroundComponent && showsPinNumbers && (
                   <text className="diagram-small" x={pin.x} y={pin.y - 8} textAnchor="middle">
                     {pin.pinIndex}
                   </text>

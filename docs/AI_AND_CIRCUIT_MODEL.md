@@ -82,7 +82,7 @@ pin nodes, footprint. Canvas (x/y) layout is visual-only and never affects
 - **Layout preservation**: `preserveDiagramLayout` keeps existing component positions (by
   ref) and net-label positions (by stable pin label ID) across edits; only new components
   get freshly generated positions. Layout format is versioned
-  (`LAYOUT_VERSION` in `schematicLayout.js`, currently 4) with migration for older saved
+  (`LAYOUT_VERSION` in `schematicLayout.js`, currently 5) with migration for older saved
   diagrams (`migrateChatDiagram` in `chatStore.js`).
 - **Routing**: `schematicLayout.js` treats components, labels, and existing wires as hard
   obstacles — auto-routed wires cannot cross/touch/come within `WIRE_CLEARANCE` (16px) of

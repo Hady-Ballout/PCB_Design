@@ -18,15 +18,19 @@ export const readGenerationStream = async (response, onEvent) => {
     if (event.type === 'complete') completed = event.data;
   };
 
-  while (true) {
-    const { done, value } = await reader.read();
-    buffered += decoder.decode(value || new Uint8Array(), { stream: !done });
-    const lines = buffered.split(/\r?\n/);
-    buffered = lines.pop() || '';
-    lines.forEach(consumeLine);
-    if (done) break;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      buffered += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const lines = buffered.split(/\r?\n/);
+      buffered = lines.pop() || '';
+      lines.forEach(consumeLine);
+      if (done) break;
+    }
+    if (buffered.trim()) consumeLine(buffered);
+  } finally {
+    reader.cancel().catch(() => {});
   }
-  if (buffered.trim()) consumeLine(buffered);
   if (!completed) throw new Error('Generation ended before the final circuit was returned.');
   return completed;
 };

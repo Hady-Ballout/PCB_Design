@@ -1,4 +1,4 @@
-export const LAYOUT_VERSION = 4;
+export const LAYOUT_VERSION = 5;
 export const GRID_SIZE = 20;
 export const COMPONENT_CLEARANCE = 24;
 export const WIRE_CLEARANCE = 16;
@@ -69,7 +69,7 @@ const isUnconnectedTerminal = (node, ref, pin) =>
 const labelIdForWire = (wire) => (wire.node === '0'
   ? `ground-label:${wire.ref}:${wire.pin}`
   : `net-label:${wire.ref}:${wire.pin}`);
-const textWidth = (text, minimum = 54, maximum = 150) =>
+const textWidth = (text, minimum = 30, maximum = 150) =>
   Math.max(minimum, Math.min(maximum, String(text || '').length * 8 + 20));
 
 export const rectsOverlap = (first, second, clearance = 0) => !(
@@ -124,15 +124,19 @@ const moveComponent = (component, x, y) => {
   };
 };
 
+// Multi-pin side pins sit a grid multiple away from the (snapped) component
+// center so horizontal wires meet them without a tiny off-grid jog at the pin.
 const pinPoint = (component, pinIndex, node, netPosition) => {
   if (component.symbolType === 'bjt_npn' || component.symbolType === 'bjt_pnp') {
-    if (pinIndex === 1) return { x: component.x + component.width / 2, y: component.y - component.height / 2 + 18 };
+    const reach = snap(component.height / 2 - 18);
+    if (pinIndex === 1) return { x: component.x + component.width / 2, y: component.y - reach };
     if (pinIndex === 2) return { x: component.x - component.width / 2, y: component.y };
-    if (pinIndex === 3) return { x: component.x + component.width / 2, y: component.y + component.height / 2 - 18 };
+    if (pinIndex === 3) return { x: component.x + component.width / 2, y: component.y + reach };
   }
   if (component.symbolType === 'opamp') {
-    if (pinIndex === 1) return { x: component.x - component.width / 2, y: component.y + component.height * 0.22 };
-    if (pinIndex === 2) return { x: component.x - component.width / 2, y: component.y - component.height * 0.22 };
+    const inputSpread = snap(component.height * 0.22);
+    if (pinIndex === 1) return { x: component.x - component.width / 2, y: component.y + inputSpread };
+    if (pinIndex === 2) return { x: component.x - component.width / 2, y: component.y - inputSpread };
     if (pinIndex === 3) return { x: component.x + component.width / 2, y: component.y };
     if (pinIndex === 4) return { x: component.x, y: component.y - component.height / 2 };
     if (pinIndex === 5) return { x: component.x, y: component.y + component.height / 2 };
@@ -340,21 +344,28 @@ const makeComponentLabels = (components) => {
     }
     return { ref: component.ref, kind, text, ...candidates[0], width, height: 18 };
   };
+  // Preferred spots hug the body: 26px clears the body box (6px pad + 4px
+  // check clearance + half the 18px label height). Horizontal parts escape
+  // their pins sideways, so side labels need 40px to clear the 36px escape
+  // reach; vertical parts escape up/down and can keep side labels tight. If
+  // none of these fit, the ring search exiles the label — and text floating
+  // away from its part is a machine-layout tell.
   for (const component of components) {
+    const sideGap = component.orientation === 'vertical' ? 10 : 40;
     const refLabel = placeLabel(component, component.ref, 'ref', [
-      { x: component.x, y: component.y - component.height / 2 - 18 },
-      { x: component.x - component.width / 2 - textWidth(component.ref) / 2 - 12, y: component.y },
-      { x: component.x + component.width / 2 + textWidth(component.ref) / 2 + 12, y: component.y },
-      { x: component.x, y: component.y + component.height / 2 + 20 },
+      { x: component.x, y: component.y - component.height / 2 - 26 },
+      { x: component.x - component.width / 2 - textWidth(component.ref) / 2 - sideGap, y: component.y },
+      { x: component.x + component.width / 2 + textWidth(component.ref) / 2 + sideGap, y: component.y },
+      { x: component.x, y: component.y + component.height / 2 + 26 },
     ]);
     labels.push(refLabel);
     occupied.push(labelBounds(refLabel, 4));
 
     const valueLabel = placeLabel(component, component.value, 'value', [
-      { x: component.x, y: component.y + component.height / 2 + 20 },
-      { x: component.x + component.width / 2 + textWidth(component.value) / 2 + 12, y: component.y },
-      { x: component.x - component.width / 2 - textWidth(component.value) / 2 - 12, y: component.y },
-      { x: component.x, y: component.y - component.height / 2 - 18 },
+      { x: component.x, y: component.y + component.height / 2 + 26 },
+      { x: component.x + component.width / 2 + textWidth(component.value) / 2 + sideGap, y: component.y },
+      { x: component.x - component.width / 2 - textWidth(component.value) / 2 - sideGap, y: component.y },
+      { x: component.x, y: component.y - component.height / 2 - 26 },
     ]);
     labels.push(valueLabel);
     occupied.push(labelBounds(valueLabel, 4));
@@ -622,7 +633,9 @@ const routeSection = (start, end, diagram, wire, routedWires) => {
       if (hardBodies.some((rect) => segmentIntersectsRect(segment.from, segment.to, rect))) continue;
       if (obstacles.some((rect) => segmentIntersectsRect(segment.from, segment.to, rect))) continue;
       if (occupiedSegments.some((occupied) => collinearOverlap(segment, occupied))) continue;
-      const bendCost = current.direction && current.direction !== neighbor.direction ? 12 : 0;
+      // Corners cost more than a grid step so the router trades a longer run
+      // for a straighter one — zig-zags are the clearest machine-drawn tell.
+      const bendCost = current.direction && current.direction !== neighbor.direction ? 30 : 0;
       const cost = current.cost + grid + bendCost;
       const neighborKey = `${neighbor.x},${neighbor.y},${neighbor.direction}`;
       if (best.has(neighborKey) && best.get(neighborKey) <= cost) continue;
@@ -784,6 +797,32 @@ const pinSide = (component, pin) => {
     { direction: 'up', distance: Math.abs(pin.y - bounds.top) },
     { direction: 'down', distance: Math.abs(pin.y - bounds.bottom) },
   ].sort((first, second) => first.distance - second.distance)[0].direction;
+};
+
+// A wire reads as hand-routed when it leaves one part and enters the next in a
+// single straight run. For a part about to be placed, find the row an
+// already-placed connected pin escapes on: side pins connect straight across at
+// their own row, top/bottom pins connect on the first grid row past the body.
+// Only grid rows qualify — aligning to an off-grid row would trade one visible
+// bend for an uglier off-grid jog.
+const alignmentRow = (placed, nodes) => {
+  for (const node of nodes) {
+    for (const other of placed) {
+      for (const pin of other.pins || []) {
+        if (pin.node !== node) continue;
+        const side = pinSide(other, pin);
+        if (side === 'left' || side === 'right') {
+          if (pin.y === snap(pin.y)) return pin.y;
+          continue;
+        }
+        const bounds = componentBounds(other);
+        return side === 'up'
+          ? Math.floor((bounds.top - WIRE_CLEARANCE) / GRID_SIZE) * GRID_SIZE
+          : Math.ceil((bounds.bottom + WIRE_CLEARANCE) / GRID_SIZE) * GRID_SIZE;
+      }
+    }
+  }
+  return null;
 };
 
 const connectionLabel = (id, name, anchor, direction, terminal = {}) => {
@@ -996,6 +1035,42 @@ const buildDraft = (circuit, options = {}) => {
     if (isTwoPin && hasGround && nonGround.length) {
       orientation = 'vertical';
       preferred = { x: preferred.x, y: preferred.y + 100 };
+      if (componentHeight < componentWidth) {
+        // Stand the body upright too: the vertical zigzag glyph assumes a tall
+        // body, and a rotated part keeping its landscape box draws a scribble
+        // with the wire running through it.
+        componentWidth = size.height;
+        componentHeight = size.width;
+      }
+    } else if (isTwoPin && nonGround.length) {
+      // Series passives line up with the pin that feeds them so the joining
+      // wire runs straight — the strongest single cue of a hand-drawn sheet.
+      // Stay within the part's own rank band: long chains wrap into serpentine
+      // bands, and dragging a part back to the previous band's row would pile
+      // the whole chain onto one endless line.
+      const row = alignmentRow(placed, nonGround);
+      if (row !== null && Math.abs(row - preferred.y) < grid.rankBandStride * 0.75) {
+        preferred = { x: preferred.x, y: row };
+      }
+    } else if (size.symbolType === 'opamp') {
+      // Center the op amp so whichever input is already driven sits level
+      // with its driving pin.
+      const spread = snap(size.height * 0.22);
+      const invertingRow = nodes[1] && nodes[1] !== '0' ? alignmentRow(placed, [nodes[1]]) : null;
+      const nonInvertingRow = invertingRow === null && nodes[0] && nodes[0] !== '0'
+        ? alignmentRow(placed, [nodes[0]])
+        : null;
+      const centered = invertingRow !== null
+        ? invertingRow + spread
+        : nonInvertingRow !== null ? nonInvertingRow - spread : null;
+      if (centered !== null && Math.abs(centered - preferred.y) < grid.rankBandStride * 0.75) {
+        preferred = { x: preferred.x, y: centered };
+      }
+    } else if (size.symbolType === 'bjt_npn' || size.symbolType === 'bjt_pnp') {
+      const baseRow = nodes[1] && nodes[1] !== '0' ? alignmentRow(placed, [nodes[1]]) : null;
+      if (baseRow !== null && Math.abs(baseRow - preferred.y) < grid.rankBandStride * 0.75) {
+        preferred = { x: preferred.x, y: baseRow };
+      }
     }
     if (role?.orientation === 'horizontal' || role?.orientation === 'vertical') {
       orientation = role.orientation;
@@ -1568,7 +1643,6 @@ const cropDiagramToContent = (diagram) => {
 const routeWithExpansion = (diagram, { maxExpansions = MAX_EXPANSIONS } = {}) => {
   let current = structuredClone(diagram);
   let lastViolations = [];
-  let failedNode = null;
   current.layoutVersion = LAYOUT_VERSION;
   current.junctions = [];
   current.bridges = [];
@@ -1581,28 +1655,6 @@ const routeWithExpansion = (diagram, { maxExpansions = MAX_EXPANSIONS } = {}) =>
   }));
 
   for (let attempt = 0; attempt <= maxExpansions; attempt += 1) {
-    if (failedNode) {
-      const offsets = [
-        { x: 80, y: 0 },
-        { x: -80, y: 0 },
-        { x: 0, y: -80 },
-        { x: 0, y: 80 },
-        { x: 160, y: 0 },
-        { x: -160, y: 0 },
-        { x: 0, y: -160 },
-        { x: 0, y: 160 },
-      ];
-      const offset = offsets[Math.min(attempt - 1, offsets.length - 1)];
-      current.netLabels = (current.netLabels || []).map((label) => label.name === failedNode
-        ? {
-            ...label,
-            x: label.x + offset.x,
-            y: label.y + offset.y,
-            labelX: label.labelX + offset.x,
-            labelY: label.labelY + offset.y,
-          }
-        : label);
-    }
     current.netLabels = [];
     for (const order of routeOrders(current)) {
       const routed = [];
@@ -1631,7 +1683,6 @@ const routeWithExpansion = (diagram, { maxExpansions = MAX_EXPANSIONS } = {}) =>
         lastViolations = validation.violations;
       } else {
         lastViolations = [{ type: 'route_failed', wire: failed.id }];
-        failedNode = failed.node && failed.node !== '0' ? failed.node : null;
       }
     }
     current.width += 160;

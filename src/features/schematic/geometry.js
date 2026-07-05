@@ -1,5 +1,7 @@
 // Pure schematic-diagram geometry helpers shared by the canvas editor.
-import { routeDiagramWire } from '../../core/schematicLayout.js';
+import { GRID_SIZE, routeDiagramWire } from '../../core/schematicLayout.js';
+
+const snapToGrid = (value) => Math.round(value / GRID_SIZE) * GRID_SIZE;
 
 export const ADD_COMPONENT_TOOLS = [
   { type: 'resistor', label: 'Add resistor' },
@@ -30,6 +32,14 @@ export const symbolDefaults = {
 
 export const svgPointer = (event, diagram) => {
   const svg = event.currentTarget.ownerSVGElement || event.currentTarget;
+  // Use the SVG's real screen transform so viewBox scaling and the
+  // preserveAspectRatio letterbox are both accounted for; a plain box-ratio
+  // mapping drifts whenever the element aspect differs from the viewBox aspect.
+  const ctm = svg.getScreenCTM?.();
+  if (ctm && typeof DOMPoint !== 'undefined') {
+    const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(ctm.inverse());
+    return { x: point.x, y: point.y };
+  }
   const rect = svg.getBoundingClientRect();
   return {
     x: ((event.clientX - rect.left) / rect.width) * diagram.width,
@@ -81,12 +91,12 @@ export const moveWirePath = (wire, diagram, dx, dy) => {
 };
 
 export const componentPinPoint = (component, pinIndex) => {
+  // Grid-aligned pin offsets, kept in sync with pinPoint in core/schematicLayout.js.
   if (component.symbolType === 'bjt_npn' || component.symbolType === 'bjt_pnp') {
-    const collectorY = component.y - component.height / 2 + 18;
-    const emitterY = component.y + component.height / 2 - 18;
-    if (pinIndex === 1) return { x: component.x + component.width / 2, y: collectorY };
+    const reach = snapToGrid(component.height / 2 - 18);
+    if (pinIndex === 1) return { x: component.x + component.width / 2, y: component.y - reach };
     if (pinIndex === 2) return { x: component.x - component.width / 2, y: component.y };
-    if (pinIndex === 3) return { x: component.x + component.width / 2, y: emitterY };
+    if (pinIndex === 3) return { x: component.x + component.width / 2, y: component.y + reach };
   }
 
   if (component.symbolType === 'opamp') {
@@ -94,8 +104,9 @@ export const componentPinPoint = (component, pinIndex) => {
     const right = component.x + component.width / 2;
     const top = component.y - component.height / 2;
     const bottom = component.y + component.height / 2;
-    if (pinIndex === 1) return { x: left, y: component.y + component.height * 0.22 };
-    if (pinIndex === 2) return { x: left, y: component.y - component.height * 0.22 };
+    const inputSpread = snapToGrid(component.height * 0.22);
+    if (pinIndex === 1) return { x: left, y: component.y + inputSpread };
+    if (pinIndex === 2) return { x: left, y: component.y - inputSpread };
     if (pinIndex === 3) return { x: right, y: component.y };
     if (pinIndex === 4) return { x: component.x, y: top };
     if (pinIndex === 5) return { x: component.x, y: bottom };

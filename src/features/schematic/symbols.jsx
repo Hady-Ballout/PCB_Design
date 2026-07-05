@@ -74,10 +74,16 @@ export function DiagramSymbol({ component }) {
 
   if (orientation === 'vertical') {
     if (symbolType === 'resistor') {
+      // Scale the zigzag to the body height so short vertical resistors don't
+      // draw the scribble past their own outline.
+      const lead = Math.min(18, height * 0.16);
+      const zigTop = top + lead;
+      const zigBottom = bottom - lead;
+      const step = (zigBottom - zigTop) / 5;
       return (
         <polyline
           className="diagram-symbol"
-          points={`${x},${top} ${x},${top + 18} ${x - 18},${top + 28} ${x + 18},${top + 44} ${x - 18},${top + 60} ${x + 18},${top + 76} ${x},${bottom - 18} ${x},${bottom}`}
+          points={`${x},${top} ${x},${zigTop} ${x - 18},${zigTop + step} ${x + 18},${zigTop + step * 2} ${x - 18},${zigTop + step * 3} ${x + 18},${zigTop + step * 4} ${x},${zigBottom} ${x},${bottom}`}
         />
       );
     }
@@ -268,15 +274,35 @@ export function GroundSymbol({ x, y }) {
 export function PortSymbol({ port }) {
   const width = port.labelWidth || 58;
   const height = 24;
-  const left = port.side === 'right' ? port.x + 10 : port.x - width - 10;
-  const y = port.y - height / 2;
-  const lineEnd = port.side === 'right' ? port.x + 10 : port.x - 10;
+  const side = ['left', 'right', 'top', 'bottom'].includes(port.side) ? port.side : 'left';
+  // Place the pill and stub on the same side the pin faces so top/bottom ports
+  // aren't drawn with a horizontal stub pointing at nothing.
+  let rectX;
+  let rectY;
+  let lineEnd;
+  if (side === 'right') {
+    rectX = port.x + 10;
+    rectY = port.y - height / 2;
+    lineEnd = { x: port.x + 10, y: port.y };
+  } else if (side === 'top') {
+    rectX = port.x - width / 2;
+    rectY = port.y - height - 10;
+    lineEnd = { x: port.x, y: port.y - 10 };
+  } else if (side === 'bottom') {
+    rectX = port.x - width / 2;
+    rectY = port.y + 10;
+    lineEnd = { x: port.x, y: port.y + 10 };
+  } else {
+    rectX = port.x - width - 10;
+    rectY = port.y - height / 2;
+    lineEnd = { x: port.x - 10, y: port.y };
+  }
   return (
     <g className="diagram-port" pointerEvents="none" aria-label={`${port.label} port`}>
       <circle className="diagram-node" cx={port.x} cy={port.y} r="4" />
-      <line className="diagram-symbol" x1={port.x} y1={port.y} x2={lineEnd} y2={port.y} />
-      <rect className="diagram-net" x={left} y={y} width={width} height={height} rx="4" />
-      <text className="diagram-small" x={left + width / 2} y={y + 16} textAnchor="middle">{port.label}</text>
+      <line className="diagram-symbol" x1={port.x} y1={port.y} x2={lineEnd.x} y2={lineEnd.y} />
+      <rect className="diagram-net" x={rectX} y={rectY} width={width} height={height} rx="4" />
+      <text className="diagram-small" x={rectX + width / 2} y={rectY + 16} textAnchor="middle">{port.label}</text>
     </g>
   );
 }

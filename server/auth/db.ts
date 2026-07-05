@@ -1,6 +1,16 @@
 import pg from 'pg';
+import { readFileSync } from 'node:fs';
 import { randomBytes, scryptSync } from 'node:crypto';
 import type { LocalUser, QueryResult } from '../types.js';
+
+// Verify the database server's TLS certificate by default. A CA bundle can be
+// supplied via PG_CA_CERT; verification is only relaxed when PG_SSL_NO_VERIFY=1
+// is set explicitly (e.g. local development against a self-signed cert).
+function sslConfig(): pg.PoolConfig['ssl'] {
+  if (process.env.PG_SSL_NO_VERIFY === '1') return { rejectUnauthorized: false };
+  if (process.env.PG_CA_CERT) return { ca: readFileSync(process.env.PG_CA_CERT, 'utf8'), rejectUnauthorized: true };
+  return { rejectUnauthorized: true };
+}
 
 let pool: pg.Pool | undefined;
 let localUsers: LocalUser[] = [];
@@ -16,7 +26,7 @@ function getPool(): pg.Pool {
   if (!pool) {
     pool = new pg.Pool({
       connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
+      ssl: sslConfig(),
     });
   }
   return pool;
