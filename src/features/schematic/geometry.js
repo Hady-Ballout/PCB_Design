@@ -1,5 +1,18 @@
 // Pure schematic-diagram geometry helpers shared by the canvas editor.
-import { GRID_SIZE, routeDiagramWire } from '../../core/schematicLayout.js';
+import {
+  GRID_SIZE,
+  SCHEMATIC_SLOT_LAYOUT,
+  nextFreeSlot,
+  routeDiagramWire,
+  slotCanvasSize,
+  slotCenter,
+  slotGridFor,
+  slotRects,
+} from '../../core/schematicLayout.js';
+
+// Re-export the slot primitives the canvas/app layers consume so they have a
+// single feature-facing import surface.
+export { SCHEMATIC_SLOT_LAYOUT, slotCanvasSize, slotCenter, slotGridFor } from '../../core/schematicLayout.js';
 
 const snapToGrid = (value) => Math.round(value / GRID_SIZE) * GRID_SIZE;
 
@@ -14,6 +27,43 @@ export const ADD_COMPONENT_TOOLS = [
 ];
 
 export const diagramPath = (points) => points.map((point) => `${point.x},${point.y}`).join(' ');
+
+// The slot grid itself (size, positions, canvas sizing, assignment) lives in
+// core/schematicLayout.js so the layout engine and this renderer share one
+// definition. Here we only add the pin geometry each slot draws.
+
+// Every slot exposes the same fixed set of pins regardless of what part lands in
+// it — a component just maps its terminals onto the ones it uses. Signal pins sit
+// on the left, the power rails on top/bottom. `position` is the fraction along
+// that side (0 = start corner) where the pin sits.
+export const SCHEMATIC_SLOT_PINS = [
+  { id: 'pos', label: '+', side: 'left', position: 0.3 },
+  { id: 'neg', label: '−', side: 'left', position: 0.7 },
+  { id: 'vccPos', label: 'V+', side: 'top', position: 0.5 },
+  { id: 'vccNeg', label: 'V−', side: 'bottom', position: 0.5 },
+];
+
+// Resolve a pin's absolute point plus where its label sits (nudged inward so it
+// reads against the slot body rather than colliding with a neighbour's wire).
+const LABEL_OFFSET = 10;
+const slotPin = (slot, pin) => {
+  const alongX = snapToGrid(slot.x + pin.position * slot.width);
+  const alongY = snapToGrid(slot.y + pin.position * slot.height);
+  const layouts = {
+    left: { x: slot.x, y: alongY, labelX: slot.x + LABEL_OFFSET, labelY: alongY, labelAnchor: 'start' },
+    right: { x: slot.x + slot.width, y: alongY, labelX: slot.x + slot.width - LABEL_OFFSET, labelY: alongY, labelAnchor: 'end' },
+    top: { x: alongX, y: slot.y, labelX: alongX, labelY: slot.y + LABEL_OFFSET + 6, labelAnchor: 'middle' },
+    bottom: { x: alongX, y: slot.y + slot.height, labelX: alongX, labelY: slot.y + slot.height - LABEL_OFFSET, labelAnchor: 'middle' },
+  };
+  return { ...pin, ...layouts[pin.side] };
+};
+
+// Core slot rectangles decorated with the fixed pins this canvas draws.
+export const schematicSlots = (rows, cols) =>
+  slotRects(rows, cols).map((slot) => ({
+    ...slot,
+    pins: SCHEMATIC_SLOT_PINS.map((pin) => slotPin(slot, pin)),
+  }));
 
 export const cloneDiagram = (diagram) => (diagram ? structuredClone(diagram) : null);
 export const wireId = (wire) => wire.id || `${wire.ref}-${wire.pin}-${wire.node}`;
@@ -150,14 +200,18 @@ export const addedComponent = (diagram, type) => {
   const existingRefs = new Set(diagram.components.map((component) => component.ref));
   let nextRefNumber = 1;
   while (existingRefs.has(`${defaults.prefix}${nextRefNumber}`)) nextRefNumber += 1;
-  const column = diagram.components.length % 3;
-  const row = Math.floor(diagram.components.length / 3);
   const nodes = defaults.kind === 'ground'
     ? ['0']
     : Array.from(
       { length: defaults.nodes },
       (_, index) => `NC_${defaults.prefix}${nextRefNumber}_${index + 1}`,
     );
+  // Drop the new part into the next free slot; the grid is sized to hold the
+  // component being added, so a free slot always exists.
+  const grid = slotGridFor(diagram.components.length + 1);
+  const slots = slotRects(grid.rows, grid.cols);
+  const slot = nextFreeSlot(slots, diagram.components) || slots[slots.length - 1];
+  const center = slotCenter(slot);
   const component = {
     ref: `${defaults.prefix}${nextRefNumber}`,
     kind: defaults.kind,
@@ -165,8 +219,8 @@ export const addedComponent = (diagram, type) => {
     nodes,
     symbolType: defaults.symbolType,
     orientation: defaults.orientation,
-    x: 150 + column * 210,
-    y: 180 + row * 125,
+    x: center.x,
+    y: center.y,
     width: defaults.width,
     height: defaults.height,
     pinCount: defaults.nodes,

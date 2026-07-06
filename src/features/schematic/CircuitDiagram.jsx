@@ -8,6 +8,8 @@ import {
   moveWirePath,
   movedComponent,
   movedNet,
+  schematicSlots,
+  slotGridFor,
   svgPointer,
   terminalPoint,
   wireId,
@@ -262,6 +264,37 @@ export function CircuitDiagram({ diagram, onChange, tool, selected, onSelect, pe
         </defs>
         <rect className="diagram-bg" width={diagram.width} height={diagram.height} rx="8" onPointerDown={cancelPendingWire} />
         <rect width={diagram.width} height={diagram.height} fill="url(#diagram-grid-large)" pointerEvents="none" />
+        {schematicSlots(
+          (diagram.slotLayout || slotGridFor(diagram.components.length)).rows,
+          (diagram.slotLayout || slotGridFor(diagram.components.length)).cols,
+        ).map((slot) => (
+          <g key={slot.id} className="diagram-slot" pointerEvents="none">
+            <rect className="diagram-slot-rect" x={slot.x} y={slot.y} width={slot.width} height={slot.height} rx="10" />
+            <text
+              className="diagram-slot-label"
+              x={slot.x + slot.width / 2}
+              y={slot.y + slot.height / 2}
+              textAnchor="middle"
+              dominantBaseline="middle"
+            >
+              {slot.index}
+            </text>
+            {slot.pins.map((pin) => (
+              <g key={`${slot.id}-${pin.id}`} className="diagram-slot-pin">
+                <circle className="diagram-slot-pin-dot" cx={pin.x} cy={pin.y} r="4" />
+                <text
+                  className="diagram-slot-pin-label"
+                  x={pin.labelX}
+                  y={pin.labelY}
+                  textAnchor={pin.labelAnchor}
+                  dominantBaseline="middle"
+                >
+                  {pin.label}
+                </text>
+              </g>
+            ))}
+          </g>
+        ))}
         {visibleWires.map((wire) => {
           const points = wirePoints(diagram, wire);
           return (

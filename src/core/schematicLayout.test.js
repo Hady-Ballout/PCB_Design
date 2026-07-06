@@ -7,10 +7,14 @@ import {
   layoutCircuitDiagram,
   repairDiagramLayout,
   rerouteAffectedNets,
+  slotCenter,
+  slotRects,
   validateDiagramLayout,
 } from './schematicLayout.js';
 
 const circuit = (title, components) => ({ title, type: 'test', supplyVoltage: 5, components, notes: [] });
+
+const schematicSlotCenters = (layout) => slotRects(layout.rows, layout.cols).map(slotCenter);
 
 const fixtures = [
   circuit('RC filter', [
@@ -104,6 +108,36 @@ describe('schematic layout engine', () => {
     expect(first.layoutVersion).toBe(LAYOUT_VERSION);
     expect(validateDiagramLayout(first)).toEqual({ ok: true, violations: [] });
     expect(second).toEqual(first);
+  });
+
+  it('places every component on a slot center in slot mode', () => {
+    for (const fixture of [fixtures[0], differenceAmplifier]) {
+      const diagram = layoutCircuitDiagram(fixture, { slots: true });
+      expect(diagram.slotLayout).toBeTruthy();
+      const centers = new Set(
+        schematicSlotCenters(diagram.slotLayout).map((center) => `${center.x}:${center.y}`),
+      );
+      for (const component of diagram.components) {
+        expect(centers.has(`${component.x}:${component.y}`)).toBe(true);
+      }
+      expect(validateDiagramLayout(diagram)).toEqual({ ok: true, violations: [] });
+    }
+  });
+
+  it('grows slot rows to hold more components than a single grid page', () => {
+    const many = circuit('Many loads', [
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      ...Array.from({ length: 13 }, (_, index) => ({
+        ref: `R${index + 1}`,
+        kind: 'load',
+        value: `${index + 1}k`,
+        nodes: ['VCC', '0'],
+      })),
+    ]);
+    const small = layoutCircuitDiagram(fixtures[0], { slots: true });
+    const large = layoutCircuitDiagram(many, { slots: true });
+    expect(large.slotLayout.rows).toBeGreaterThan(small.slotLayout.rows);
+    expect(large.slotLayout.rows * large.slotLayout.cols).toBeGreaterThanOrEqual(14);
   });
 
   it('reports typed body, clearance, crossing, and bounds violations', () => {

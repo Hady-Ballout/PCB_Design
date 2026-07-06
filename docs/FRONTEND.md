@@ -8,7 +8,7 @@ React 19 + Vite 7, no router library — page switching is a tiny hash-based rou
 | File | Role |
 |---|---|
 | `pcbGenerator.js` (~690 ln) | `validateCircuit`, `toSpice`, `toKiCadNetlist`, `toDiagramSvg`, `simulateCircuit` metadata, `addMissingSpiceModels` (injects the built-in `LM358` subcircuit), `buildCircuitDiagram` |
-| `schematicLayout.js` (~1900 ln) | Diagram layout engine: `layoutCircuitDiagram`, `routeDiagramWire`, `rerouteAffectedNets`, `repairDiagramLayout`, `validateDiagramLayout`, collision/clearance helpers. Current layout version: `LAYOUT_VERSION = 5` |
+| `schematicLayout.js` (~2000 ln) | Diagram layout engine: `layoutCircuitDiagram` (free + `{ slots: true }` slot-anchored mode), `routeDiagramWire`, `rerouteAffectedNets`, `repairDiagramLayout`, `validateDiagramLayout`, collision/clearance helpers, and the slot-grid primitives (`SCHEMATIC_SLOT_LAYOUT`, `slotGridFor`, `slotCanvasSize`, `slotRects`, `slotCenter`, `assignSlots`, `nextFreeSlot`, `nearestSlot`). Current layout version: `LAYOUT_VERSION = 5` |
 | `circuitSync.js` (~815 ln) | Bidirectional sync between the canonical circuit model and each editable view: `parseSpiceNetlist`, `parseKiCadNetlist`, `parseCircuitJson`, `circuitFromDiagram`, `circuitElectricalSignature`, `synchronizeResult`, `preserveDiagramLayout` |
 | `lineDiff.js` | `changedLineIndexes` — used to highlight changed SPICE lines in AI-proposal review mode |
 | `config.js` | `API_BASE` from `VITE_API_URL` |
@@ -71,6 +71,44 @@ hovered/selected so net names read as plain text flags. Layout tuning constants
 (`TIDY_GRID`, `SPREAD_GRID`, clearances, `CANVAS_MARGIN`) live at the top of
 `schematicLayout.js`.
 
+#### Slot grid and slot-anchored placement
+
+Generated components are placed into a **fixed slot grid** rather than scattered
+freely. The grid is the source of truth: `SCHEMATIC_SLOT_LAYOUT` (in
+`schematicLayout.js`) fixes the slot size (`slotWidth`/`slotHeight`), `gap`,
+`margin`, and column count; `slotCanvasSize(rows, cols)` *derives* the canvas
+from the grid (the inverse of the old canvas-drives-slots relationship), and
+`slotGridFor(count)` grows the row count so every component gets its own slot
+(≥2 rows). All slot geometry lives in **core** (`slotRects`, `slotCenter`,
+`assignSlots`, `nextFreeSlot`, `nearestSlot`) so the layout engine and the
+renderer share one definition.
+
+`layoutCircuitDiagram(circuit, { slots: true })` is the slot-placement mode:
+`buildDraft`'s `slots` branch sizes the canvas from the grid, orders components
+by signal-flow rank, assigns them column-major to slot cells (`assignSlots`), and
+pins each component **exactly** at its slot center (bypassing the
+collision-nudge). The existing A\* router then wires them through the gaps, and
+external-terminal **ports** drop as short stubs beside their connected pin
+(edge-anchored ports would be unroutable across fixed slots). The returned
+diagram carries `slotLayout: { rows, cols }`; `cropDiagramToContent` never shrinks
+below the slot-grid extent, so empty trailing slots stay visible. `buildCircuitDiagram`
+(hence the server's generated diagram and every edit through `synchronizeResult`)
+and the canvas **Auto-layout** button all use `{ slots: true }`.
+
+`geometry.js` `addedComponent` drops a manually-added part into the
+`nextFreeSlot`; **dragging stays unrestricted** (`movedComponent` is unchanged) —
+snapping a drag into a slot is a later step, as is mapping a component's terminals
+onto the slot pins. `preserveDiagramLayout` keeps user-dragged positions and grows
+the canvas to contain them, so a part dragged past the grid is not shoved back.
+
+The canvas draws the slots as dashed, numbered rectangles below the wires and
+symbols. `schematicSlots(rows, cols)` in `geometry.js` wraps core's `slotRects`
+and decorates each with the **fixed pin set** (`SCHEMATIC_SLOT_PINS`: `+`/`−`
+signal pins on the left, `V+`/`V−` power rails on top/bottom) — always present so
+a component that occupies a slot maps its terminals onto the pins it uses. The
+renderer sizes the grid from `diagram.slotLayout` (falling back to
+`slotGridFor(components.length)`); the layer is `pointerEvents="none"`.
+
 ## `src/app` — app shell
 
 - **`App.jsx`** (~1200 ln) — the integration point. Owns: chat store state, active
@@ -99,7 +137,8 @@ hovered/selected so net names read as plain text flags. Layout tuning constants
 | `chat` | `chatStore.js`, `chatFormat.js`, `ChatPanel.jsx` | `loadChatStore`/`saveChatStore` (localStorage-backed, key `prompt-to-pcb-chats-v1`), `createChat`, `chatTitleFromPrompt`, `buildConversationContext`, `migrateChatDiagram` (upgrades saved diagrams to the current layout version) |
 | `schematic` | `CircuitDiagram.jsx`, `symbols.jsx`, `geometry.js` | The interactive canvas: rendering, symbols (`DiagramSymbol`, `GroundSymbol`, `PortSymbol`, `BridgeSymbol`), and pure geometry helpers (`addedComponent`, `movedComponent`, `moveWirePath`, `componentPinPoint`, etc.) |
 | `blockSchematic` | `BlockSchematic.jsx`, `BusEdge.jsx`, `blockSchematicModel.js`, `blockSymbols.jsx`, `BlockSchematic.css` | The **"new schematic test"** view — a read-only [React Flow](https://reactflow.dev) (`@xyflow/react`) block diagram: one rectangle per component whose header shows the component's **schematic symbol** (SVG glyph keyed by `kind`, from `blockSymbols.jsx` — self-contained so the chunk stays decoupled) instead of a name, with the `ref`/`value` beneath it, pins listed down the right side (labeled Positive/Negative for 2‑pin parts, positional for opamp/BJT). Nets connecting ≥2 pins become wires: each net gets its own lane index → contrasting color (`laneColor`) and a dedicated vertical channel, routed by the custom orthogonal `BusEdge` (`laneX = max(sourceX,targetX)+margin+laneIndex*gap`) so wires run parallel instead of overlapping. Clicking a wire selects it — React Flow adds `.selected`, the wrapper gets `.has-selection`, and CSS highlights the active wire while dimming the rest. `blockSchematicModel.js` is a pure `circuit → { nodes, edges }` transform (unit-tested in `blockSchematicModel.test.js`); it re-derives the `isUnconnectedTerminal` predicate locally rather than importing another chunk |
-| `editors` | `editorConfig.js` | Editor window labels/keys and split-pane persistence (`EDITOR_SPLIT_STORAGE_KEY`, `loadEditorSplit`) — the editor windows themselves render inside `App.jsx`. Views: `spice`, `json`, `canvas`, and `blockSchematic` ("new schematic test") — a scaffold tab for an alternate block-based schematic (rectangle-per-component with pins on one side) |
+| `realisticSchematic` | `RealisticSchematic.jsx`, `Breadboard.jsx`, `parts.jsx`, `breadboardModel.js`, `breadboardGeometry.js`, `breadboardDescription.js`, `partVisuals.js`, `RealisticSchematic.css` | The **"Realistic schematic"** view — a read-only Fritzing-style breadboard build rendered entirely in SVG: a half-size solderless breadboard (grows in 10-column steps when a circuit overflows) with photo-style parts (resistors with color bands computed from `value`, electrolytic/ceramic caps, LED lens colors, DIP-8 opamps straddling the trench, TO-92 transistors, TO-220 regulators) and colored jumper wires. `breadboardModel.js` is a pure `circuit → placement` transform (`circuitToBreadboard`, unit-tested): ground/supply nets map to the rails, other nets get 5-hole tie groups via a greedy left-to-right column allocator with series-chain reuse; voltage sources render as off-board battery packs feeding the rails. `partVisuals.js` holds the value-parsing heuristics (`resistorColorBands`, `capStyle`, `ledColor`, unit-tested). Interactive: clicking a part or wire highlights its electrical neighborhood — the part, its nets' jumpers, tie-group columns, rail stripes, and feeding battery — and dims everything else (hover previews the same more gently); `selectionModel.js` is the pure `highlightFor`/`readoutFor`/`pinLabelsFor` logic (unit-tested). Also: clickable net legend chips, pin labels on selection (opamp IN±/OUT, BJT C/B/E, MOSFET D/G/S, LED A/K), toolbar readout, ctrl+wheel zoom, and SVG export via `downloadText`. A **"Copy description"** toolbar button (debug aid) copies a plain-text dump of the build — via `describeBreadboard(circuit, model)` in `breadboardDescription.js` (pure, unit-tested): intended netlist, per-net pin lists, physical placement (rails/batteries/parts/jumpers with breadboard hole addresses like `a5`), a reconstructed-connectivity check that flags any `SPLIT` (net across ≥2 nodes) or `SHORT` (node mixing nets), and warnings — so it can be pasted into an AI to verify the generated schematic (falls back to a downloadable `.txt` when the clipboard is unavailable). All four model files re-derive `isUnconnectedTerminal` locally rather than importing another chunk |
+| `editors` | `editorConfig.js` | Editor window labels/keys and split-pane persistence (`EDITOR_SPLIT_STORAGE_KEY`, `loadEditorSplit`) — the editor windows themselves render inside `App.jsx`. Views: `spice`, `json`, `canvas`, `blockSchematic` ("new schematic test") — a scaffold tab for an alternate block-based schematic (rectangle-per-component with pins on one side) — and `realisticSchematic` ("Realistic schematic") — a read-only breadboard build with photo-style parts |
 | `waveform` | `WaveformChart.jsx` | Custom SVG chart: trace toggles, zoom/pan, hover readout, CSV export, collapsible Ngspice log |
 
 ## Persistence model

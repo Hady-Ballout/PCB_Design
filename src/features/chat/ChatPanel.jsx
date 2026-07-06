@@ -5,7 +5,10 @@ import { formatChatTime } from './chatFormat.js';
 export function ChatPanel({
   chatPanelView,
   setChatPanelView,
-  startNewChat,
+  newChatPrompt,
+  setNewChatPrompt,
+  startChatFromHistory,
+  handleNewChatComposerKeyDown,
   chatStore,
   sortedChats,
   activeChat,
@@ -28,10 +31,34 @@ export function ChatPanel({
               <p className="eyebrow">Prompt-to-PCB MVP</p>
               <h1>Previous chats</h1>
             </div>
-            <button className="new-chat-button" onClick={startNewChat} type="button">
-              + New chat
-            </button>
           </header>
+
+          <form
+            className="chat-composer new-chat-composer"
+            onSubmit={(event) => { event.preventDefault(); startChatFromHistory(); }}
+          >
+            <div className="chat-composer-input">
+              <textarea
+                value={newChatPrompt}
+                onChange={(event) => setNewChatPrompt(event.target.value)}
+                onKeyDown={handleNewChatComposerKeyDown}
+                rows={3}
+                placeholder="Describe a new circuit to start a new chat..."
+                aria-label="Describe a new circuit to start a new chat"
+              />
+              <button
+                className="composer-send-button"
+                type="submit"
+                disabled={generationBusy || !newChatPrompt.trim()}
+                aria-label="Start new chat"
+                title="Start new chat"
+              >
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                  <path d="M3 11.5L21 3l-8.5 18-2.2-7.3L3 11.5z" fill="currentColor" />
+                </svg>
+              </button>
+            </div>
+          </form>
 
           <section className="chat-history chat-history-page" aria-label="Previous chats">
             <div className="chat-section-label">

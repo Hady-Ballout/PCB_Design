@@ -214,7 +214,8 @@ describe('prompt-to-pcb generator', () => {
       expect(diagram.components.slice(index + 1).some((other) =>
         diagramComponentsOverlap(component, other))).toBe(false);
     }
-    expect(diagram.height).toBeGreaterThanOrEqual(500);
+    // Slot placement gives each of the four parts its own slot in the fixed grid.
+    expect(diagram.slotLayout).toEqual({ rows: 2, cols: 4 });
   });
 
   it('places voltage divider output and load connections in the diagram model', () => {
@@ -370,10 +371,13 @@ describe('prompt-to-pcb generator', () => {
     expect(svg).toContain('<svg');
     expect(svg).toContain('R1');
     expect(svg).toContain('C1');
+    // Fully routed with physical wires, not labeled-net stubs.
     expect(diagram.netLabels).toHaveLength(0);
-    expect(diagram.bridges).toEqual([]);
-    expect(diagram.junctions).toEqual([]);
-    expect(svg).not.toContain('class="diagram-bridge"');
+    // Slot placement pins parts to fixed cells, so wires may cross and bridge —
+    // bridges/junctions are valid routing artifacts here, just well-formed arrays.
+    expect(Array.isArray(diagram.bridges)).toBe(true);
+    expect(Array.isArray(diagram.junctions)).toBe(true);
+    expect(diagram.slotLayout).toBeTruthy();
   });
 
   it('exports schematic ports in the generated diagram SVG', () => {

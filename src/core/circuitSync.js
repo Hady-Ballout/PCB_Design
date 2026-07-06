@@ -1,10 +1,14 @@
 import {
   DiagramLayoutError,
   buildCircuitDiagram,
-  findNearestLegalPlacement,
   layoutCircuitDiagram,
+  nextFreeSlot,
   repairDiagramLayout,
   simulateCircuit,
+  slotCanvasSize,
+  slotCenter,
+  slotGridFor,
+  slotRects,
   toDiagramSvg,
   toKiCadNetlist,
   toSpice,
@@ -647,26 +651,22 @@ const refreshIncrementalDiagram = (diagram, circuit) => {
   const previousByRef = new Map((diagram.components || []).map((component) => [component.ref, component]));
   const components = circuit.components.map((part, index) => componentFromPart(part, previousByRef.get(part.ref), index));
   const nextRefs = new Set(components.map((component) => component.ref));
+  // New parts drop into the next free slot; existing parts keep their positions.
+  const grid = slotGridFor(components.length);
+  const slots = slotRects(grid.rows, grid.cols);
   const placed = [];
   const positioned = components.map((component) => {
     if (previousByRef.has(component.ref)) {
       placed.push(component);
       return component;
     }
-    const placementBase = {
-      ...diagram,
-      components: [...placed, component],
-      width: Math.max(diagram.width || 1100, component.x + component.width / 2 + 120),
-      height: Math.max(diagram.height || 720, component.y + component.height / 2 + 120),
-    };
-    const placement = findNearestLegalPlacement(placementBase, component.ref, component);
-    const moved = placement
-      ? componentFromPart(
-        { ...circuit.components.find((part) => part.ref === component.ref), nodes: component.nodes },
-        { ...component, x: placement.x, y: placement.y },
-        component.order,
-      )
-      : component;
+    const slot = nextFreeSlot(slots, placed) || slots[slots.length - 1];
+    const center = slotCenter(slot);
+    const moved = componentFromPart(
+      { ...circuit.components.find((part) => part.ref === component.ref), nodes: component.nodes },
+      { ...component, x: center.x, y: center.y },
+      component.order,
+    );
     placed.push(moved);
     return moved;
   });
@@ -696,11 +696,13 @@ const refreshIncrementalDiagram = (diagram, circuit) => {
       };
     }));
 
+  const slotSize = slotCanvasSize(grid.rows, grid.cols);
   return {
     ...diagram,
     title: circuit.title,
-    width: Math.max(diagram.width || 1100, ...positioned.map((component) => component.x + component.width / 2 + 120)),
-    height: Math.max(diagram.height || 720, ...positioned.map((component) => component.y + component.height / 2 + 120)),
+    slotLayout: grid,
+    width: Math.max(slotSize.width, ...positioned.map((component) => component.x + component.width / 2 + 120)),
+    height: Math.max(slotSize.height, ...positioned.map((component) => component.y + component.height / 2 + 120)),
     components: positioned,
     labels: (diagram.labels || []).filter((label) => nextRefs.has(label.ref)),
     netLabels: (diagram.netLabels || []).filter((label) => wires.some((wire) => wire.labelId === label.id)),
@@ -763,10 +765,15 @@ export const preserveDiagramLayout = (diagram, previousDiagram, circuit = null) 
       preferredWaypoints: previous.preferredWaypoints || [],
     } : wire;
   });
+  // Keep the canvas large enough to contain every preserved component — a part
+  // the user dragged past the slot grid must stay where they put it, not get
+  // shoved back by the repair pass for sitting out of bounds.
+  const contentWidth = Math.max(0, ...components.map((component) => component.x + component.width / 2 + 120));
+  const contentHeight = Math.max(0, ...components.map((component) => component.y + component.height / 2 + 120));
   const preserved = {
     ...diagram,
-    width: Math.max(diagram.width, previousDiagram.width),
-    height: Math.max(diagram.height, previousDiagram.height),
+    width: Math.max(diagram.width, previousDiagram.width, contentWidth),
+    height: Math.max(diagram.height, previousDiagram.height, contentHeight),
     components,
     netLabels,
     wires,
@@ -794,7 +801,7 @@ export const preserveDiagramLayout = (diagram, previousDiagram, circuit = null) 
   if (circuit) {
     try {
       const anchors = new Map(components.map((component) => [component.ref, component]));
-      const repaired = layoutCircuitDiagram(circuit, { anchors });
+      const repaired = layoutCircuitDiagram(circuit, { anchors, slots: true });
       if (diagramHasCompleteConnectivity(repaired, circuit)) return repaired;
     } catch (error) {
       if (!(error instanceof DiagramLayoutError)) throw error;

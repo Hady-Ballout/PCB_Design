@@ -61,6 +61,96 @@ const symbolTypeByKind = {
 };
 
 const snap = (value, grid = GRID_SIZE) => Math.round(value / grid) * grid;
+
+// --- Placeholder slot grid -------------------------------------------------
+// The canvas is a grid of fixed-size slots, one component per slot. The grid —
+// not the content — drives the canvas size (slotCanvasSize), so slots stay put
+// even if the router grows the canvas to fit wires. All dimensions are grid
+// multiples so slot centers land on the schematic grid. These pure helpers live
+// in core so both the layout engine and the feature renderer share one source of
+// truth (the feature layer decorates each rect with pins on top).
+export const SCHEMATIC_SLOT_LAYOUT = { cols: 4, slotWidth: 160, slotHeight: 120, gap: 60, margin: 60 };
+
+// Rows grow to hold every component; keep at least two rows so an empty grid
+// still reads as a grid. Columns are fixed by the layout.
+export const slotGridFor = (count, layout = SCHEMATIC_SLOT_LAYOUT) => ({
+  rows: Math.max(2, Math.ceil(Math.max(count, 1) / layout.cols)),
+  cols: layout.cols,
+});
+
+export const slotCanvasSize = (rows, cols, layout = SCHEMATIC_SLOT_LAYOUT) => {
+  const { slotWidth, slotHeight, gap, margin } = layout;
+  return {
+    width: snap(2 * margin + cols * slotWidth + (cols - 1) * gap),
+    height: snap(2 * margin + rows * slotHeight + (rows - 1) * gap),
+  };
+};
+
+// Bare slot rectangles (no pins). The feature layer adds pin geometry.
+export const slotRects = (rows, cols, layout = SCHEMATIC_SLOT_LAYOUT) => {
+  const { slotWidth, slotHeight, gap, margin } = layout;
+  const slots = [];
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      slots.push({
+        id: `slot-${row}-${col}`,
+        index: row * cols + col + 1,
+        row,
+        col,
+        x: snap(margin + col * (slotWidth + gap)),
+        y: snap(margin + row * (slotHeight + gap)),
+        width: slotWidth,
+        height: slotHeight,
+      });
+    }
+  }
+  return slots;
+};
+
+export const slotCenter = (slot) => ({
+  x: snap(slot.x + slot.width / 2),
+  y: snap(slot.y + slot.height / 2),
+});
+
+// Assign refs (already in signal-flow order) to slots column-major, so earlier
+// ranks sit in the left column and flow rightward. Returns Map<ref, slot>.
+export const assignSlots = (refsInOrder, slots) => {
+  const rows = slots.reduce((max, slot) => Math.max(max, slot.row + 1), 0);
+  const byRowCol = new Map(slots.map((slot) => [`${slot.row}:${slot.col}`, slot]));
+  const assignment = new Map();
+  refsInOrder.forEach((ref, index) => {
+    const slot = byRowCol.get(`${index % rows}:${Math.floor(index / rows)}`) || slots[index];
+    if (slot) assignment.set(ref, slot);
+  });
+  return assignment;
+};
+
+const slotIsOccupied = (slot, components) => {
+  const center = slotCenter(slot);
+  return components.some(
+    (component) =>
+      Math.abs(component.x - center.x) < slot.width / 2 && Math.abs(component.y - center.y) < slot.height / 2,
+  );
+};
+
+export const nextFreeSlot = (slots, components) =>
+  slots.find((slot) => !slotIsOccupied(slot, components)) || null;
+
+export const nearestSlot = (slots, x, y) => {
+  let best = null;
+  let bestDistance = Infinity;
+  for (const slot of slots) {
+    const center = slotCenter(slot);
+    const distance = (center.x - x) ** 2 + (center.y - y) ** 2;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = slot;
+    }
+  }
+  return best;
+};
+// ---------------------------------------------------------------------------
+
 const pointKey = (point) => `${point.x},${point.y}`;
 const isSourceKind = (kind) => kind === 'voltage_source' || kind === 'signal_source';
 const isOutputNode = (node) => /(^|_)(v?out|out|load|filtered)(_|$)/i.test(String(node));
@@ -990,9 +1080,28 @@ const buildDraft = (circuit, options = {}) => {
   const maxRank = Math.max(0, ...ranks.values());
   const rankColumns = Math.min(8, maxRank + 1);
   const rankBands = Math.ceil((maxRank + 1) / rankColumns);
-  const width = Math.max(1100, CANVAS_MARGIN * 2 + rankColumns * 340) + (options.extraWidth || 0);
-  const height = Math.max(720, 480 + rankBands * 300 + Math.ceil((circuit.components?.length || 0) / 8) * 110)
-    + (options.extraHeight || 0);
+  // Slot mode: place one component per fixed slot and size the canvas to the
+  // grid (see slotCanvasSize) instead of to the free signal-flow spread.
+  const slotMode = Boolean(options.slots);
+  const slotGrid = slotMode ? slotGridFor((circuit.components || []).length) : null;
+  const slots = slotMode ? slotRects(slotGrid.rows, slotGrid.cols) : null;
+  const slotAssignment = slotMode
+    ? assignSlots(
+        [...(circuit.components || [])]
+          .map((part, index) => ({ ref: part.ref, rank: ranks.get(part.ref) || 0, index }))
+          .sort((first, second) => first.rank - second.rank || first.index - second.index)
+          .map((entry) => entry.ref),
+        slots,
+      )
+    : null;
+  const slotSize = slotMode ? slotCanvasSize(slotGrid.rows, slotGrid.cols) : null;
+  const width = slotMode
+    ? slotSize.width + (options.extraWidth || 0)
+    : Math.max(1100, CANVAS_MARGIN * 2 + rankColumns * 340) + (options.extraWidth || 0);
+  const height = slotMode
+    ? slotSize.height + (options.extraHeight || 0)
+    : Math.max(720, 480 + rankBands * 300 + Math.ceil((circuit.components?.length || 0) / 8) * 110)
+      + (options.extraHeight || 0);
   const netPositions = new Map(nonGroundNets.map((name, index) => [name, {
     x: snap(CANVAS_MARGIN + 100 + index * ((width - CANVAS_MARGIN * 2 - 200) / Math.max(1, nonGroundNets.length - 1))),
     y: CANVAS_MARGIN + 40 + (index % 4) * 50,
@@ -1095,6 +1204,12 @@ const buildDraft = (circuit, options = {}) => {
         y: rows[roleSide],
       };
     }
+    // Slot mode pins the component to its assigned slot center; the orientation
+    // heuristics above still apply (they only affect body/pin geometry).
+    if (slotMode) {
+      const slot = slotAssignment.get(part.ref) || slots[index] || slots[slots.length - 1];
+      if (slot) preferred = slotCenter(slot);
+    }
     const component = {
       ref: part.ref,
       kind: part.kind,
@@ -1116,11 +1231,19 @@ const buildDraft = (circuit, options = {}) => {
     }));
     const anchor = options.anchors?.get(part.ref);
     const target = anchor || component;
-    const position = nearestFreePosition(component, placed, target, { width, height: height * 3, clearance: PLACEMENT_CLEARANCE })
-      || { x: component.x, y: component.y + placed.length * 160 };
+    // In slot mode (without an explicit anchor) the component sits exactly at
+    // its slot center — never nudged out of the slot to dodge a collision.
+    const position = slotMode && !anchor
+      ? { x: component.x, y: component.y }
+      : nearestFreePosition(component, placed, target, { width, height: height * 3, clearance: PLACEMENT_CLEARANCE })
+        || { x: component.x, y: component.y + placed.length * 160 };
     placed.push(moveComponent(component, position.x, position.y));
   }
-  const requiredHeight = Math.max(height, ...placed.map((component) => component.y + component.height / 2 + 150));
+  // Slot mode keeps the canvas locked to the grid; the free layout grows to fit
+  // the lowest placed part.
+  const requiredHeight = slotMode
+    ? height
+    : Math.max(height, ...placed.map((component) => component.y + component.height / 2 + 150));
   const componentLabels = makeComponentLabels(placed);
   const netPinCounts = new Map();
   placed.forEach((component) => {
@@ -1135,13 +1258,26 @@ const buildDraft = (circuit, options = {}) => {
     terminalCounts.set(side, (terminalCounts.get(side) || 0) + 1);
   }
   const terminalIndexes = new Map();
+  // Slot mode fixes component positions, so an edge-anchored port can end up far
+  // from its net's pin with occupied slots in between (unroutable). Instead drop
+  // the port as a short stub just outside the pin it connects to.
+  const slotPortPoint = (net, side) => {
+    const pin = placed.flatMap((component) => component.pins).find((item) => item.node === net);
+    if (!pin) return null;
+    const STUB = GRID_SIZE * 2;
+    if (side === 'left') return { x: snap(pin.x - STUB), y: snap(pin.y) };
+    if (side === 'right') return { x: snap(pin.x + STUB), y: snap(pin.y) };
+    if (side === 'top') return { x: snap(pin.x), y: snap(pin.y - STUB) };
+    return { x: snap(pin.x), y: snap(pin.y + STUB) };
+  };
   const ports = activeTerminals
     .filter((terminal) => netNames.includes(String(terminal.net || '')))
     .map((terminal, index) => {
       const net = String(terminal.net);
       const netRole = netRoles.get(net);
-      const point = portTerminalPoint(terminal, terminalIndexes, terminalCounts, { width, height: requiredHeight }, netRole);
       const side = terminalSide(terminal, netRole);
+      const point = (slotMode && slotPortPoint(net, side))
+        || portTerminalPoint(terminal, terminalIndexes, terminalCounts, { width, height: requiredHeight }, netRole);
       const label = String(terminal.label || net);
       const labelWidth = textWidth(label, 48, 110);
       return {
@@ -1208,6 +1344,7 @@ const buildDraft = (circuit, options = {}) => {
     wires,
     junctions: [],
     bridges: [],
+    ...(slotMode ? { slotLayout: slotGrid } : {}),
   };
   return draft;
 };
@@ -1631,12 +1768,17 @@ const cropDiagramToContent = (diagram) => {
   for (const wire of diagram.wires || []) {
     for (const point of wire.points || []) extend(point.x, point.y + GROUND_GLYPH_DROP);
   }
-  const width = Math.max(MIN_CANVAS_WIDTH, snap(maxX + CANVAS_MARGIN));
-  const height = Math.max(MIN_CANVAS_HEIGHT, snap(maxY + CANVAS_MARGIN));
+  // In slot mode the canvas must never shrink below the slot grid, so empty
+  // trailing slots stay visible.
+  const slotFloor = diagram.slotLayout
+    ? slotCanvasSize(diagram.slotLayout.rows, diagram.slotLayout.cols)
+    : { width: MIN_CANVAS_WIDTH, height: MIN_CANVAS_HEIGHT };
+  const width = Math.max(slotFloor.width, snap(maxX + CANVAS_MARGIN));
+  const height = Math.max(slotFloor.height, snap(maxY + CANVAS_MARGIN));
   return {
     ...diagram,
-    width: Math.min(diagram.width, width),
-    height: Math.min(diagram.height, height),
+    width: Math.max(slotFloor.width, Math.min(diagram.width, width)),
+    height: Math.max(slotFloor.height, Math.min(diagram.height, height)),
   };
 };
 

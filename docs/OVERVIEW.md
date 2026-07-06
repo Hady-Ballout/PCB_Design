@@ -12,6 +12,7 @@ User prompt (chat UI)
   -> Ollama (or an OpenAI-compatible provider) generates circuit JSON + SPICE
   -> server validates/normalizes the circuit and reconciles it against the prior design
   -> frontend synchronizes SPICE <-> canvas schematic <-> KiCad netlist
+     (plus read-only block-schematic and realistic-breadboard views of the same circuit)
   -> POST /api/simulate-circuit runs Ngspice on the current SPICE deck
   -> waveform data is parsed and charted in the frontend
 ```

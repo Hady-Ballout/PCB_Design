@@ -5,10 +5,15 @@ import {
   diagramComponentsOverlap,
   findNearestLegalPlacement,
   layoutCircuitDiagram,
+  nextFreeSlot,
   repairDiagramLayout,
   rerouteAffectedNets,
   resolveComponentOverlaps,
   routeDiagramWire,
+  slotCanvasSize,
+  slotCenter,
+  slotGridFor,
+  slotRects,
   validateDiagramLayout,
 } from './schematicLayout.js';
 
@@ -19,10 +24,15 @@ export {
   diagramComponentsOverlap,
   findNearestLegalPlacement,
   layoutCircuitDiagram,
+  nextFreeSlot,
   repairDiagramLayout,
   rerouteAffectedNets,
   resolveComponentOverlaps,
   routeDiagramWire,
+  slotCanvasSize,
+  slotCenter,
+  slotGridFor,
+  slotRects,
   validateDiagramLayout,
 };
 
@@ -487,7 +497,8 @@ const diagramWirePoints = (diagram, wire) => {
   return routeDiagramWire(diagram, wire);
 };
 
-export const buildCircuitDiagram = (circuit) => layoutCircuitDiagram(circuit);
+// Every generated diagram places components into the fixed slot grid.
+export const buildCircuitDiagram = (circuit) => layoutCircuitDiagram(circuit, { slots: true });
 
 const renderGroundSvg = (x, y) =>
   `<g class="diagram-ground" aria-label="Ground"><circle class="diagram-node" cx="${x}" cy="${y}" r="4" /><line class="diagram-symbol" x1="${x}" y1="${y}" x2="${x}" y2="${y + 16}" /><line class="diagram-symbol" x1="${x - 18}" y1="${y + 16}" x2="${x + 18}" y2="${y + 16}" /><line class="diagram-symbol" x1="${x - 12}" y1="${y + 22}" x2="${x + 12}" y2="${y + 22}" /><line class="diagram-symbol" x1="${x - 6}" y1="${y + 28}" x2="${x + 6}" y2="${y + 28}" /></g>`;

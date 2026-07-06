@@ -208,9 +208,8 @@ h3 {
   width: 22px;
 }
 
-.new-chat-button {
-  flex: 0 0 auto;
-  font-weight: 700;
+.new-chat-composer {
+  margin-bottom: 12px;
 }
 
 .chat-history {
@@ -1181,6 +1180,29 @@ pre {
   stroke: #b8beb5;
 }
 
+.diagram-slot-rect {
+  fill: none;
+  stroke: #c2c8bd;
+  stroke-dasharray: 8 6;
+  stroke-width: 1.5;
+}
+
+.diagram-slot-label {
+  fill: #b4b9ac;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.diagram-slot-pin-dot {
+  fill: #c2c8bd;
+}
+
+.diagram-slot-pin-label {
+  fill: #9aa093;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .diagram-ground {
   fill: none;
   stroke: #17201a;
@@ -1682,6 +1704,19 @@ pre,
 .diagram-net {
   fill: var(--color-surface);
   stroke: var(--color-border);
+}
+
+.diagram-slot-rect {
+  stroke: var(--color-border);
+}
+
+.diagram-slot-label,
+.diagram-slot-pin-label {
+  fill: var(--color-text-muted);
+}
+
+.diagram-slot-pin-dot {
+  fill: var(--color-border);
 }
 
 /* Net names read as plain hand-lettered flags; the box only appears as an

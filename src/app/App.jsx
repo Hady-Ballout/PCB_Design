@@ -17,7 +17,7 @@ import {
 } from '../core/circuitSync.js';
 import { toDiagramSvg } from '../core/pcbGenerator.js';
 import { changedLineIndexes } from '../core/lineDiff.js';
-import { findNearestLegalPlacement, layoutCircuitDiagram } from '../core/schematicLayout.js';
+import { layoutCircuitDiagram } from '../core/schematicLayout.js';
 import { API_BASE } from '../core/config.js';
 import { downloadText } from '../core/download.js';
 import { AUTH_PAGES, PUBLIC_PAGES, pageFromHash } from './routing.js';
@@ -28,12 +28,14 @@ import { EDITOR_SPLIT_STORAGE_KEY, EDITOR_VIEW_LABELS, loadEditorSplit } from '.
 import { WaveformChart } from '../features/waveform/WaveformChart.jsx';
 import { CircuitDiagram } from '../features/schematic/CircuitDiagram.jsx';
 import { BlockSchematic } from '../features/blockSchematic/BlockSchematic.jsx';
+import { RealisticSchematic } from '../features/realisticSchematic/RealisticSchematic.jsx';
 import { ComponentToolIcon } from '../features/schematic/symbols.jsx';
 import {
   ADD_COMPONENT_TOOLS,
   addedComponent,
   cloneDiagram,
-  movedComponent,
+  slotCanvasSize,
+  slotGridFor,
   wireId,
 } from '../features/schematic/geometry.js';
 import { AuthProvider, useAuth, HomePage, LoginPage, SignupPage, VerifyPage } from '../features/auth/auth.jsx';
@@ -55,6 +57,7 @@ function App() {
   const [editorSplit, setEditorSplit] = useState(loadEditorSplit);
   const [resizingAxis, setResizingAxis] = useState(null);
   const [chatPanelView, setChatPanelView] = useState('conversation');
+  const [newChatPrompt, setNewChatPrompt] = useState('');
   const [page, setPage] = useState(pageFromHash);
   const [generatingChatId, setGeneratingChatId] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
@@ -450,18 +453,21 @@ function App() {
       setError('Enter a circuit prompt before sending.');
       return;
     }
+    await submitToChat(activeChat, submittedPrompt);
+  };
 
-    const chatId = activeChat.id;
-    const priorMessages = activeChat.messages;
-    const currentDesign = result
+  const submitToChat = async (chat, submittedPrompt) => {
+    const chatId = chat.id;
+    const priorMessages = chat.messages;
+    const currentDesign = chat.result
       ? {
-          circuit: result.circuit,
-          spice: editableSpice,
-          kicadNetlist: editableKicadNetlist,
+          circuit: chat.result.circuit,
+          spice: chat.editableSpice,
+          kicadNetlist: chat.editableKicadNetlist,
         }
       : null;
     const isRevision = Boolean(currentDesign);
-    const previousSpice = editableSpice;
+    const previousSpice = chat.editableSpice;
     const userMessage = {
       id: messageId(),
       role: 'user',
@@ -499,7 +505,7 @@ function App() {
           prompt: submittedPrompt,
           messages: buildConversationContext(priorMessages),
           currentDesign,
-          memory: activeChat.memory,
+          memory: chat.memory,
         }),
       });
 
@@ -611,13 +617,12 @@ function App() {
       const next = cloneDiagram(base);
       const component = addedComponent(next, type);
       next.components.push(component);
-      const placement = findNearestLegalPlacement(next, component.ref, component);
-      const placedComponent = placement
-        ? movedComponent(component, placement.x - component.x, placement.y - component.y)
-        : component;
-      next.components = next.components.map((item) => item.ref === component.ref ? placedComponent : item);
-      next.width = Math.max(next.width, placement?.width || 0);
-      next.height = Math.max(next.height, placement?.height || 0, placedComponent.y + placedComponent.height / 2 + 80);
+      // Grow the slot grid to hold the new part and resize the canvas to match.
+      const grid = slotGridFor(next.components.length);
+      next.slotLayout = grid;
+      const size = slotCanvasSize(grid.rows, grid.cols);
+      next.width = Math.max(next.width, size.width);
+      next.height = Math.max(next.height, size.height);
       setDiagramSelection({ type: 'component', ref: component.ref });
       setPendingTerminal(null);
       setDiagramTool('select');
@@ -678,26 +683,36 @@ function App() {
     setPage('workspace');
   };
 
-  const startNewChat = () => {
-    if (activeChat && activeChat.messages.length === 0 && !activeChat.result) {
-      openChat(activeChat.id);
-      return;
+  const startChatFromHistory = async () => {
+    const submittedPrompt = newChatPrompt.trim();
+    if (!submittedPrompt) return;
+
+    let chat = activeChat;
+    if (!chat || chat.messages.length > 0 || chat.result) {
+      chat = createChat();
+      setChatStore((current) => ({
+        chats: [chat, ...current.chats],
+        activeChatId: chat.id,
+      }));
     }
-    const chat = createChat();
-    setChatStore((current) => ({
-      chats: [chat, ...current.chats],
-      activeChatId: chat.id,
-    }));
+
+    setNewChatPrompt('');
     setChatPanelView('conversation');
     openEditorView('spice');
-    window.location.hash = '';
-    setPage('workspace');
+    await submitToChat(chat, submittedPrompt);
   };
 
   const handleComposerKeyDown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       if (!generationBusy) generate();
+    }
+  };
+
+  const handleNewChatComposerKeyDown = (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      if (!generationBusy) startChatFromHistory();
     }
   };
 
@@ -924,7 +939,7 @@ function App() {
               )}
             </div>
             <div className="button-row">
-              <button onClick={() => applyDiagramChange(() => layoutCircuitDiagram(result.circuit))}>Auto-layout</button>
+              <button onClick={() => applyDiagramChange(() => layoutCircuitDiagram(result.circuit, { slots: true }))}>Auto-layout</button>
               <button onClick={() => setEditedDiagram(cloneDiagram(result.diagram))}>Reset</button>
               <button onClick={() => downloadText('generated.svg', toDiagramSvg(editedDiagram || result.diagram), 'image/svg+xml')}>Download SVG</button>
             </div>
@@ -999,6 +1014,19 @@ function App() {
     </div>
   );
 
+  const renderRealisticSchematicView = () => (
+    <div className="editor-window-body canvas-window-body">
+      {!result ? (
+        <div className="editor-window-empty">
+          <strong>No breadboard available</strong>
+          <p>Generate a circuit to view its breadboard build.</p>
+        </div>
+      ) : (
+        <RealisticSchematic circuit={result.circuit} />
+      )}
+    </div>
+  );
+
   const renderEditorWindow = (view) => {
     const isMaximized = maximizedEditorView === view;
     return (
@@ -1046,6 +1074,7 @@ function App() {
         {view === 'json' && renderJsonView()}
         {view === 'canvas' && renderCanvasView()}
         {view === 'blockSchematic' && renderBlockSchematicView()}
+        {view === 'realisticSchematic' && renderRealisticSchematicView()}
       </article>
     );
   };
@@ -1189,7 +1218,10 @@ function App() {
         <ChatPanel
           chatPanelView={chatPanelView}
           setChatPanelView={setChatPanelView}
-          startNewChat={startNewChat}
+          newChatPrompt={newChatPrompt}
+          setNewChatPrompt={setNewChatPrompt}
+          startChatFromHistory={startChatFromHistory}
+          handleNewChatComposerKeyDown={handleNewChatComposerKeyDown}
           chatStore={chatStore}
           sortedChats={sortedChats}
           activeChat={activeChat}

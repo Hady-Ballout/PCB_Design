@@ -14,8 +14,10 @@ src/
     chat/      chatStore.js, chatFormat.js, ChatPanel.jsx
     schematic/ CircuitDiagram.jsx, symbols.jsx, geometry.js
     blockSchematic/ BlockSchematic.jsx (React Flow block view) + model/css
-    editors/   editorConfig.js (the SPICE/JSON/Canvas/block-schematic editor
-               *windows* themselves live in app/App.jsx)
+    realisticSchematic/ RealisticSchematic.jsx (SVG breadboard-build view)
+               + breadboardModel.js / breadboardGeometry.js / breadboardDescription.js / partVisuals.js / parts.jsx / css
+    editors/   editorConfig.js (the SPICE/JSON/Canvas/block-schematic/
+               realistic-schematic editor *windows* themselves live in app/App.jsx)
     waveform/  WaveformChart.jsx
 
 server/
