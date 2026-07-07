@@ -7,18 +7,22 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Install dependencies
+# Install dependencies (incl. devDependencies, needed to compile TypeScript below)
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci
 
-# Copy server source
+# Copy server source + the src/core modules it imports, then compile TS -> JS
+COPY tsconfig.server.json ./
 COPY server/ ./server/
-COPY src/lib/ ./src/lib/
-RUN ls -la /app/server/
+COPY src/core/ ./src/core/
+RUN npm run build:server
+
+# Drop devDependencies now that the build is done
+RUN npm prune --omit=dev
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 
 EXPOSE 8787
 
-CMD ["node", "server/index.js"]
+CMD ["node", "dist/server/server/index.js"]

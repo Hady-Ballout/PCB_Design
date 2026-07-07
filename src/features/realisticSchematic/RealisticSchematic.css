@@ -1,0 +1,144 @@
+/* Realistic-schematic view: workbench background, zoom toolbar, warnings. */
+.realistic-schematic {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 480px;
+  min-width: 0;
+  border-radius: 7px;
+  overflow: hidden;
+  border: 1px solid #cfd2ca;
+  background: #e8e6df;
+}
+
+.realistic-toolbar {
+  align-items: center;
+  background: #f3f1ea;
+  border-bottom: 1px solid #d8d5ca;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 6px 10px;
+}
+
+.realistic-toolbar button {
+  background: #fff;
+  border: 1px solid #c3c6bd;
+  border-radius: 5px;
+  color: #33413a;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  min-width: 26px;
+  padding: 5px 8px;
+}
+
+.realistic-toolbar button:hover {
+  background: #eef1e9;
+}
+
+.realistic-zoom-readout {
+  color: #6b7568;
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+.realistic-readout {
+  color: #33413a;
+  flex: 1;
+  font-size: 12px;
+  margin-left: 10px;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.realistic-describe {
+  margin-left: auto;
+}
+
+/* Net legend: one clickable chip per net, swatch matches the wire color. */
+.realistic-legend {
+  background: #f3f1ea;
+  border-bottom: 1px solid #d8d5ca;
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 5px 10px;
+}
+
+.realistic-legend-chip {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #c3c6bd;
+  border-radius: 999px;
+  color: #33413a;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 11px;
+  gap: 5px;
+  line-height: 1;
+  padding: 4px 9px;
+}
+
+.realistic-legend-chip:hover {
+  background: #eef1e9;
+}
+
+.realistic-legend-chip.active {
+  background: #33413a;
+  border-color: #33413a;
+  color: #f3f1ea;
+}
+
+.realistic-legend-swatch {
+  border-radius: 50%;
+  display: inline-block;
+  height: 8px;
+  width: 8px;
+}
+
+/* Selection highlighting: interactive groups dim when something else is
+   selected; hover-only previews dim more gently. */
+.realistic-scroll .rs-item {
+  cursor: pointer;
+  transition: opacity 140ms ease;
+}
+
+.realistic-scroll .rs-item.rs-dim {
+  opacity: 0.22;
+}
+
+.realistic-scroll svg.rs-preview .rs-item.rs-dim {
+  opacity: 0.5;
+}
+
+/* No UA focus rectangle on mouse click; keyboard focus keeps a visible ring. */
+.realistic-scroll .rs-item:focus {
+  outline: none;
+}
+
+.realistic-scroll .rs-item:focus-visible {
+  outline: 2px solid #d97742;
+  outline-offset: 2px;
+}
+
+.realistic-warnings {
+  background: #fdf6dd;
+  border-bottom: 1px solid #e8dba6;
+  color: #7a6414;
+  flex: 0 0 auto;
+  font-size: 12px;
+  list-style: disc inside;
+  margin: 0;
+  padding: 6px 12px;
+}
+
+.realistic-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}

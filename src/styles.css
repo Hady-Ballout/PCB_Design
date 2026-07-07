@@ -1,6 +1,32 @@
 :root {
-  color: #17201a;
-  background: #f5f3ee;
+  --color-page: #ffffff;
+  --color-panel: #ffffff;
+  --color-surface: #f4f1ea;
+  --color-surface-soft: #ffffff;
+  --color-canvas: #faf9f5;
+  --color-code: #f4f1ea;
+  --color-primary: #d97757;
+  --color-primary-hover: #c2643f;
+  --color-primary-pressed: #a8532f;
+  --color-primary-soft: #fbe9e0;
+  --color-primary-border: #e7ac8d;
+  --color-text: #262521;
+  --color-text-muted: #6b6459;
+  --color-text-subtle: #8f887a;
+  --color-border: #dad5c9;
+  --color-border-soft: #ece8de;
+  --color-chart-bg: #faf9f5;
+  --color-diagram-bg: #fbfbf7;
+  --color-diagram-grid-small: #ece7dd;
+  --color-diagram-grid-large: #ddd5c6;
+  --color-error-bg: #fdecea;
+  --color-error-text: #b3261e;
+  --color-error-border: #c23b3b;
+  --color-warning-bg: #ffe58a;
+  --color-warning-text: #6b4e00;
+  color: var(--color-text);
+  background: var(--color-page);
+  color-scheme: light;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.5;
 }
@@ -33,7 +59,7 @@ button:hover {
 }
 
 button:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.68;
 }
 
@@ -66,7 +92,6 @@ button.primary {
   margin: 0 auto;
 }
 
-.side-panel,
 .main-panel,
 .panel-block {
   background: #ffffff;
@@ -80,7 +105,7 @@ button.primary {
   gap: 14px;
   height: calc(100vh - 48px);
   order: 2;
-  min-height: 680px;
+  min-height: min(680px, calc(100vh - 48px));
   overflow: hidden;
   padding: 18px;
   position: sticky;
@@ -138,7 +163,6 @@ h3 {
 }
 
 .chat-sidebar-header,
-.chat-composer-footer,
 .chat-section-label,
 .chat-message-meta {
   align-items: center;
@@ -159,21 +183,18 @@ h3 {
   align-items: center;
   border-bottom: 1px solid #d8d9d2;
   display: grid;
-  gap: 10px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  padding-bottom: 14px;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding-bottom: 10px;
 }
 
 .chat-conversation-title {
   min-width: 0;
 }
 
-.chat-conversation-title .eyebrow {
-  margin-bottom: 2px;
-}
-
 .chat-conversation-title h1 {
-  font-size: 18px;
+  font-size: 15px;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -181,19 +202,14 @@ h3 {
 
 .chat-back-button {
   border-radius: 999px;
-  font-size: 24px;
-  min-height: 40px;
+  font-size: 13px;
+  min-height: 22px;
   padding: 0;
-  width: 40px;
+  width: 22px;
 }
 
-.chat-conversation-header > button:last-child {
-  min-height: 36px;
-}
-
-.new-chat-button {
-  flex: 0 0 auto;
-  font-weight: 700;
+.new-chat-composer {
+  margin-bottom: 12px;
 }
 
 .chat-history {
@@ -269,16 +285,13 @@ h3 {
 }
 
 .chat-messages {
-  background: #f7f5ef;
-  border: 1px solid #d8d9d2;
-  border-radius: 8px;
   display: flex;
   flex: 1;
   flex-direction: column;
   gap: 10px;
   min-height: 360px;
   overflow-y: auto;
-  padding: 12px;
+  padding: 4px 2px;
 }
 
 .chat-welcome {
@@ -360,18 +373,41 @@ h3 {
   gap: 8px;
 }
 
-.chat-composer textarea {
+.chat-composer-input {
+  position: relative;
+}
+
+.chat-composer-input textarea {
   min-height: 92px;
   resize: none;
+  padding-right: 44px;
 }
 
-.chat-composer-footer {
-  align-items: flex-end;
+.composer-send-button {
+  align-items: center;
+  background: var(--color-primary);
+  border: none;
+  border-radius: 50%;
+  bottom: 10px;
+  color: #102116;
+  cursor: pointer;
+  display: flex;
+  height: 30px;
+  justify-content: center;
+  min-height: 0;
+  padding: 0;
+  position: absolute;
+  right: 10px;
+  width: 30px;
 }
 
-.chat-composer-footer small {
-  color: #617066;
-  font-size: 10px;
+.composer-send-button:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.composer-send-button:disabled {
+  cursor: wait;
+  opacity: 0.5;
 }
 
 .chat-error {
@@ -392,46 +428,8 @@ textarea {
   gap: 10px;
 }
 
-.result-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.result-actions {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: flex-end;
-}
-
-.status {
-  border-radius: 999px;
-  font-size: 13px;
-  font-weight: 700;
-  padding: 7px 10px;
-  white-space: nowrap;
-}
-
-.status.ok {
-  background: #e3f3e7;
-  color: #1d6332;
-}
-
-.status.error {
-  background: #f8e0dc;
-  color: #97362a;
-}
-
-.streaming-status {
-  background: #eef0ea;
-  color: #23533a;
-}
-
 .live-spice-panel {
-  border-color: #91aa99;
+  border-color: var(--color-primary-border);
 }
 
 .live-code-editor,
@@ -468,41 +466,50 @@ textarea {
   min-height: calc(100vh - 48px);
 }
 
-.workbench-header {
-  flex: 0 0 auto;
-}
-
+/* Minimalist browser-style tab strip. */
 .editor-launchbar {
-  align-items: center;
-  border-bottom: 1px solid #d8d9d2;
+  align-items: flex-end;
+  border-bottom: 1px solid var(--color-border);
   display: flex;
   flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 14px;
-  padding-bottom: 12px;
-}
-
-.editor-launchbar > span {
-  color: #617066;
-  font-size: 11px;
-  font-weight: 700;
-  margin-right: 3px;
-  text-transform: uppercase;
+  gap: 2px;
+  margin-top: 0;
+  padding: 0;
 }
 
 .editor-launchbar button {
-  min-height: 34px;
-  padding: 0 11px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  color: var(--color-text-muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  min-height: 30px;
+  padding: 0 12px;
+  position: relative;
+  top: 1px;
+  transition: background 120ms ease, color 120ms ease;
 }
 
+.editor-launchbar button:hover {
+  background: var(--color-surface-soft);
+  color: var(--color-text);
+}
+
+/* A view that is open in the split but not the focused tab. */
 .editor-launchbar button.open {
-  background: #eef0ea;
+  background: var(--color-surface-soft);
+  border-color: var(--color-border);
+  color: var(--color-text);
 }
 
+/* The focused tab reads as connected to the content below. */
 .editor-launchbar button.active {
-  background: #17201a;
-  border-color: #17201a;
-  color: #ffffff;
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  color: var(--color-text);
+  font-weight: 600;
 }
 
 .editor-window-layout {
@@ -514,6 +521,20 @@ textarea {
 .editor-window-layout.single {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+}
+
+/* Maximized: the focused window fills the entire viewport as an overlay. */
+.editor-window-layout.maximized {
+  min-height: 0;
+}
+
+.editor-window-layout .editor-window.maximized {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  inset: 0;
+  position: fixed;
+  z-index: 100;
 }
 
 .editor-window-layout.split-two,
@@ -596,7 +617,7 @@ textarea {
 }
 
 .editor-resize-handle:focus-visible {
-  outline: 2px solid #23533a;
+  outline: 2px solid var(--color-primary);
   outline-offset: -2px;
 }
 
@@ -643,8 +664,8 @@ textarea {
   display: flex;
   flex: 0 0 auto;
   justify-content: space-between;
-  min-height: 38px;
-  padding: 0 7px 0 12px;
+  min-height: 32px;
+  padding: 0 5px 0 12px;
 }
 
 .editor-window.active .editor-window-titlebar {
@@ -652,21 +673,38 @@ textarea {
 }
 
 .editor-window-titlebar strong {
-  font-size: 13px;
+  font-size: 12.5px;
+  font-weight: 600;
 }
 
-.editor-window-close {
+.editor-window-controls {
+  align-items: center;
+  display: flex;
+  gap: 1px;
+}
+
+.editor-window-control {
+  align-items: center;
   background: transparent;
   border: 0;
   border-radius: 5px;
-  font-size: 20px;
-  min-height: 28px;
+  color: var(--color-text-muted);
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  min-height: 24px;
   padding: 0;
-  width: 28px;
+  width: 24px;
 }
 
-.editor-window-close:hover {
+.editor-window-control:hover {
   background: #d8ddd5;
+  color: var(--color-text);
+}
+
+.editor-window-close {
+  font-size: 18px;
+  line-height: 1;
 }
 
 .editor-window-body {
@@ -744,7 +782,7 @@ textarea {
   border: 1px solid #aeb6ad;
   border-radius: 6px;
   color: #17201a;
-  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-family: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
   font-size: 13px;
   min-height: 34px;
   padding: 6px 10px;
@@ -775,7 +813,7 @@ pre {
   background: #eef0ea;
   border-radius: 6px;
   color: #17201a;
-  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-family: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 }
 
 code {
@@ -1024,6 +1062,29 @@ pre {
   padding: 0 10px;
 }
 
+.diagram-editbar .component-symbol-button {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-width: 46px;
+  padding: 0 8px;
+}
+
+.component-symbol-button svg {
+  display: block;
+  fill: none;
+  height: 24px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.2;
+  width: 42px;
+}
+
+.component-symbol-button:hover {
+  background: #f7faf5;
+}
+
 .active-tool {
   background: #e3f3e7;
   border-color: #23533a;
@@ -1066,9 +1127,10 @@ pre {
   stroke-width: 2;
 }
 
+/* Wires share the symbol ink and weight — one pen for the whole drawing. */
 .diagram-wire {
-  stroke: #617066;
-  stroke-width: 1.5;
+  stroke: #17201a;
+  stroke-width: 2;
 }
 
 .diagram-wire.pending {
@@ -1088,6 +1150,20 @@ pre {
   stroke-width: 4;
 }
 
+.diagram-bridge-clear {
+  stroke: #fbfbf7;
+  stroke-linecap: round;
+  stroke-width: 7;
+}
+
+.diagram-bridge-arc {
+  fill: none;
+  stroke: #17201a;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
 .diagram-fill {
   fill: #ffffff;
   stroke: #17201a;
@@ -1102,6 +1178,29 @@ pre {
 .diagram-net {
   fill: #eef0ea;
   stroke: #b8beb5;
+}
+
+.diagram-slot-rect {
+  fill: none;
+  stroke: #c2c8bd;
+  stroke-dasharray: 8 6;
+  stroke-width: 1.5;
+}
+
+.diagram-slot-label {
+  fill: #b4b9ac;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.diagram-slot-pin-dot {
+  fill: #c2c8bd;
+}
+
+.diagram-slot-pin-label {
+  fill: #9aa093;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .diagram-ground {
@@ -1204,7 +1303,7 @@ pre {
   border: 1px solid #d8d9d2;
   border-radius: 6px;
   color: #17201a;
-  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-family: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
   font-size: 13px;
   line-height: 1.45;
   margin-top: 16px;
@@ -1236,15 +1335,10 @@ pre {
     min-height: 360px;
   }
 
-  .result-header,
   .waveform-page-header,
   .waveform-page-summary,
   .editor-header {
     display: grid;
-  }
-
-  .result-actions {
-    justify-content: flex-start;
   }
 
   .spice-editor-actions {
@@ -1280,7 +1374,7 @@ pre {
 .netlist-review-button {
   color: #ffffff;
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 700;
   height: 24px;
   min-width: 24px;
   padding: 0;
@@ -1315,4 +1409,328 @@ pre {
 .netlist-diff .diff-line.changed {
   background: #ffe58a;
   box-shadow: -12px 0 #ffe58a, 12px 0 #ffe58a;
+}
+
+/* Dark theme overrides */
+html,
+body {
+  background: var(--color-page);
+  color: var(--color-text);
+}
+
+body,
+.app-shell,
+.waveform-page-shell {
+  background: var(--color-page);
+}
+
+button,
+textarea,
+input {
+  background: var(--color-surface-soft);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+button:hover,
+button:focus-visible,
+textarea:focus,
+input:focus {
+  border-color: var(--color-primary);
+  outline-color: var(--color-primary);
+}
+
+button.primary,
+.play-simulation-button,
+.netlist-review-button.accept {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #102116;
+}
+
+button.primary:hover,
+.play-simulation-button:hover {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+
+.text-button {
+  color: var(--color-primary-pressed);
+}
+
+.main-panel,
+.panel-block,
+.waveform-page-header {
+  background: var(--color-panel);
+  border-color: var(--color-border);
+}
+
+.eyebrow,
+.chat-section-label,
+.chat-history-copy small,
+.chat-history-item time,
+.chat-welcome p,
+.empty-state p:last-child,
+.workbench-empty p,
+.editor-window-empty p,
+.editor-header p,
+.waveform-page-summary p,
+.empty-waveform-page p,
+.empty-chart,
+.chat-message.pending {
+  color: var(--color-text-muted);
+}
+
+.prompt-box span,
+.chat-welcome,
+.component-value-editor span,
+.workbench-empty,
+.editor-window-empty,
+.waveform-card text,
+.diagram-small,
+.trace-picker label {
+  color: var(--color-text);
+  fill: var(--color-text);
+}
+
+.chat-conversation-header,
+.editor-launchbar,
+.waveform-toolbar,
+.editor-window-titlebar {
+  border-color: var(--color-border);
+}
+
+.editor-window,
+.waveform-card,
+.diagram-card {
+  background: var(--color-canvas);
+  border-color: var(--color-border);
+}
+
+.chat-message,
+.editor-window-titlebar,
+.waveform-toolbar,
+.trace-picker label,
+.cursor-box {
+  background: var(--color-surface-soft);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+.chat-artifact-chip {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+
+.chat-message.user {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #102116;
+}
+
+.chat-message.user .chat-message-meta time {
+  color: #3a1c10;
+}
+
+.chat-artifact-chip span,
+.chat-message-meta time,
+.user-bar,
+.user-bar button {
+  color: var(--color-text-muted);
+}
+
+.chat-history-item.active,
+.active-tool,
+.live-code-editor,
+.code-editor:read-only {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary-border);
+  color: var(--color-text);
+}
+
+.editor-window.active {
+  border-color: var(--color-primary);
+}
+
+/* Focused tab: subtle accent underline instead of a solid fill. */
+.editor-launchbar button.active {
+  box-shadow: inset 0 -2px 0 var(--color-primary);
+}
+
+.editor-window {
+  background: var(--color-surface-soft);
+}
+
+.editor-window.active {
+  box-shadow: 0 0 0 1px var(--color-primary);
+}
+
+.editor-window-titlebar,
+.editor-window.active .editor-window-titlebar {
+  background: var(--color-surface);
+}
+
+.editor-window-control:hover,
+.component-symbol-button:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-text);
+}
+
+.editor-resize-handle::before {
+  background: var(--color-border);
+}
+
+.editor-resize-handle span {
+  background: var(--color-text-subtle);
+}
+
+.editor-resize-handle:hover::before,
+.editor-resize-handle:focus-visible::before,
+.resizing-columns .editor-resize-handle.columns::before,
+.resizing-rows > .editor-resize-handle.rows::before {
+  background: var(--color-primary);
+}
+
+.component-value-editor input,
+code,
+pre,
+.code-editor {
+  background: var(--color-code);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+.component-value-editor input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.2);
+}
+
+.simulation-ok {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-pressed);
+}
+
+.inline-error {
+  color: var(--color-error-text);
+}
+
+.netlist-review-button.reject {
+  background: var(--color-error-border);
+  border-color: var(--color-error-border);
+}
+
+.netlist-diff .diff-line.changed {
+  background: var(--color-warning-bg);
+  box-shadow: -12px 0 var(--color-warning-bg), 12px 0 var(--color-warning-bg);
+}
+
+.netlist-diff .diff-line.changed code {
+  color: var(--color-warning-text);
+}
+
+.chart-bg {
+  fill: var(--color-chart-bg);
+}
+
+.grid-line {
+  stroke: var(--color-border-soft);
+}
+
+.axis-line {
+  stroke: var(--color-text-muted);
+}
+
+.cursor-line {
+  stroke: var(--color-primary-hover);
+}
+
+.cursor-box {
+  fill: var(--color-surface);
+  opacity: 0.96;
+  stroke: var(--color-border);
+}
+
+.diagram-bg {
+  fill: var(--color-diagram-bg);
+}
+
+.diagram-grid-small {
+  stroke: var(--color-diagram-grid-small);
+}
+
+.diagram-grid-large {
+  stroke: var(--color-diagram-grid-large);
+}
+
+.diagram-wire,
+.diagram-symbol,
+.diagram-ground,
+.diagram-bridge-arc {
+  stroke: var(--color-text);
+}
+
+.diagram-bridge-clear {
+  stroke: var(--color-diagram-bg);
+}
+
+.diagram-wire.pending,
+.diagram-wire:hover,
+.diagram-wire.selected,
+.editable-component:hover .diagram-symbol,
+.editable-component.selected .diagram-symbol,
+.editable-net:hover .diagram-net,
+.editable-net:hover .diagram-ground,
+.editable-net.selected .diagram-ground,
+.editable-net.selected .diagram-net {
+  stroke: var(--color-primary);
+}
+
+.diagram-fill,
+.terminal-dot {
+  fill: var(--color-surface-soft);
+  stroke: var(--color-text);
+}
+
+/* Junction and node dots are drawn with the same ink as the wires they join. */
+.diagram-node {
+  fill: var(--color-text);
+}
+
+.terminal-dot.selected {
+  fill: var(--color-primary);
+}
+
+.diagram-net {
+  fill: var(--color-surface);
+  stroke: var(--color-border);
+}
+
+.diagram-slot-rect {
+  stroke: var(--color-border);
+}
+
+.diagram-slot-label,
+.diagram-slot-pin-label {
+  fill: var(--color-text-muted);
+}
+
+.diagram-slot-pin-dot {
+  fill: var(--color-border);
+}
+
+/* Net names read as plain hand-lettered flags; the box only appears as an
+   affordance when hovered or selected. */
+.editable-net .diagram-net {
+  fill: transparent;
+  stroke: transparent;
+}
+
+.diagram-port .diagram-net {
+  fill: var(--color-diagram-bg);
+  stroke: var(--color-text-muted);
+}
+
+.diagram-text {
+  fill: var(--color-text);
 }
