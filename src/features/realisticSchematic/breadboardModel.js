@@ -45,10 +45,10 @@ const OFFBOARD_MCU_KINDS = new Set(['arduino_uno', 'raspberry_pi']);
 const ESP32_WIDTH_COLUMNS = 6;
 const ESP32_LEG_LAYOUT = { bottom: [0, 1, 4, 5, 6, 7], top: [2, 3, 11, 10, 9, 8] };
 
-const LEAD_SPAN = 3; // default columns between a two-lead part's legs
+const LEAD_SPAN = 2; // default columns between a two-lead part's legs
 const MAX_DIRECT_SPAN = 8; // widest a part stretches to plug straight into home groups
 const MAX_REACH = 6; // how far back a leg reaches to reuse a home group
-const PART_GAP = 2; // free columns kept between parts
+const PART_GAP = 1; // free columns kept between parts
 
 // `overrides` is an optional persisted placement layer: { parts: { [ref]:
 // { strip, column } } } pinning a part's leftmost column/strip (see the
