@@ -94,18 +94,31 @@ export interface ProviderConfig {
 export interface ParsedCircuitResponse {
   reply: string;
   circuit: Circuit;
-  spice: string;
-}
-
-export interface StreamState {
-  attempt: number;
-  correcting: boolean;
 }
 
 export interface CorrectionContext {
   content: string;
   error: string;
 }
+
+// ── Multi-stage pipeline ──
+
+export type PipelineStageName = 'circuit' | 'reviewing' | 'reply';
+
+export interface PipelineStageEvent {
+  type: 'stage';
+  stage: PipelineStageName;
+}
+
+export interface PipelineContentEvent {
+  type: 'content';
+  stage: 'circuit';
+  content: string;
+  attempt: number;
+  correcting: boolean;
+}
+
+export type PipelineEvent = PipelineStageEvent | PipelineContentEvent;
 
 // ── Diagram & response ──
 
@@ -222,16 +235,4 @@ export interface StreamingSpiceResult {
   componentCount: number;
   title: string;
   spice: string;
-}
-
-export interface OllamaRequestBody {
-  model: string;
-  stream: boolean;
-  format: Record<string, unknown>;
-  options: {
-    num_ctx: number;
-    num_predict: number;
-    temperature: number;
-  };
-  messages: Array<{ role: string; content: string }>;
 }

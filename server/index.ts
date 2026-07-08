@@ -2,12 +2,12 @@ import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { loadEnv } from './env.js';
 import { buildCircuitResponse, reconcileCircuitRevision } from './circuit/circuitResponse.js';
 import { normalizeChatMemory, sanitizeConversationHistory, updateChatMemory } from './ai/chatMemory.js';
-import { streamCircuitWithOllama } from './ai/ollamaProvider.js';
+import { runCircuitPipeline } from './ai/ollamaProvider.js';
 import { runNgspiceSimulation } from './simulation/simulator.js';
 import { buildStreamingSpice } from './circuit/streamingCircuit.js';
 import { initDb } from './auth/db.js';
 import { handleSignup, handleLogin, handleVerifyEmail, handleMe, verifyJwt } from './auth/auth.js';
-import type { ChatMemory, ChatMessage, Circuit, CurrentDesign, JwtPayload, StreamState } from './types.js';
+import type { ChatMemory, ChatMessage, Circuit, CurrentDesign, JwtPayload, PipelineEvent } from './types.js';
 
 loadEnv();
 
@@ -179,18 +179,22 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       });
 
       let lastSpiceEvent = '';
-      const aiResponse = await streamCircuitWithOllama(prompt, messages, currentDesign, (content: string, streamState: StreamState) => {
-        const partial = buildStreamingSpice(content, prompt, currentDesign?.circuit ?? null);
-        const eventKey = `${streamState.attempt}:${partial.spice}`;
+      const aiResponse = await runCircuitPipeline(prompt, messages, currentDesign, memory, (event: PipelineEvent) => {
+        if (event.type === 'stage') {
+          writeStreamEvent(response, { type: 'stage', stage: event.stage });
+          return;
+        }
+        const partial = buildStreamingSpice(event.content, prompt, currentDesign?.circuit ?? null);
+        const eventKey = `${event.attempt}:${partial.spice}`;
         if (eventKey === lastSpiceEvent) return;
         lastSpiceEvent = eventKey;
         writeStreamEvent(response, {
           type: 'spice',
           provisional: true,
-          correcting: streamState.correcting,
+          correcting: event.correcting,
           ...partial,
         });
-      }, memory);
+      });
       const circuit = reconcileCircuitRevision(aiResponse.circuit as unknown as Record<string, unknown>, prompt, currentDesign?.circuit ?? null);
       let updatedMemory: ChatMemory = memory;
       try {

@@ -60,6 +60,7 @@ function App() {
   const [newChatPrompt, setNewChatPrompt] = useState('');
   const [page, setPage] = useState(pageFromHash);
   const [generatingChatId, setGeneratingChatId] = useState(null);
+  const [generationStage, setGenerationStage] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const messagesEndRef = useRef(null);
   const spiceEditorRef = useRef(null);
@@ -476,6 +477,7 @@ function App() {
     };
 
     setGeneratingChatId(chatId);
+    setGenerationStage('circuit');
     openEditorView('spice');
     window.location.hash = '';
     setPage('workspace');
@@ -516,6 +518,10 @@ function App() {
       const contentType = response.headers.get('content-type') || '';
       const data = contentType.includes('application/x-ndjson')
         ? await readGenerationStream(response, (event) => {
+            if (event.type === 'stage') {
+              setGenerationStage(event.stage);
+              return;
+            }
             if (event.type !== 'spice') return;
             updateChat(chatId, (chat) => ({
               ...chat,
@@ -581,6 +587,7 @@ function App() {
       }));
     } finally {
       setGeneratingChatId(null);
+      setGenerationStage(null);
     }
   };
 
@@ -1227,6 +1234,7 @@ function App() {
           activeChat={activeChat}
           openChat={openChat}
           isGenerating={isGenerating}
+          generationStage={generationStage}
           messagesEndRef={messagesEndRef}
           prompt={prompt}
           setPrompt={setPrompt}

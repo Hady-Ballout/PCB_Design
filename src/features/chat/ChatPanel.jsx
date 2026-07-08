@@ -1,5 +1,11 @@
 import { formatChatTime } from './chatFormat.js';
 
+const GENERATION_STAGE_LABELS = {
+  circuit: 'Generating circuit...',
+  reviewing: 'Reviewing design...',
+  reply: 'Writing summary...',
+};
+
 // Conversation + history sidebar. All workspace state is supplied by the
 // app shell (src/app/App.jsx) so this feature can be edited independently.
 export function ChatPanel({
@@ -14,6 +20,7 @@ export function ChatPanel({
   activeChat,
   openChat,
   isGenerating,
+  generationStage,
   messagesEndRef,
   prompt,
   setPrompt,
@@ -127,7 +134,7 @@ export function ChatPanel({
               {isGenerating && (
                 <article className="chat-message assistant pending">
                   <div className="chat-message-meta"><strong>AI</strong></div>
-                  <p>Designing the circuit package...</p>
+                  <p>{GENERATION_STAGE_LABELS[generationStage] || 'Designing the circuit package...'}</p>
                 </article>
               )}
               <div ref={messagesEndRef} />
