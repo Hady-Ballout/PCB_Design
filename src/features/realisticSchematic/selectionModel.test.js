@@ -32,6 +32,10 @@ describe('highlightFor', () => {
     // The VOUT tie group glows.
     expect(highlight.groupKeys.size).toBeGreaterThan(0);
     expect(highlight.batteryRefs).toEqual(new Set(['V1'])); // V1 feeds VCC
+    // Each lit carrier knows its net, so the overlay can tint per net.
+    highlight.groupKeys.forEach((key) => expect(highlight.nets.has(highlight.groupKeyNets.get(key))).toBe(true));
+    expect([...highlight.groupKeyNets.values()]).toContain('VOUT');
+    expect(highlight.railStripNets.get('railTopPlus')).toBe('VCC');
   });
 
   it('lights a whole net including the parts on it', () => {

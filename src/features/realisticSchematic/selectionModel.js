@@ -45,6 +45,10 @@ const emptyHighlight = () => ({
   railStrips: new Set(),
   groupKeys: new Set(),
   batteryRefs: new Set(),
+  // Net identity per lit carrier, so the overlay can tint each tie group /
+  // rail stripe with its net's legend color instead of one uniform yellow.
+  groupKeyNets: new Map(),
+  railStripNets: new Map(),
 });
 
 // Everything to light up for a selection. A part lights itself plus the full
@@ -76,10 +80,16 @@ export function highlightFor(model, selection) {
     if (highlight.nets.has(jumper.net)) highlight.jumperIds.add(jumper.id);
   });
   Object.entries(model.rails).forEach(([strip, net]) => {
-    if (net != null && highlight.nets.has(net)) highlight.railStrips.add(strip);
+    if (net != null && highlight.nets.has(net)) {
+      highlight.railStrips.add(strip);
+      highlight.railStripNets.set(strip, net);
+    }
   });
   highlight.nets.forEach((net) => {
-    (model.netGroups[net] ?? []).forEach(({ strip, column }) => highlight.groupKeys.add(`${strip}:${column}`));
+    (model.netGroups[net] ?? []).forEach(({ strip, column }) => {
+      highlight.groupKeys.add(`${strip}:${column}`);
+      highlight.groupKeyNets.set(`${strip}:${column}`, net);
+    });
   });
   model.batteries.forEach((battery) => {
     if ((battery.nets ?? []).some((net) => net != null && highlight.nets.has(net))) {

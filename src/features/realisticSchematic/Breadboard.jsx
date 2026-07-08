@@ -44,10 +44,16 @@ function Holes({ columns }) {
 }
 
 // Translucent glow over the tie-group columns and rail rows carrying the
-// highlighted nets. Rendered between the board and the parts; never
-// intercepts pointer events.
-export function HighlightOverlay({ board, highlight }) {
+// highlighted nets, tinted with each net's legend color (yellow fallback).
+// Rendered between the board and the parts; never intercepts pointer events.
+export function HighlightOverlay({ board, highlight, nets = [] }) {
   if (!highlight.active) return null;
+  // Near-black ground reads as a shadow when tinted; use the − rail blue.
+  const colorOf = (net) => {
+    const entry = nets.find((candidate) => candidate.net === net);
+    if (!entry) return '#ffc400';
+    return entry.role === 'ground' ? '#2465b0' : entry.color;
+  };
   const rects = [];
   highlight.groupKeys.forEach((key) => {
     const [strip, columnText] = key.split(':');
@@ -62,7 +68,8 @@ export function HighlightOverlay({ board, highlight }) {
         width={12}
         height={(STRIP_ROWS[strip] - 1) * HOLE_PITCH + 14}
         rx={6}
-        fill="rgba(255,196,0,0.3)"
+        fill={colorOf(highlight.groupKeyNets?.get(key))}
+        opacity={0.3}
       />,
     );
   });
@@ -76,7 +83,8 @@ export function HighlightOverlay({ board, highlight }) {
         width={columnX(board.columns) - columnX(1) + 16}
         height={14}
         rx={6}
-        fill="rgba(255,196,0,0.3)"
+        fill={colorOf(highlight.railStripNets?.get(strip))}
+        opacity={0.3}
       />,
     );
   });

@@ -443,7 +443,7 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
           <PartDefs />
           <g className="rs-world" transform={`translate(${view.tx} ${view.ty}) scale(${view.s})`} style={{ willChange: 'transform' }}>
             <Breadboard board={model.board} rails={model.rails} />
-            <HighlightOverlay board={model.board} highlight={highlight} />
+            <HighlightOverlay board={model.board} highlight={highlight} nets={model.nets} />
             {model.parts.map((part) => {
               const dragging = partDrag?.ref === part.ref;
               return (
