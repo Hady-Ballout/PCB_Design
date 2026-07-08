@@ -50,6 +50,9 @@ describe('realistic part rendering', () => {
     expect(markup).toContain('rsPartUno');
     expect(markup).toContain('ATMEGA328P');
     expect(markup).toContain('rsGoldPad');
+    // Pin wires paint after the opaque board body so they terminate visibly
+    // on the header pads instead of vanishing under the board.
+    expect(markup.indexOf('rsPartUno)')).toBeLessThan(markup.indexOf('rs-mcu-wires'));
   });
 
   it('renders an off-board Raspberry Pi', () => {
@@ -71,6 +74,7 @@ describe('realistic part rendering', () => {
     expect(markup).toContain('GPIO17');
     expect(markup).toContain('rsPartPi');
     expect(markup).toContain('BCM2711');
+    expect(markup.indexOf('rsPartPi)')).toBeLessThan(markup.indexOf('rs-mcu-wires'));
   });
 
   it('renders an ESP32 module straddling the trench', () => {
@@ -114,5 +118,41 @@ describe('realistic part rendering', () => {
     ['R1', 'C1', 'L1', 'DLED1', 'Q1', 'XU1', 'ARDUINO'].forEach((label) => {
       expect(markup).toContain(label);
     });
+  });
+});
+
+describe('jumper wire geometry', () => {
+  const controlPoints = (jumper) => {
+    const markup = renderToStaticMarkup(<svg><JumperWire jumper={jumper} /></svg>);
+    const [, ax, ay, c1x, c1y, c2x, c2y, bx, by] =
+      /M ([\d.-]+) ([\d.-]+) C ([\d.-]+) ([\d.-]+), ([\d.-]+) ([\d.-]+), ([\d.-]+) ([\d.-]+)/.exec(markup);
+    return { a: { x: +ax, y: +ay }, c1: { x: +c1x, y: +c1y }, c2: { x: +c2x, y: +c2y }, b: { x: +bx, y: +by } };
+  };
+
+  it('bows a same-column rail-to-strip stub sideways within its vertical range', () => {
+    const { a, c1, c2, b } = controlPoints({
+      id: 'j1', net: 'X', color: '#000',
+      from: { strip: 'railTopMinus', column: 5, row: 0 },
+      to: { strip: 'top', column: 5, row: 0 },
+    });
+    // Sideways bow (no straight vertical line) …
+    expect(c1.x).toBeGreaterThan(a.x);
+    expect(c2.x).toBeGreaterThan(b.x);
+    // … and no overshoot past the rails above or the strip below.
+    const [top, bottom] = [Math.min(a.y, b.y), Math.max(a.y, b.y)];
+    expect(c1.y).toBeGreaterThanOrEqual(top);
+    expect(c1.y).toBeLessThanOrEqual(bottom);
+    expect(c2.y).toBeGreaterThanOrEqual(top);
+    expect(c2.y).toBeLessThanOrEqual(bottom);
+  });
+
+  it('bows a same-column rail-to-rail bridge left into the board', () => {
+    const { a, c1, c2, b } = controlPoints({
+      id: 'j2', net: '0', color: '#1f1f1f',
+      from: { strip: 'railTopMinus', column: 30, row: 0 },
+      to: { strip: 'railBottomMinus', column: 30, row: 0 },
+    });
+    expect(c1.x).toBeLessThan(a.x);
+    expect(c2.x).toBeLessThan(b.x);
   });
 });

@@ -440,7 +440,7 @@ function McuPinWires({ part }) {
   const slot = part.meta.slot;
   if (!slot) return null;
   return (
-    <g>
+    <g className="rs-mcu-wires">
       {part.holes.map((hole, index) => {
         if (!hole) return null;
         const pad = mcuPadPoint(slot, index);
@@ -452,6 +452,7 @@ function McuPinWires({ part }) {
         return (
           <g key={index}>
             <path d={d} stroke={part.meta.pinColors?.[index] || '#7d7d7d'} strokeWidth="2.7" strokeLinecap="round" fill="none" />
+            <circle cx={pad.x} cy={pad.y} r={2} fill="#20262b" />
             <circle cx={target.x} cy={target.y} r={2} fill="#20262b" />
           </g>
         );
@@ -509,7 +510,6 @@ function ArduinoUnoBody({ part }) {
   const legPitch = chipW / 14;
   return (
     <g>
-      <McuPinWires part={part} />
       {/* teal soldermask board with a flat inset bevel (no shadow / gloss) */}
       <rect x={bx0} y={by0} width={bw} height={bh} rx={8} fill="url(#rsPartUno)" stroke="#014449" strokeWidth="0.9" />
       <rect x={bx0 + 1.6} y={by0 + 1.6} width={bw - 3.2} height={bh - 3.2} rx={7} fill="none" stroke="rgba(255,255,255,0.16)" strokeWidth="0.7" />
@@ -586,6 +586,9 @@ function ArduinoUnoBody({ part }) {
       {/* functional top digital header (where wires attach) */}
       <McuHeader part={part} />
       <Silk x={fx(0.85)} y={fy(0.3)} text={`${part.ref}${part.value ? ` · ${part.value}` : ''}`} size={4} fill="#bce0e2" />
+      {/* pin wires last so they visibly terminate on the header pads instead
+          of vanishing under the opaque board body */}
+      <McuPinWires part={part} />
     </g>
   );
 }
@@ -607,7 +610,6 @@ function RaspberryPiBody({ part }) {
   const last = mcuPadPoint(slot, Math.max(pinCount - 1, 1));
   return (
     <g>
-      <McuPinWires part={part} />
       {/* green soldermask board with a flat inset bevel */}
       <rect x={bx0} y={by0} width={bw} height={bh} rx={9} fill="url(#rsPartPi)" stroke="#0f4a29" strokeWidth="0.9" />
       <rect x={bx0 + 1.6} y={by0 + 1.6} width={bw - 3.2} height={bh - 3.2} rx={8} fill="none" stroke="rgba(255,255,255,0.14)" strokeWidth="0.7" />
@@ -699,6 +701,9 @@ function RaspberryPiBody({ part }) {
 
       {/* functional GPIO header row (where wires attach) */}
       <McuHeader part={part} light />
+      {/* pin wires last so they visibly terminate on the header pads instead
+          of vanishing under the opaque board body */}
+      <McuPinWires part={part} />
     </g>
   );
 }
@@ -752,10 +757,16 @@ export function JumperWire({ jumper }) {
   const lift = Math.min(46, 16 + span * 0.14 + Math.abs(b.y - a.y) * 0.18) + stagger;
   let c1;
   let c2;
-  if (sides[0] !== sides[1] && span < HOLE_PITCH) {
-    // Same-column rail bridge: bow out to the right.
-    c1 = { x: a.x + lift + 14, y: a.y };
-    c2 = { x: b.x + lift + 14, y: b.y };
+  if (span < HOLE_PITCH) {
+    // Same-column jumpers can't lift vertically (identical control x renders a
+    // straight line overshooting the rails). Bow sideways instead: rail-to-rail
+    // bridges bow LEFT into the board — they only occur at the right edge
+    // (assignRail bridges at the last column), where a right bow would sweep
+    // over the rail net labels — while short rail-to-strip stubs bow gently
+    // right. The ±0.2·dy pull keeps the curve inside its vertical range.
+    const bow = sides[0] !== sides[1] ? -(16 + stagger) : 8 + stagger;
+    c1 = { x: a.x + bow, y: a.y + (b.y - a.y) * 0.2 };
+    c2 = { x: b.x + bow, y: b.y - (b.y - a.y) * 0.2 };
   } else {
     const direction1 = sides[0] === 'bottom' ? 1 : -1;
     const direction2 = sides[1] === 'bottom' ? 1 : -1;
