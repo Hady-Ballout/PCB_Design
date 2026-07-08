@@ -311,6 +311,17 @@ export function circuitToBreadboard(circuit, overrides = {}) {
     return { column: Number(key.split(':')[1]) };
   };
 
+  // Same, but on whichever strip the home lives — off-board MCU wires can fly
+  // to either strip, so a pin should tap the net's existing group directly
+  // instead of allocating a spare group plus a joining jumper.
+  const anyUsableHome = (net) => {
+    if (net == null || isRailNet(net)) return null;
+    const key = netHome.get(net);
+    if (!key || !groupHasSpace(key) || !sharableGroups.has(key)) return null;
+    const [strip, columnText] = key.split(':');
+    return { strip, column: Number(columnText) };
+  };
+
   const placeTwoLead = (component) => {
     const nets = component.nodes ?? [];
     const strip = peekStrip(LEAD_SPAN + 1);
@@ -393,8 +404,8 @@ export function circuitToBreadboard(circuit, overrides = {}) {
         mirrorRailToBottom(net);
         return railHoleFor(net, nextColumn(), 'bottom');
       }
-      const home = usableHome(net, 'bottom');
-      if (home) return takeHole('bottom', home.column);
+      const home = anyUsableHome(net);
+      if (home) return takeHole(home.strip, home.column);
       const freshColumn = nextColumn();
       const hole = takeHole('bottom', freshColumn);
       // The attachment group carries no body, so later two-lead parts may
@@ -461,6 +472,10 @@ export function circuitToBreadboard(circuit, overrides = {}) {
     const anchor = overrideParts[component.ref];
     if (anchor) placeAnchored(component, anchor);
   });
+  // Off-board MCU boards place after everything else: their jumper wires can
+  // fly to any strip, so waiting lets each pin tap the tie group its net
+  // already earned under a component lead instead of allocating a spare group.
+  const deferredMcus = [];
   components.forEach((component) => {
     if (component.kind === 'voltage_source') return; // handled in the rail pre-pass
     if (placedRefs.has(component.ref)) return; // pinned in Phase 1
@@ -471,12 +486,13 @@ export function circuitToBreadboard(circuit, overrides = {}) {
     if (component.kind === 'esp32') {
       return placeStraddle(component, ESP32_WIDTH_COLUMNS, ESP32_LEG_LAYOUT, 'esp32');
     }
-    if (OFFBOARD_MCU_KINDS.has(component.kind)) return placeOffboardMcu(component);
+    if (OFFBOARD_MCU_KINDS.has(component.kind)) return deferredMcus.push(component);
     if (TO92_KINDS.has(component.kind)) return placeInline(component, 'to92');
     if (component.kind === 'regulator') return placeInline(component, 'to220');
     if (pinCount === 2) return placeTwoLead(component);
     placeInline(component, 'module');
   });
+  deferredMcus.forEach(placeOffboardMcu);
 
   // Slot rectangles use the final column count, so they are stamped only after
   // every part has placed (placement can still grow the board).

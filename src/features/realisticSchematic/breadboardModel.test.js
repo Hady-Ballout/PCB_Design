@@ -231,12 +231,24 @@ describe('circuitToBreadboard', () => {
     expect(uno.holes[2].strip.startsWith('rail')).toBe(true);
   });
 
-  it('fans MCU wires out left-to-right without crossing', () => {
+  it('taps existing net groups directly and fans the rest out left-to-right', () => {
     const model = circuitToBreadboard(unoCircuit);
     const uno = model.parts.find((part) => part.ref === 'U1');
-    const columns = uno.holes.filter(Boolean).map((hole) => hole.column);
-    expect(columns).toEqual([...columns].sort((a, b) => a - b));
-    expect(new Set(columns).size).toBe(columns.length);
+    const rled = model.parts.find((part) => part.ref === 'RLED');
+    // D13 plugs straight into the tie group RLED's lead already earned —
+    // no spare attachment group, no joining jumper on that net.
+    expect(uno.holes[8].strip).toBe(rled.holes[0].strip);
+    expect(uno.holes[8].column).toBe(rled.holes[0].column);
+    expect(model.jumpers.filter((jumper) => jumper.net === 'LED')).toHaveLength(0);
+    // Every other connected pin lands on a rail or a fresh column, and those
+    // columns run left-to-right in pin order without crossing.
+    const reusedKey = `${rled.holes[0].strip}:${rled.holes[0].column}`;
+    const fanned = uno.holes
+      .filter(Boolean)
+      .filter((hole) => `${hole.strip}:${hole.column}` !== reusedKey)
+      .map((hole) => hole.column);
+    expect(fanned).toEqual([...fanned].sort((a, b) => a - b));
+    expect(new Set(fanned).size).toBe(fanned.length);
   });
 
   it('wires MCU circuits exactly like their netlists', () => {
