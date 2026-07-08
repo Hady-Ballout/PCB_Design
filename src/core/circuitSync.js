@@ -1,6 +1,7 @@
 import {
   DiagramLayoutError,
   buildCircuitDiagram,
+  findNearestLegalPlacement,
   layoutCircuitDiagram,
   nextFreeSlot,
   repairDiagramLayout,

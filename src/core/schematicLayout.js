@@ -808,7 +808,7 @@ const routeOneWire = (diagram, wire, routedWires, target = null) => {
   const start = endpoints.start;
   const componentPins = new Set(diagram.components.flatMap((component) =>
     (component.pins || []).map((pin) => pointKey(pin))));
-  const sameNetWires = wire.node
+  const sameNetWires = !wire.labelId && wire.node && wire.node !== '0'
     ? routedWires.filter((item) => item.node === wire.node)
     : [];
   const sameNetPoints = sameNetWires.flatMap((item) => [
