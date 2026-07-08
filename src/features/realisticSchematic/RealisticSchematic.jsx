@@ -388,7 +388,7 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
         <button type="button" onClick={() => zoomAround(centerAnchor(), 1.25)}>+</button>
         <button type="button" onClick={() => setView(IDENTITY_VIEW)}>Fit</button>
         <span className="realistic-zoom-readout">{Math.round(view.s * 100)}%</span>
-        <span className="realistic-readout">{readoutFor(model, selection) ?? 'Click a part or wire'}</span>
+        <span className="realistic-readout">{readoutFor(model, effective) ?? 'Click a part or wire'}</span>
         <button
           type="button"
           className="realistic-describe"

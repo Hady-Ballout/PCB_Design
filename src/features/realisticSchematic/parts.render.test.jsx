@@ -118,6 +118,10 @@ describe('realistic part rendering', () => {
     ['R1', 'C1', 'L1', 'DLED1', 'Q1', 'XU1', 'ARDUINO'].forEach((label) => {
       expect(markup).toContain(label);
     });
+    // Part labels carry a paint-order halo so crossing wires don't strike text.
+    expect(markup).toContain('paint-order:stroke');
+    // Electrolytic cap polarity glyphs.
+    expect(markup).toContain('−');
   });
 });
 

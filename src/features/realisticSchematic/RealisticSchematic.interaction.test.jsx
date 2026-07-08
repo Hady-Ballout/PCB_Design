@@ -104,6 +104,17 @@ describe('breadboard editing', () => {
     return partGroup;
   };
 
+  it('previews a hovered part in the toolbar readout while nothing is selected', () => {
+    mount({ onCircuitChange: vi.fn(), onLayoutChange: vi.fn() });
+    const partGroup = container.querySelector('[aria-label="R1 resistor 1k"]');
+    const readout = () => container.querySelector('.realistic-readout').textContent;
+    expect(readout()).toBe('Click a part or wire');
+    act(() => { partGroup.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); });
+    expect(readout()).toBe('R1 · resistor · 1k');
+    act(() => { partGroup.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })); });
+    expect(readout()).toBe('Click a part or wire');
+  });
+
   it('reveals draggable pin handles for the selected part', () => {
     const svg = mount({ onCircuitChange: vi.fn(), onLayoutChange: vi.fn() });
     expect(container.querySelectorAll('.rs-pin-handle')).toHaveLength(0);

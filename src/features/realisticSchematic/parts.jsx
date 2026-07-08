@@ -8,13 +8,17 @@ import { pinLabelsFor } from './selectionModel.js';
 
 const LEAD_STROKE = { stroke: '#8f979e', strokeWidth: 1.7, strokeLinecap: 'round', fill: 'none' };
 const LABEL_STYLE = { fontSize: 7.5, fontFamily: 'Inter, Arial, sans-serif', fill: '#3c4640' };
+// Halo behind labels drawn over the board so crossing jumper wires don't
+// strike through the text. Board-colored for dark text, dark for light text.
+const HALO = { paintOrder: 'stroke', stroke: 'rgba(244,241,232,0.9)', strokeWidth: 2.4, strokeLinejoin: 'round' };
+const DARK_HALO = { ...HALO, stroke: 'rgba(20,26,30,0.75)' };
 
 // Direction the body sits relative to its holes: above on the top strip,
 // below on the bottom strip, so bodies lean away from the trench.
 const bodyDir = (strip) => (strip === 'bottom' ? 1 : -1);
 
 const RefLabel = ({ x, y, text, light = false }) => (
-  <text x={x} y={y} textAnchor="middle" style={LABEL_STYLE} fill={light ? '#f0f0ea' : LABEL_STYLE.fill}>
+  <text x={x} y={y} textAnchor="middle" style={{ ...LABEL_STYLE, ...(light ? DARK_HALO : HALO) }} fill={light ? '#f0f0ea' : LABEL_STYLE.fill}>
     {text}
   </text>
 );
@@ -192,7 +196,7 @@ function ResistorBody({ part, points }) {
               fill={BAND_COLOR_HEX[band]}
             />
           ))
-        : <text x={mid} y={y + 2.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6.5 }}>{part.value}</text>}
+        : <text x={mid} y={y + 2.5} textAnchor="middle" style={{ ...LABEL_STYLE, ...HALO, fontSize: 6.5 }}>{part.value}</text>}
       <RefLabel x={mid} y={y + dir * 13} text={part.ref} />
     </g>
   );
@@ -207,13 +211,17 @@ function CapacitorBody({ part, points }) {
   if (style.type === 'electrolytic') {
     // Radial can; pin 1 is positive, so the pale minus stripe hugs the pin-2 side.
     const width = 20;
-    const stripeX = b.x > a.x ? mid + width / 2 - 5 : mid - width / 2;
+    const minusOnRight = b.x > a.x;
+    const stripeX = minusOnRight ? mid + width / 2 - 5 : mid - width / 2;
+    const plusX = minusOnRight ? mid - width / 2 + 4 : mid + width / 2 - 4;
     return (
       <g>
         <Lead from={a} to={{ x: mid - 4, y: y + 8 }} />
         <Lead from={b} to={{ x: mid + 4, y: y + 8 }} />
         <rect x={mid - width / 2} y={y - 12} width={width} height={24} rx={4} fill="url(#rsPartCan)" stroke="#1b2947" strokeWidth="0.6" />
         <rect x={stripeX} y={y - 12} width={5} height={24} rx={2} fill="#d8dde6" opacity="0.85" />
+        <text x={stripeX + 2.5} y={y + 2} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6, fontWeight: 700 }} fill="#2b3550">−</text>
+        <text x={plusX} y={y - 4.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6, fontWeight: 700 }} fill="#e8ecf4">+</text>
         <RefLabel x={mid} y={y - 17} text={`${part.ref} · ${part.value}`} />
       </g>
     );
@@ -235,14 +243,19 @@ function LedBody({ part, points }) {
   const y = Math.min(a.y, b.y) + dir * 17;
   const mid = (a.x + b.x) / 2;
   const { fill } = ledColor(part.value);
-  const flatX = b.x > a.x ? mid + 8 : mid - 8; // flat side marks the cathode (pin 2)
+  // Flat-sided lens silhouette: the vertical chord marks the cathode (pin 2),
+  // like the flattened rim of a real 5mm LED.
+  const flat = b.x > a.x ? 6 : -6;
+  const chordY = Math.sqrt(9 * 9 - flat * flat);
+  const sweep = flat > 0 ? 0 : 1;
+  const lens = `M ${mid + flat} ${y - chordY} A 9 9 0 1 ${sweep} ${mid + flat} ${y + chordY} Z`;
   return (
     <g>
       <Lead from={a} to={{ x: mid - 3.5, y: y + 9 }} />
       <Lead from={b} to={{ x: mid + 3.5, y: y + 9 }} />
-      <circle cx={mid} cy={y} r={9} fill={fill} stroke="rgba(0,0,0,0.35)" strokeWidth="0.7" />
-      <circle cx={mid} cy={y} r={9} fill="url(#rsPartLens)" />
-      <line x1={flatX} y1={y - 6} x2={flatX} y2={y + 6} stroke="rgba(0,0,0,0.4)" strokeWidth="1.4" />
+      <path d={lens} fill={fill} stroke="rgba(0,0,0,0.35)" strokeWidth="0.7" />
+      <path d={lens} fill="url(#rsPartLens)" />
+      <line x1={mid + flat} y1={y - chordY + 1} x2={mid + flat} y2={y + chordY - 1} stroke="rgba(0,0,0,0.4)" strokeWidth="1.4" />
       <ellipse cx={mid - 3} cy={y - 3.5} rx={2.6} ry={1.8} fill="rgba(255,255,255,0.75)" />
       <RefLabel x={mid} y={y - 14} text={part.ref} />
     </g>
@@ -434,7 +447,17 @@ function Esp32Body({ part }) {
 // (part.meta.slot); their header pads along the board's top edge fan wires
 // upward to the placement holes.
 
-const mcuPadPoint = (slot, index) => ({ x: slot.x + 24 + index * MCU_PIN_SPACING, y: slot.y + 18 });
+// Pin-group breaks per MCU kind (indexes a group starts at, first group
+// implicit): the Uno's canonical pins split power | digital | analog, mirrored
+// as physical gaps in the header strip like the real board's 8/10-pin blocks.
+const MCU_PIN_GROUPS = { arduino_uno: [4, 9] };
+const MCU_GROUP_GAP = 10;
+
+const mcuPadPoint = (slot, index, kind) => {
+  const breaks = MCU_PIN_GROUPS[kind] ?? [];
+  const gaps = breaks.filter((breakIndex) => index >= breakIndex).length;
+  return { x: slot.x + 24 + index * MCU_PIN_SPACING + gaps * MCU_GROUP_GAP, y: slot.y + 18 };
+};
 
 function McuPinWires({ part }) {
   const slot = part.meta.slot;
@@ -443,7 +466,7 @@ function McuPinWires({ part }) {
     <g className="rs-mcu-wires">
       {part.holes.map((hole, index) => {
         if (!hole) return null;
-        const pad = mcuPadPoint(slot, index);
+        const pad = mcuPadPoint(slot, index, part.kind);
         const target = holeCenter(hole);
         // Same visual family as JumperWire: cubic curve with a small
         // deterministic per-pin stagger so neighbouring wires don't overlap.
@@ -466,19 +489,31 @@ function McuHeader({ part, light = false }) {
   const names = MCU_PINS[part.kind] ?? [];
   const pinCount = part.pinNets?.length ?? names.length;
   if (pinCount === 0) return null;
-  const first = mcuPadPoint(slot, 0);
-  const last = mcuPadPoint(slot, pinCount - 1);
+  // One plastic strip per pin group (power | digital | analog on the Uno),
+  // mirroring the physical gaps between the real board's header blocks.
+  const breaks = MCU_PIN_GROUPS[part.kind] ?? [];
+  const groups = [0, ...breaks.filter((breakIndex) => breakIndex < pinCount), pinCount]
+    .slice(0, -1)
+    .map((start, groupIndex, starts) => [start, (starts[groupIndex + 1] ?? pinCount) - 1]);
   return (
     <g>
-      {/* black plastic pin-header strip with a top highlight edge */}
-      <rect x={first.x - 9} y={first.y - 5} width={last.x - first.x + 18} height={10} rx={1.5} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.4" />
-      <line x1={first.x - 8} y1={first.y - 4} x2={last.x + 8} y2={first.y - 4} stroke="rgba(255,255,255,0.16)" strokeWidth="0.5" />
+      {groups.map(([startPin, endPin]) => {
+        const first = mcuPadPoint(slot, startPin, part.kind);
+        const last = mcuPadPoint(slot, endPin, part.kind);
+        return (
+          <g key={startPin}>
+            {/* black plastic pin-header strip with a top highlight edge */}
+            <rect x={first.x - 9} y={first.y - 5} width={last.x - first.x + 18} height={10} rx={1.5} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.4" />
+            <line x1={first.x - 8} y1={first.y - 4} x2={last.x + 8} y2={first.y - 4} stroke="rgba(255,255,255,0.16)" strokeWidth="0.5" />
+          </g>
+        );
+      })}
       {Array.from({ length: pinCount }, (_, index) => {
-        const pad = mcuPadPoint(slot, index);
+        const pad = mcuPadPoint(slot, index, part.kind);
         return (
           <g key={index}>
             <GoldPad x={pad.x} y={pad.y} s={4.4} />
-            <text x={pad.x} y={pad.y + 13.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 4.6 }} fill={light ? '#e9ede8' : '#f0f0ea'}>
+            <text x={pad.x} y={pad.y + 14} textAnchor="middle" style={{ ...LABEL_STYLE, ...DARK_HALO, fontSize: 6 }} fill={light ? '#e9ede8' : '#f0f0ea'}>
               {names[index] ?? index + 1}
             </text>
           </g>
@@ -498,7 +533,7 @@ function ArduinoUnoBody({ part }) {
   // placed in board-fraction coordinates so it survives the slot-width variance.
   const bx0 = slot.x;
   const by0 = slot.y + 3;
-  const bw = mcuPadPoint(slot, Math.max(pinCount - 1, 1)).x + 24 - bx0;
+  const bw = mcuPadPoint(slot, Math.max(pinCount - 1, 1), part.kind).x + 24 - bx0;
   const bh = Math.min(bw / 1.285, slot.height - 10);
   const fx = (f) => bx0 + bw * f;
   const fy = (f) => by0 + bh * f;
@@ -606,8 +641,8 @@ function RaspberryPiBody({ part }) {
   const bw = bh * 1.5;
   const fx = (f) => bx0 + bw * f;
   const fy = (f) => by0 + bh * f;
-  const first = mcuPadPoint(slot, 0);
-  const last = mcuPadPoint(slot, Math.max(pinCount - 1, 1));
+  const first = mcuPadPoint(slot, 0, part.kind);
+  const last = mcuPadPoint(slot, Math.max(pinCount - 1, 1), part.kind);
   return (
     <g>
       {/* green soldermask board with a flat inset bevel */}
@@ -622,7 +657,7 @@ function RaspberryPiBody({ part }) {
 
       {/* 2-row GPIO header backing behind the functional row */}
       <rect x={first.x - 9} y={first.y - 6} width={last.x - first.x + 18} height={15} rx={1.5} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.4" />
-      {Array.from({ length: pinCount }, (_, i) => <GoldPad key={`g${i}`} x={mcuPadPoint(slot, i).x} y={first.y + 4.5} s={4.4} />)}
+      {Array.from({ length: pinCount }, (_, i) => <GoldPad key={`g${i}`} x={mcuPadPoint(slot, i, part.kind).x} y={first.y + 4.5} s={4.4} />)}
       <Silk x={fx(0.03)} y={first.y + 1} text="GPIO" size={4} fill="#cdecd8" anchor="start" />
 
       {/* WiFi/BT RF shield can (top-left) */}
@@ -733,14 +768,19 @@ export function BatteryPack({ battery, index }) {
         />
       )}
       <rect x={x} y={y} width={width} height={height} rx={5} fill="url(#rsPartBattery)" stroke="#20262b" strokeWidth="0.8" />
-      <rect x={x + width - 20} y={terminalY - 3.5} width={7} height={7} rx={1.5} fill="#d8b13a" stroke="#8a6d14" strokeWidth="0.5" />
-      <circle cx={x + 17} cy={terminalY} r={4.4} fill="#d0d5d9" stroke="#6d757c" strokeWidth="0.6" />
-      <text x={x + width / 2} y={y + height / 2 + 2} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 9 }} fill="#f0ede4" fontWeight="600">
+      {/* 9V snap top: metal cap band, female − snap (ring) and male + stud */}
+      <rect x={x} y={y} width={width} height={13} rx={5} fill="url(#rsPartTab)" stroke="#20262b" strokeWidth="0.7" />
+      <rect x={x} y={y + 9} width={width} height={4} fill="url(#rsPartBattery)" />
+      <circle cx={x + 17} cy={terminalY} r={5} fill="url(#rsBrushedShield)" stroke="#565e66" strokeWidth="0.7" />
+      <circle cx={x + 17} cy={terminalY} r={2.6} fill="#22262a" />
+      <circle cx={x + width - 17} cy={terminalY} r={3.4} fill="url(#rsBrushedShield)" stroke="#565e66" strokeWidth="0.7" />
+      <circle cx={x + width - 18} cy={terminalY - 1} r={1.2} fill="rgba(255,255,255,0.55)" />
+      <text x={x + width / 2} y={y + height / 2 + 6} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 9 }} fill="#f0ede4" fontWeight="600">
         {battery.value || '?V'}
       </text>
       <text x={x + width / 2} y={y + height - 8} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6 }} fill="#c9c4b6">{battery.ref}</text>
-      <text x={x + width - 16} y={terminalY - 7} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 8 }} fill="#f0ede4">+</text>
-      <text x={x + 17} y={terminalY - 8} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 8 }} fill="#f0ede4">−</text>
+      <text x={x + width - 17} y={terminalY + 12} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 8, fontWeight: 700 }} fill="#f0ede4">+</text>
+      <text x={x + 17} y={terminalY + 12} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 8, fontWeight: 700 }} fill="#f0ede4">−</text>
     </g>
   );
 }
