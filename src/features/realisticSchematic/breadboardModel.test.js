@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { circuitToBreadboard, GROUND_NET } from './breadboardModel.js';
+import { MCU_SLOT_GAP, MCU_SLOT_HEIGHT, boardSize } from './breadboardGeometry.js';
+import { circuitToBreadboard, reconcileOverrides, GROUND_NET, MCU_PINS } from './breadboardModel.js';
 
 const dividerCircuit = {
   title: 'Voltage divider',
@@ -18,6 +19,41 @@ const opampCircuit = {
     { ref: 'V1', kind: 'voltage_source', value: '9V', nodes: ['VCC', '0'] },
     { ref: 'XU1', kind: 'opamp', value: 'LM358', nodes: ['VIN', 'VOUT', 'VOUT', 'VCC', '0'] },
     { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VIN', '0'] },
+  ],
+};
+
+// Arduino Uno blink: 5V powers a standing LED, D13 drives a switched LED.
+// Pin order is the canonical MCU_PINS.arduino_uno contract.
+const unoCircuit = {
+  title: 'Uno blink',
+  nodes: ['VCC5', 'LED', 'LEDK', 'LED2A', '0'],
+  components: [
+    {
+      ref: 'U1',
+      kind: 'arduino_uno',
+      value: 'Uno R3',
+      nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'LED', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+    },
+    { ref: 'RLED', kind: 'resistor', value: '330', nodes: ['LED', 'LEDK'] },
+    { ref: 'DLED1', kind: 'led', value: 'red', nodes: ['LEDK', '0'] },
+    { ref: 'R2', kind: 'resistor', value: '330', nodes: ['VCC5', 'LED2A'] },
+    { ref: 'DLED2', kind: 'led', value: 'green', nodes: ['LED2A', '0'] },
+  ],
+};
+
+const esp32Circuit = {
+  title: 'ESP32 LED',
+  nodes: ['VCC3', 'LED', 'LEDK', '0'],
+  components: [
+    {
+      ref: 'U1',
+      kind: 'esp32',
+      value: 'DevKit V1',
+      nodes: ['VCC3', '0', 'NC_U1_3', 'NC_U1_4', 'LED', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+    },
+    { ref: 'RLED', kind: 'resistor', value: '220', nodes: ['LED', 'LEDK'] },
+    { ref: 'DLED1', kind: 'led', value: 'blue', nodes: ['LEDK', '0'] },
+    { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['VCC3', '0'] },
   ],
 };
 
@@ -165,5 +201,166 @@ describe('circuitToBreadboard', () => {
     const first = circuitToBreadboard(transistorCircuit);
     const second = circuitToBreadboard(transistorCircuit);
     expect(second).toEqual(first);
+  });
+
+  it('places an Arduino Uno off-board in a slot below the breadboard', () => {
+    const model = circuitToBreadboard(unoCircuit);
+    const uno = model.parts.find((part) => part.ref === 'U1');
+    expect(uno.body).toBe('arduino_uno');
+    expect(uno.meta.slotIndex).toBe(0);
+    expect(uno.meta.slot).toMatchObject({ height: MCU_SLOT_HEIGHT });
+    // The slot sits below the plain board and the drawing grows to hold it.
+    expect(uno.meta.slot.y).toBeGreaterThanOrEqual(boardSize(model.board.columns).height);
+    expect(model.board.height).toBe(boardSize(model.board.columns, 1).height);
+    // NC pins are not wired to the board at all.
+    uno.pinNets.forEach((net, index) => {
+      if (/^NC_/i.test(net)) expect(uno.holes[index]).toBeNull();
+      else expect(uno.holes[index]).toBeTruthy();
+    });
+    expect(uno.meta.pinColors.filter(Boolean)).toHaveLength(3);
+  });
+
+  it('puts the MCU supply pin on a + rail even without a battery', () => {
+    const model = circuitToBreadboard(unoCircuit);
+    expect(model.rails.railTopPlus).toBe('VCC5');
+    expect(model.rails.railTopMinus).toBe(GROUND_NET);
+    expect(model.batteries).toHaveLength(0);
+    const uno = model.parts.find((part) => part.ref === 'U1');
+    // Power pins plug straight into rail holes; the GND wire lands on a rail too.
+    expect(uno.holes[0].strip.startsWith('rail')).toBe(true);
+    expect(uno.holes[2].strip.startsWith('rail')).toBe(true);
+  });
+
+  it('fans MCU wires out left-to-right without crossing', () => {
+    const model = circuitToBreadboard(unoCircuit);
+    const uno = model.parts.find((part) => part.ref === 'U1');
+    const columns = uno.holes.filter(Boolean).map((hole) => hole.column);
+    expect(columns).toEqual([...columns].sort((a, b) => a - b));
+    expect(new Set(columns).size).toBe(columns.length);
+  });
+
+  it('wires MCU circuits exactly like their netlists', () => {
+    [unoCircuit, esp32Circuit].forEach((circuit) => {
+      assertBoardMatchesNetlist(circuit, circuitToBreadboard(circuit));
+    });
+  });
+
+  it('stacks two off-board boards into separate slots', () => {
+    const model = circuitToBreadboard({
+      components: [
+        {
+          ref: 'U1',
+          kind: 'arduino_uno',
+          value: 'Uno R3',
+          nodes: ['VCC5', 'NC_U1_2', '0', ...Array.from({ length: 9 }, (_, i) => `NC_U1_${i + 4}`)],
+        },
+        {
+          ref: 'U2',
+          kind: 'raspberry_pi',
+          value: 'Pi 5',
+          nodes: ['NC_U2_1', 'VCC3', '0', ...Array.from({ length: 7 }, (_, i) => `NC_U2_${i + 4}`)],
+        },
+        { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VCC5', '0'] },
+        { ref: 'R2', kind: 'resistor', value: '1k', nodes: ['VCC3', '0'] },
+      ],
+    });
+    const uno = model.parts.find((part) => part.ref === 'U1');
+    const pi = model.parts.find((part) => part.ref === 'U2');
+    expect(pi.body).toBe('raspberry_pi');
+    expect([uno.meta.slotIndex, pi.meta.slotIndex]).toEqual([0, 1]);
+    expect(pi.meta.slot.y - uno.meta.slot.y).toBe(MCU_SLOT_HEIGHT + MCU_SLOT_GAP);
+    expect(model.board.height).toBe(boardSize(model.board.columns, 2).height);
+    // Each board's supply lands on its own + rail.
+    expect(model.rails.railTopPlus).toBe('VCC5');
+    expect(model.rails.railBottomPlus).toBe('VCC3');
+  });
+
+  it('places an ESP32 module straddling the trench like a wide DIP', () => {
+    const model = circuitToBreadboard(esp32Circuit);
+    const esp = model.parts.find((part) => part.ref === 'U1');
+    expect(esp.body).toBe('esp32');
+    const { columnStart, columnEnd } = esp.meta;
+    expect(columnEnd - columnStart).toBe(5);
+    // Legs split 6/6 across the trench per the DevKit layout.
+    const strips = esp.holes.map((hole) => hole?.strip);
+    [0, 1, 4, 5, 6, 7].forEach((pin) => expect(strips[pin]).toBe('bottom'));
+    [2, 3, 8, 9, 10, 11].forEach((pin) => expect(strips[pin]).toBe('top'));
+    esp.holes.forEach((hole) => {
+      expect(hole.column).toBeGreaterThanOrEqual(columnStart);
+      expect(hole.column).toBeLessThanOrEqual(columnEnd);
+    });
+    // The module supply rides the + rail like any other supply net.
+    expect(model.rails.railTopPlus).toBe('VCC3');
+  });
+
+  it('exposes the canonical MCU pin lists', () => {
+    expect(MCU_PINS.arduino_uno).toHaveLength(12);
+    expect(MCU_PINS.raspberry_pi).toHaveLength(10);
+    expect(MCU_PINS.esp32).toHaveLength(12);
+    expect(MCU_PINS.arduino_uno[8]).toBe('D13');
+  });
+});
+
+describe('circuitToBreadboard with placement overrides', () => {
+  it('reproduces the pure auto-placement when overrides are empty', () => {
+    // The byte-identical guarantee that keeps every test above valid.
+    [dividerCircuit, opampCircuit, transistorCircuit, unoCircuit, esp32Circuit].forEach((circuit) => {
+      expect(circuitToBreadboard(circuit, {})).toEqual(circuitToBreadboard(circuit));
+      expect(circuitToBreadboard(circuit, { parts: {} })).toEqual(circuitToBreadboard(circuit));
+    });
+  });
+
+  it('pins a two-lead part at its anchor column and strip', () => {
+    const model = circuitToBreadboard(dividerCircuit, { parts: { R2: { strip: 'bottom', column: 20 } } });
+    const r2 = model.parts.find((part) => part.ref === 'R2');
+    expect(r2.holes[0].strip).toBe('bottom');
+    expect(r2.holes[0].column).toBe(20);
+    // Pinning must not break connectivity — the board still wires up correctly.
+    assertBoardMatchesNetlist(dividerCircuit, model);
+  });
+
+  it('pins a straddling DIP at its anchor and greedy-places the rest around it', () => {
+    const model = circuitToBreadboard(opampCircuit, { parts: { XU1: { strip: 'top', column: 15 } } });
+    const dip = model.parts.find((part) => part.ref === 'XU1');
+    expect(dip.meta.columnStart).toBe(15);
+    const r1 = model.parts.find((part) => part.ref === 'R1');
+    // R1 (auto-placed) must not overlap the pinned DIP's reserved columns.
+    r1.holes.filter(Boolean).forEach((hole) => {
+      const overlapsDip = hole.column >= 15 && hole.column <= 18;
+      expect(overlapsDip).toBe(false);
+    });
+    assertBoardMatchesNetlist(opampCircuit, model);
+  });
+
+  it('grows the board to honor an anchor past the default edge', () => {
+    const model = circuitToBreadboard(dividerCircuit, { parts: { R1: { strip: 'top', column: 40 } } });
+    expect(model.board.columns).toBeGreaterThanOrEqual(41);
+    const r1 = model.parts.find((part) => part.ref === 'R1');
+    expect(r1.holes[0].column).toBe(40);
+  });
+
+  it('ignores anchors for parts that are no longer in the circuit', () => {
+    // A stale anchor (part removed) must not throw or place a phantom part.
+    const model = circuitToBreadboard(dividerCircuit, { parts: { GONE: { strip: 'top', column: 10 } } });
+    expect(model.parts.map((part) => part.ref).sort()).toEqual(['R1', 'R2']);
+    assertBoardMatchesNetlist(dividerCircuit, model);
+  });
+});
+
+describe('reconcileOverrides', () => {
+  it('drops anchors whose part no longer exists', () => {
+    const overrides = { version: 1, parts: { R1: { strip: 'top', column: 5 }, GONE: { strip: 'top', column: 9 } } };
+    const reconciled = reconcileOverrides(overrides, dividerCircuit);
+    expect(Object.keys(reconciled.parts)).toEqual(['R1']);
+  });
+
+  it('returns the same object when every anchor is still live', () => {
+    const overrides = { version: 1, parts: { R1: { strip: 'top', column: 5 } } };
+    expect(reconcileOverrides(overrides, dividerCircuit)).toBe(overrides);
+  });
+
+  it('is null-safe for missing overrides', () => {
+    expect(reconcileOverrides(null, dividerCircuit)).toBeNull();
+    expect(reconcileOverrides({}, dividerCircuit)).toEqual({});
   });
 });

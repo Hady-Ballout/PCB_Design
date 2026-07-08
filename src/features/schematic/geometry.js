@@ -166,6 +166,18 @@ export const componentPinPoint = (component, pinIndex) => {
     return { x: component.x, y: component.y - component.height / 2 };
   }
 
+  if (component.symbolType === 'mcu') {
+    // Tighter 18px pin pitch: MCU boards carry 10-12 pins that must fit the
+    // fixed slot height without stressing the overlap resolver.
+    const side = pinIndex % 2 === 1 ? -1 : 1;
+    const row = Math.floor((pinIndex - 1) / 2);
+    const rows = Math.ceil(component.pinCount / 2);
+    return {
+      x: component.x + side * (component.width / 2),
+      y: component.y - ((rows - 1) * 18) / 2 + row * 18,
+    };
+  }
+
   if (component.pinCount <= 2) {
     if (component.orientation === 'vertical') {
       return {

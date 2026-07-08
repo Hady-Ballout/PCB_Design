@@ -203,6 +203,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         data: {
           ...buildCircuitResponse(circuit, { rawPrompt: prompt, type: circuit.type }, aiProviderName()),
           reply: aiResponse.reply,
+          code: aiResponse.code || '',
           memory: updatedMemory,
           ...(process.env.OLLAMA_CONTEXT_DIAGNOSTICS === '1' ? { contextDiagnostics } : {}),
         },

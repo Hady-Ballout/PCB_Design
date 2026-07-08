@@ -139,6 +139,43 @@
 .realistic-scroll {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   padding: 12px;
+  position: relative;
+}
+
+/* The board is a pan/zoom canvas: it fills the stage and the world <g> is
+   translated/scaled in place. touch-action:none is required so the browser
+   hands us pinch/two-finger gestures instead of scrolling the page. */
+.realistic-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+}
+
+.realistic-canvas .rs-item {
+  cursor: pointer;
+}
+
+/* Rewiring: the selected part's pins become draggable handles; dragging one
+   trails a rubber-band line to the hole it will connect to. */
+.rs-pin-handle {
+  fill: rgba(217, 119, 66, 0.9);
+  stroke: #fff;
+  stroke-width: 1;
+  cursor: crosshair;
+}
+
+.rs-pin-handle:hover {
+  fill: #d97742;
+  r: 6;
+}
+
+.rs-wire-drag {
+  stroke: #d97742;
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+  stroke-linecap: round;
 }

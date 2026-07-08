@@ -38,7 +38,10 @@ export const createChat = ({ id = createId(), now = Date.now() } = {}) => ({
   editableKicadNetlist: '',
   pendingKicadChange: null,
   editableCircuitJson: '',
+  editableCode: '',
+  pendingCodeChange: null,
   editedDiagram: null,
+  editedBreadboard: null,
   simulationRun: null,
   error: '',
   simulationError: '',
@@ -114,8 +117,18 @@ const normalizeChat = (chat) => {
         }
       : null,
     editableCircuitJson: String(chat.editableCircuitJson || (chat.result?.circuit ? JSON.stringify(chat.result.circuit, null, 2) : '')),
+    editableCode: String(chat.editableCode || chat.result?.code || ''),
+    pendingCodeChange: chat.pendingCodeChange && typeof chat.pendingCodeChange === 'object'
+      ? {
+          previous: String(chat.pendingCodeChange.previous || ''),
+          proposed: String(chat.pendingCodeChange.proposed || ''),
+        }
+      : null,
     editedDiagram: chat.editedDiagram && typeof chat.editedDiagram === 'object'
       ? chat.editedDiagram
+      : null,
+    editedBreadboard: chat.editedBreadboard && typeof chat.editedBreadboard === 'object'
+      ? chat.editedBreadboard
       : null,
     simulationRun: null,
     error: '',

@@ -58,6 +58,9 @@ const symbolTypeByKind = {
   mosfet_p: 'generic',
   opamp: 'opamp',
   regulator: 'generic',
+  arduino_uno: 'mcu',
+  raspberry_pi: 'mcu',
+  esp32: 'mcu',
 };
 
 const snap = (value, grid = GRID_SIZE) => Math.round(value / grid) * grid;
@@ -231,6 +234,17 @@ const pinPoint = (component, pinIndex, node, netPosition) => {
     if (pinIndex === 4) return { x: component.x, y: component.y - component.height / 2 };
     if (pinIndex === 5) return { x: component.x, y: component.y + component.height / 2 };
   }
+  if (component.symbolType === 'mcu') {
+    // Tighter 18px pin pitch: MCU boards carry 10-12 pins that must fit the
+    // fixed slot height without stressing the overlap resolver.
+    const side = pinIndex % 2 === 1 ? -1 : 1;
+    const row = Math.floor((pinIndex - 1) / 2);
+    const rows = Math.ceil(component.pinCount / 2);
+    return {
+      x: component.x + side * component.width / 2,
+      y: component.y - ((rows - 1) * 18) / 2 + row * 18,
+    };
+  }
   if (component.pinCount <= 2) {
     if (component.orientation === 'vertical') {
       return { x: component.x, y: node === '0' ? component.y + component.height / 2 : component.y - component.height / 2 };
@@ -254,6 +268,7 @@ const pinPoint = (component, pinIndex, node, netPosition) => {
 const componentSize = (kind) => {
   const symbolType = symbolTypeByKind[kind] || 'generic';
   if (symbolType === 'opamp') return { width: 150, height: 110, symbolType };
+  if (symbolType === 'mcu') return { width: 150, height: 118, symbolType };
   if (symbolType === 'bjt_npn' || symbolType === 'bjt_pnp') return { width: 118, height: 100, symbolType };
   if (symbolType === 'voltage_source' || symbolType === 'capacitor' || symbolType === 'diode' || symbolType === 'led') {
     return { width: 98, height: 112, symbolType };

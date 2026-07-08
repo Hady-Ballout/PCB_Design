@@ -384,3 +384,51 @@ V2 IN 0 DC 5
     expect(parsed.errors.join(' ')).toContain('unknown component MISSING');
   });
 });
+
+describe('microcontroller board synchronization', () => {
+  const mcuCircuit = {
+    title: 'Uno blink',
+    type: 'mcu_led',
+    supplyVoltage: 5,
+    components: [
+      { ref: 'V1', kind: 'voltage_source', value: '5V', footprint: '', nodes: ['VIN', '0'] },
+      {
+        ref: 'U1',
+        kind: 'arduino_uno',
+        value: 'Uno R3',
+        footprint: 'Module:Arduino_UNO_R3',
+        nodes: ['NC_U1_1', 'NC_U1_2', '0', 'VIN', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'LED', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+      },
+      { ref: 'RLED', kind: 'resistor', value: '330', footprint: '', nodes: ['LED', 'LEDK'] },
+      { ref: 'DLED1', kind: 'led', value: 'red', footprint: '', nodes: ['LEDK', '0'] },
+    ],
+    notes: [],
+  };
+
+  it('accepts MCU kinds in circuit JSON', () => {
+    const parsed = parseCircuitJson(JSON.stringify(mcuCircuit), null);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.circuit.components.find((part) => part.ref === 'U1').kind).toBe('arduino_uno');
+  });
+
+  it('preserves MCUs through the SPICE round-trip at their original index', () => {
+    const spice = toSpice(mcuCircuit);
+    expect(spice).toContain('* U1 arduino_uno');
+    const parsed = parseSpiceNetlist(spice, mcuCircuit);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.circuit.components.map((part) => part.ref)).toEqual(['V1', 'U1', 'RLED', 'DLED1']);
+    const preserved = parsed.circuit.components[1];
+    expect(preserved).toMatchObject({ ref: 'U1', kind: 'arduino_uno', value: 'Uno R3' });
+    expect(preserved.nodes).toEqual(mcuCircuit.components[1].nodes);
+    // The electrical signature must not register a spurious edit.
+    expect(circuitElectricalSignature(parsed.circuit)).toBe(circuitElectricalSignature(mcuCircuit));
+  });
+
+  it('keeps the MCU when the user edits another component in SPICE', () => {
+    const editedDeck = toSpice(mcuCircuit).replace('RLED LED LEDK 330', 'RLED LED LEDK 470');
+    const parsed = parseSpiceNetlist(editedDeck, mcuCircuit);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.circuit.components.find((part) => part.ref === 'U1')).toBeTruthy();
+    expect(parsed.circuit.components.find((part) => part.ref === 'RLED').value).toBe('470');
+  });
+});

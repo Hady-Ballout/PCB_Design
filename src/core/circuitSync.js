@@ -1,5 +1,7 @@
 import {
   DiagramLayoutError,
+  MCU_KINDS,
+  MCU_PIN_COUNTS,
   buildCircuitDiagram,
   layoutCircuitDiagram,
   nextFreeSlot,
@@ -94,6 +96,7 @@ const kindFromRef = (ref) => {
 const defaultPinCount = (kind) => {
   if (kind === 'opamp') return 5;
   if (kind === 'bjt_npn' || kind === 'bjt_pnp' || kind === 'mosfet_n' || kind === 'mosfet_p') return 3;
+  if (MCU_PIN_COUNTS[kind]) return MCU_PIN_COUNTS[kind];
   return 2;
 };
 
@@ -113,6 +116,9 @@ const spiceRefForComponent = (component) => {
     mosfet_n: 'M',
     mosfet_p: 'M',
     opamp: 'X',
+    arduino_uno: 'U',
+    raspberry_pi: 'U',
+    esp32: 'U',
   };
   const prefix = prefixByKind[component.kind] || 'X';
   return base.startsWith(prefix) ? base : `${prefix}_${base}`;
@@ -135,6 +141,9 @@ const allowedCircuitKinds = new Set([
   'voltage_source',
   'signal_source',
   'load',
+  'arduino_uno',
+  'raspberry_pi',
+  'esp32',
 ]);
 
 export const parseCircuitJson = (source, baseCircuit = null) => {
@@ -304,6 +313,16 @@ export const parseSpiceNetlist = (source, baseCircuit) => {
       ...record,
     });
   }
+
+  // Microcontroller boards are wiring-only and never appear in a SPICE deck;
+  // carry them over from the base circuit (at their original position, so the
+  // electrical signature does not register a spurious edit) instead of
+  // treating the deck as having dropped them.
+  baseComponents.forEach((component, index) => {
+    if (!MCU_KINDS.has(component.kind)) return;
+    if (components.some((existing) => existing.ref === component.ref)) return;
+    components.splice(Math.min(index, components.length), 0, { ...component });
+  });
 
   if (components.length === 0) errors.push('The SPICE netlist does not contain any supported components.');
   const duplicateRefs = components
@@ -580,11 +599,15 @@ const symbolTypeByKind = {
   bjt_npn: 'bjt_npn',
   bjt_pnp: 'bjt_pnp',
   opamp: 'opamp',
+  arduino_uno: 'mcu',
+  raspberry_pi: 'mcu',
+  esp32: 'mcu',
 };
 
 const defaultShapeForPart = (part) => {
   const symbolType = symbolTypeByKind[part.kind] || 'generic';
   if (symbolType === 'opamp') return { width: 150, height: 110, symbolType, orientation: 'horizontal' };
+  if (symbolType === 'mcu') return { width: 150, height: 118, symbolType, orientation: 'horizontal' };
   if (symbolType === 'bjt_npn' || symbolType === 'bjt_pnp') return { width: 118, height: 100, symbolType, orientation: 'horizontal' };
   if (symbolType === 'voltage_source' || symbolType === 'capacitor' || symbolType === 'diode' || symbolType === 'led') {
     return { width: 98, height: 112, symbolType, orientation: 'vertical' };
@@ -604,6 +627,17 @@ const pinPointForComponent = (component, pinIndex, node) => {
     if (pinIndex === 3) return { x: component.x + component.width / 2, y: component.y };
     if (pinIndex === 4) return { x: component.x, y: component.y - component.height / 2 };
     if (pinIndex === 5) return { x: component.x, y: component.y + component.height / 2 };
+  }
+  if (component.symbolType === 'mcu') {
+    // Tighter 18px pin pitch: MCU boards carry 10-12 pins that must fit the
+    // fixed slot height without stressing the overlap resolver.
+    const side = pinIndex % 2 === 1 ? -1 : 1;
+    const row = Math.floor((pinIndex - 1) / 2);
+    const rows = Math.ceil(component.pinCount / 2);
+    return {
+      x: component.x + side * component.width / 2,
+      y: component.y - ((rows - 1) * 18) / 2 + row * 18,
+    };
   }
   if (component.pinCount <= 2) {
     if (component.orientation === 'vertical') {

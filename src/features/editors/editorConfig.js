@@ -2,6 +2,7 @@
 export const EDITOR_VIEW_LABELS = {
   spice: 'SPICE',
   json: 'JSON',
+  code: 'Code',
   canvas: 'Canvas',
   blockSchematic: 'Block schematic',
   realisticSchematic: 'Realistic schematic',

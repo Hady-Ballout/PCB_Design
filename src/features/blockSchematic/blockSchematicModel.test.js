@@ -95,3 +95,36 @@ describe('blockSchematicModel', () => {
     expect(humanComponentName(opamp)).toBe('Op-Amp');
   });
 });
+
+describe('microcontroller blocks', () => {
+  it('labels MCU pins positionally and names the boards', () => {
+    const uno = {
+      ref: 'U1',
+      kind: 'arduino_uno',
+      value: 'Uno R3',
+      nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'LED', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+    };
+    expect(humanComponentName(uno)).toBe('Arduino Uno');
+    expect(pinLabel(uno, 1)).toBe('5V');
+    expect(pinLabel(uno, 9)).toBe('D13');
+    expect(humanComponentName({ kind: 'raspberry_pi' })).toBe('Raspberry Pi');
+    expect(pinLabel({ kind: 'esp32', nodes: new Array(12).fill('x') }, 5)).toBe('GPIO2');
+  });
+
+  it('builds flow nodes for MCU circuits with connected pins marked', () => {
+    const { nodes } = circuitToFlow({
+      components: [
+        {
+          ref: 'U1',
+          kind: 'arduino_uno',
+          value: 'Uno R3',
+          nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'LED', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+        },
+        { ref: 'RLED', kind: 'resistor', value: '330', nodes: ['LED', '0'] },
+      ],
+    });
+    const mcuNode = nodes.find((node) => node.id === 'U1');
+    expect(mcuNode.data.pins).toHaveLength(12);
+    expect(mcuNode.data.pins.filter((pin) => pin.connected).map((pin) => pin.label)).toEqual(['5V', 'GND', 'D13']);
+  });
+});

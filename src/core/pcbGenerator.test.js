@@ -428,3 +428,56 @@ describe('prompt-to-pcb generator', () => {
     expect(kicadNetlist).toContain('name="VBIAS"');
   });
 });
+
+describe('microcontroller boards', () => {
+  const esp32Circuit = {
+    title: 'ESP32 LED',
+    type: 'mcu_led',
+    supplyVoltage: 3.3,
+    components: [
+      {
+        ref: 'U1',
+        kind: 'esp32',
+        value: 'DevKit V1',
+        nodes: ['VCC3', '0', 'NC_U1_3', 'NC_U1_4', 'LED', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+      },
+      { ref: 'RLED', kind: 'resistor', value: '220', nodes: ['LED', 'LEDK'] },
+      { ref: 'DLED1', kind: 'led', value: 'blue', nodes: ['LEDK', '0'] },
+      { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['VCC3', '0'] },
+    ],
+    notes: [],
+  };
+
+  it('exports MCUs as SPICE comments, never element lines', () => {
+    const spice = toSpice(esp32Circuit);
+    expect(spice).toContain('* U1 esp32 (microcontroller board, not simulated)');
+    expect(spice.split('\n').some((line) => /^U1\s/i.test(line))).toBe(false);
+    expect(spice).toContain('RLED LED LEDK 220');
+    expect(spice).toContain('.end');
+  });
+
+  it('does not flag NC placeholder pins as floating nets', () => {
+    const validation = validateCircuit(esp32Circuit);
+    expect(validation.ok).toBe(true);
+    expect(validation.warnings.filter((warning) => warning.includes('NC_U1'))).toHaveLength(0);
+  });
+
+  it('warns when an MCU pin list has the wrong length', () => {
+    const truncated = {
+      ...esp32Circuit,
+      components: [
+        { ...esp32Circuit.components[0], nodes: ['VCC3', '0', 'LED'] },
+        ...esp32Circuit.components.slice(1),
+      ],
+    };
+    const validation = validateCircuit(truncated);
+    expect(validation.warnings.some((warning) => warning.includes('exactly 12 nodes'))).toBe(true);
+  });
+
+  it('lays out MCU circuits on the canvas without errors', () => {
+    const diagram = buildCircuitDiagram(esp32Circuit);
+    const mcu = diagram.components.find((part) => part.ref === 'U1');
+    expect(mcu.symbolType).toBe('mcu');
+    expect(mcu.pins).toHaveLength(12);
+  });
+});

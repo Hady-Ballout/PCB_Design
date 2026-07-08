@@ -61,6 +61,9 @@ Allowed component kinds:
 - `voltage_source`
 - `signal_source`
 - `load`
+- `arduino_uno`
+- `raspberry_pi`
+- `esp32`
 
 Do not invent additional component kinds.
 
@@ -104,8 +107,39 @@ Use these node orders consistently:
 | `load` | `[positive_or_input, return]` |
 | `regulator` | `[input, ground, output]` |
 | `opamp` | `[non_inverting, inverting, output, positive_supply, negative_supply]` |
+| `arduino_uno` | `[5V, 3V3, GND, VIN, D2, D3, D5, D9, D13, A0, A1, A2]` (exactly 12 nodes) |
+| `raspberry_pi` | `[5V, 3V3, GND, GPIO2, GPIO3, GPIO4, GPIO17, GPIO18, GPIO27, GPIO22]` (exactly 10 nodes) |
+| `esp32` | `[3V3, GND, VIN, EN, GPIO2, GPIO4, GPIO5, GPIO13, GPIO18, GPIO19, GPIO21, GPIO22]` (exactly 12 nodes) |
 
 For a single-supply op amp, connect the negative-supply node to `"0"`.
+
+Microcontroller boards use their full fixed positional pin list every time. Fill every unused pin with `NC_<REF>_<pinNumber>` (for example `NC_U1_7` for pin 7 of `U1`). Connect the board's GND pin to `"0"`. When the board itself powers the circuit, use its 5V or 3V3 pin as the supply net and set `supplyVoltage` to match (5 for `arduino_uno`, 3.3 for `raspberry_pi` and `esp32`).
+
+### Firmware code
+
+When the circuit contains a microcontroller board, the response must include a top-level `code` field with ready-to-run firmware. `arduino_uno` and `esp32` use an Arduino C++ sketch; `raspberry_pi` uses Python 3 with gpiozero. Map pin names to code: `D13` → `13`, `A0` → `A0`, `GPIO17` → `17`. Only use pins the circuit actually wires. Plain source text in one JSON string, no Markdown fences, under 40 lines.
+
+Arduino blink example (`D13` wired to an LED):
+
+```cpp
+void setup() { pinMode(13, OUTPUT); }
+void loop() {
+  digitalWrite(13, HIGH); delay(1000);
+  digitalWrite(13, LOW); delay(1000);
+}
+```
+
+gpiozero example (`GPIO17` wired to an LED):
+
+```python
+from gpiozero import LED
+from signal import pause
+led = LED(17)
+led.blink(on_time=1, off_time=1)
+pause()
+```
+
+When the circuit has no microcontroller board, set `code` to an empty string.
 
 ## SPICE Compatibility Rules
 
@@ -127,6 +161,7 @@ For a single-supply op amp, connect the negative-supply node to `"0"`.
 - Op amps and other subcircuits start with `X`, for example `XU1`.
 - Op amps must use `LM358` as the JSON `value` and as the SPICE subcircuit/model name. Do not use `GENERIC` or `OPAMP` for op amp values.
 - Regulators represented as subcircuits should start with `X`, for example `XREG1`.
+- Microcontroller boards (`arduino_uno`, `raspberry_pi`, `esp32`) start with `U`, for example `U1`. They must NOT appear in the SPICE netlist — they are wiring-only. Every other component must still appear in SPICE.
 - Loads should normally be represented electrically as resistive loads and use an `R` reference such as `RLOAD`.
 - Use compact SPICE-friendly values such as `220`, `1k`, `4.7k`, `10k`, `1Meg`, `100nF`, `1uF`, `10uF`, `5V`, and `SINE(0 1 1k)`.
 - Use `1Meg` rather than `1M` when one megaohm is intended.
@@ -248,6 +283,16 @@ Structure: input, ground, output regulator with capacitors from input to ground 
 - Typical `COUT`: `100nF` plus `1uF` to `10uF`.
 - Avoid ignoring dropout voltage and power dissipation.
 
+### MCU-Driven LED
+
+Structure: `U1(D13) -- RLED -- DLED1 -- 0`, with `U1(GND) -- 0`.
+
+- The MCU (`arduino_uno`, `raspberry_pi`, `esp32`) appears only in the JSON circuit, never in SPICE.
+- SPICE contains only `RLED` and `DLED1` (plus an optional `signal_source` on the pin's net when the user wants to simulate the pin waveform).
+- Size `RLED` for the board's logic level: 5 V for `arduino_uno`, 3.3 V for `raspberry_pi` and `esp32`.
+- Never drive an LED from a GPIO without a series resistor.
+- Return matching firmware in the top-level `code` field that drives the same pin.
+
 ### Pull-Up, Pull-Down, and Debounce
 
 - Pull-up: `VCC -- RPULL -- INPUT`, switch from `INPUT` to `0`.
@@ -267,6 +312,9 @@ Structure: input, ground, output regulator with capacitors from input to ground 
 - Two-pin header: `Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical`
 - Three-pin header: `Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical`
 - DIP-8 op amp: `Package_DIP:DIP-8_W7.62mm`
+- Arduino Uno: `Module:Arduino_UNO_R3`
+- Raspberry Pi (GPIO header): `Connector_PinSocket_2.54mm:PinSocket_2x20_P2.54mm_Vertical`
+- ESP32 DevKit: `Module:ESP32-DevKitC`
 
 Verify physical pinouts before fabrication.
 

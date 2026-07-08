@@ -26,13 +26,6 @@ export function ChatPanel({
     <aside className={`side-panel chat-panel-${chatPanelView}`}>
       {chatPanelView === 'history' ? (
         <>
-          <header className="chat-sidebar-header chat-history-header">
-            <div>
-              <p className="eyebrow">Prompt-to-PCB MVP</p>
-              <h1>Previous chats</h1>
-            </div>
-          </header>
-
           <form
             className="chat-composer new-chat-composer"
             onSubmit={(event) => { event.preventDefault(); startChatFromHistory(); }}
@@ -75,9 +68,7 @@ export function ChatPanel({
                 >
                   <span className="chat-history-copy">
                     <strong>{chat.title}</strong>
-                    <small>{chat.messages.at(-1)?.content || 'Start a new circuit conversation'}</small>
                   </span>
-                  <time>{formatChatTime(chat.updatedAt)}</time>
                 </button>
               ))}
             </div>
@@ -112,7 +103,6 @@ export function ChatPanel({
               {activeChat?.messages.map((message) => (
                 <article className={`chat-message ${message.role}`} key={message.id}>
                   <div className="chat-message-meta">
-                    <strong>{message.role === 'user' ? 'You' : 'AI'}</strong>
                     <time>{formatChatTime(message.createdAt)}</time>
                   </div>
                   <p>{message.content}</p>
@@ -126,7 +116,6 @@ export function ChatPanel({
               ))}
               {isGenerating && (
                 <article className="chat-message assistant pending">
-                  <div className="chat-message-meta"><strong>AI</strong></div>
                   <p>Designing the circuit package...</p>
                 </article>
               )}

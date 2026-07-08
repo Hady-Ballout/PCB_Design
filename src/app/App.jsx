@@ -25,6 +25,7 @@ import { markSpiceAsProvisional, readGenerationStream } from './generationStream
 import { messageId } from '../features/chat/chatFormat.js';
 import { ChatPanel } from '../features/chat/ChatPanel.jsx';
 import { EDITOR_SPLIT_STORAGE_KEY, EDITOR_VIEW_LABELS, loadEditorSplit } from '../features/editors/editorConfig.js';
+import { firmwareTargetForCircuit } from '../features/editors/firmwareInfo.js';
 import { WaveformChart } from '../features/waveform/WaveformChart.jsx';
 import { CircuitDiagram } from '../features/schematic/CircuitDiagram.jsx';
 import { BlockSchematic } from '../features/blockSchematic/BlockSchematic.jsx';
@@ -72,6 +73,8 @@ function App() {
   const editableKicadNetlist = activeChat?.editableKicadNetlist || '';
   const pendingKicadChange = activeChat?.pendingKicadChange || null;
   const editableCircuitJson = activeChat?.editableCircuitJson || '';
+  const editableCode = activeChat?.editableCode || '';
+  const pendingCodeChange = activeChat?.pendingCodeChange || null;
   const editedDiagram = activeChat?.editedDiagram || null;
   const simulationRun = activeChat?.simulationRun || null;
   const error = activeChat?.error || '';
@@ -91,6 +94,12 @@ function App() {
       : new Set(),
     [pendingSpiceChange],
   );
+  const pendingCodeChangedLines = useMemo(
+    () => pendingCodeChange
+      ? changedLineIndexes(pendingCodeChange.previous, pendingCodeChange.proposed)
+      : new Set(),
+    [pendingCodeChange],
+  );
 
   const updateChat = (chatId, updater) => {
     setChatStore((current) => ({
@@ -109,6 +118,7 @@ function App() {
   const setPrompt = (value) => setChatField('draft', value);
   const setEditableSpice = (value) => setChatField('editableSpice', value);
   const setEditableCircuitJson = (value) => setChatField('editableCircuitJson', value);
+  const setEditableCode = (value) => setChatField('editableCode', value);
   const setEditedDiagram = (value) => setChatField('editedDiagram', value);
   const setSimulationRun = (value) => setChatField('simulationRun', value);
   const setError = (value) => setChatField('error', value);
@@ -144,6 +154,40 @@ function App() {
         };
       } catch (layoutError) {
         return { ...chat, error: layoutError.message };
+      }
+    });
+  };
+
+  // Direct circuit edits (e.g. rewiring a pin in the breadboard view). Unlike
+  // applyDiagramChange we already hold the next circuit, so there is no diagram
+  // inverse — just gate on the electrical signature and run the same sync spine
+  // so SPICE/KiCad/JSON/schematic stay consistent.
+  const applyCircuitChange = (value) => {
+    updateActiveChat((chat) => {
+      if (!chat.result) return chat;
+      try {
+        const nextCircuit = typeof value === 'function' ? value(chat.result.circuit) : value;
+        if (!nextCircuit || circuitElectricalSignature(nextCircuit) === circuitElectricalSignature(chat.result.circuit)) {
+          return chat;
+        }
+        const synchronized = synchronizeResult(chat.result, nextCircuit, chat.editedDiagram || chat.result.diagram);
+        return {
+          ...chat,
+          updatedAt: Date.now(),
+          result: synchronized,
+          editedDiagram: synchronized.diagram,
+          editableSpice: synchronized.spice,
+          editableKicadNetlist: synchronized.kicadNetlist,
+          editableCircuitJson: JSON.stringify(synchronized.circuit, null, 2),
+          simulationRun: null,
+          simulationError: '',
+          spiceSyncError: '',
+          kicadSyncError: '',
+          circuitJsonSyncError: '',
+          error: '',
+        };
+      } catch (syncError) {
+        return { ...chat, error: syncError.message };
       }
     });
   };
@@ -218,6 +262,13 @@ function App() {
       setEditableCircuitJson(JSON.stringify(result.circuit, null, 2));
     }
   }, [result?.circuit]);
+
+  // Same for the firmware code editor.
+  useEffect(() => {
+    if (result?.code && !editableCode) {
+      setEditableCode(result.code);
+    }
+  }, [result?.code]);
 
   useEffect(() => {
     setDiagramSelection(null);
@@ -464,6 +515,7 @@ function App() {
           circuit: chat.result.circuit,
           spice: chat.editableSpice,
           kicadNetlist: chat.editableKicadNetlist,
+          code: chat.editableCode,
         }
       : null;
     const isRevision = Boolean(currentDesign);
@@ -550,6 +602,10 @@ function App() {
           ? { previous: currentDesign.kicadNetlist, proposed: data.kicadNetlist || '' }
           : null,
         editableCircuitJson: JSON.stringify(data.circuit, null, 2),
+        editableCode: data.code || '',
+        pendingCodeChange: currentDesign && (currentDesign.code || '') !== (data.code || '')
+          ? { previous: currentDesign.code || '', proposed: data.code || '' }
+          : null,
         editedDiagram: cloneDiagram(data.diagram),
         simulationRun: null,
         simulationError: '',
@@ -721,6 +777,7 @@ function App() {
       ...chat,
       pendingSpiceChange: null,
       pendingKicadChange: null,
+      pendingCodeChange: null,
       editableCircuitJson: chat.result?.circuit ? JSON.stringify(chat.result.circuit, null, 2) : chat.editableCircuitJson,
       circuitJsonSyncError: '',
     }));
@@ -730,8 +787,21 @@ function App() {
     updateActiveChat((chat) => {
       const previousSpice = chat.pendingSpiceChange?.previous;
       const previousKicad = chat.pendingKicadChange?.previous;
+      const previousCode = chat.pendingCodeChange?.previous;
+      const restoredCode = chat.pendingCodeChange ? previousCode || '' : null;
       if (!chat.result || (!previousSpice && !previousKicad)) {
-        return { ...chat, pendingSpiceChange: null, pendingKicadChange: null };
+        return {
+          ...chat,
+          pendingSpiceChange: null,
+          pendingKicadChange: null,
+          pendingCodeChange: null,
+          ...(restoredCode != null
+            ? {
+                editableCode: restoredCode,
+                result: { ...chat.result, code: restoredCode },
+              }
+            : {}),
+        };
       }
 
       const parsed = previousSpice
@@ -743,8 +813,15 @@ function App() {
           editableSpice: previousSpice || chat.editableSpice,
           editableKicadNetlist: previousKicad || chat.editableKicadNetlist,
           editableCircuitJson: chat.result?.circuit ? JSON.stringify(chat.result.circuit, null, 2) : chat.editableCircuitJson,
+          ...(restoredCode != null
+            ? {
+                editableCode: restoredCode,
+                result: { ...chat.result, code: restoredCode },
+              }
+            : {}),
           pendingSpiceChange: null,
           pendingKicadChange: null,
+          pendingCodeChange: null,
           circuitJsonSyncError: '',
         };
       }
@@ -760,13 +837,15 @@ function App() {
       );
       return {
         ...chat,
-        result: synchronized,
+        result: restoredCode != null ? { ...synchronized, code: restoredCode } : synchronized,
         editableSpice: previousSpice || synchronized.spice,
         editableKicadNetlist: previousKicad || synchronized.kicadNetlist,
         editableCircuitJson: JSON.stringify(synchronized.circuit, null, 2),
+        editableCode: restoredCode != null ? restoredCode : chat.editableCode,
         editedDiagram: synchronized.diagram,
         pendingSpiceChange: null,
         pendingKicadChange: null,
+        pendingCodeChange: null,
         simulationRun: null,
         simulationError: '',
         spiceSyncError: '',
@@ -1001,6 +1080,59 @@ function App() {
     </div>
   );
 
+  const renderCodeView = () => {
+    const firmwareTarget = firmwareTargetForCircuit(result?.circuit);
+    return (
+      <div className="editor-window-body code-window-body">
+        <div className="editor-header">
+          <div>
+            <h3>Firmware code</h3>
+            <p>
+              {firmwareTarget
+                ? `${firmwareTarget.boardName} — ${firmwareTarget.language} (${firmwareTarget.filename})`
+                : result
+                  ? ''
+                  : 'Generate a circuit with a microcontroller board to get firmware.'}
+            </p>
+          </div>
+          <div className="spice-editor-actions">
+            <button
+              onClick={() => setEditableCode(result?.code || '')}
+              disabled={!result?.code || isGenerating || Boolean(pendingCodeChange)}
+            >
+              Reset
+            </button>
+            <button
+              onClick={() => downloadText(firmwareTarget?.filename || 'firmware.txt', editableCode, firmwareTarget?.mime || 'text/plain')}
+              disabled={!editableCode || isGenerating}
+            >
+              Download
+            </button>
+          </div>
+        </div>
+        {result && !firmwareTarget && !pendingCodeChange ? (
+          <div className="editor-window-empty">
+            <strong>No firmware for this circuit</strong>
+            <p>This circuit has no microcontroller board.</p>
+          </div>
+        ) : pendingCodeChange ? (
+          renderChangedCode(editableCode, pendingCodeChangedLines, 'firmware')
+        ) : (
+          <textarea
+            className="code-editor editor-window-code"
+            value={editableCode}
+            readOnly={isGenerating || !result}
+            onChange={(event) => setEditableCode(event.target.value)}
+            spellCheck="false"
+            rows={24}
+            aria-label="Editable firmware code"
+            placeholder="Generate a circuit with a microcontroller board to see its firmware here."
+          />
+        )}
+      </div>
+    );
+  };
+
   const renderBlockSchematicView = () => (
     <div className="editor-window-body canvas-window-body">
       {!result ? (
@@ -1022,7 +1154,12 @@ function App() {
           <p>Generate a circuit to view its breadboard build.</p>
         </div>
       ) : (
-        <RealisticSchematic circuit={result.circuit} />
+        <RealisticSchematic
+          circuit={result.circuit}
+          overrides={activeChat?.editedBreadboard}
+          onCircuitChange={applyCircuitChange}
+          onLayoutChange={(value) => setChatField('editedBreadboard', value)}
+        />
       )}
     </div>
   );
@@ -1072,6 +1209,7 @@ function App() {
         </header>
         {view === 'spice' && renderSpiceView()}
         {view === 'json' && renderJsonView()}
+        {view === 'code' && renderCodeView()}
         {view === 'canvas' && renderCanvasView()}
         {view === 'blockSchematic' && renderBlockSchematicView()}
         {view === 'realisticSchematic' && renderRealisticSchematicView()}

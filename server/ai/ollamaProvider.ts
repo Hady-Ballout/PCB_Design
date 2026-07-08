@@ -15,14 +15,14 @@ import type {
 
 const SYSTEM_PROMPT = `You are a JSON API for beginner-safe electronics circuit generation.
 Return exactly one valid JSON object and no other text.
-The top-level object must contain "reply", "circuit", and "spice".
+The top-level object must contain "reply", "circuit", and "spice". When the circuit includes a microcontroller board it must also contain "code".
 The "reply" field is a concise, conversational explanation of what you built or changed for the user. Mention important component refs when helpful, such as RLOAD, R1, or C1. Do not use Markdown.
 The "circuit" field is the canonical structured circuit.
 The "spice" field is a SPICE netlist generated from the same circuit.
 Use node "0" for ground.
 Every component needs ref, kind, value, nodes, and footprint.
 The circuit may include optional compact "schematic" metadata for layout intent. Omit schematic unless it is needed to mark external terminals or an op amp primaryRef. Schematic metadata is visual only and must not add SPICE components.
-Allowed component kinds: resistor, capacitor, inductor, diode, led, bjt_npn, bjt_pnp, mosfet_n, mosfet_p, opamp, regulator, voltage_source, signal_source, load.
+Allowed component kinds: resistor, capacitor, inductor, diode, led, bjt_npn, bjt_pnp, mosfet_n, mosfet_p, opamp, regulator, voltage_source, signal_source, load, arduino_uno, raspberry_pi, esp32.
 Component refs must be SPICE-compatible because the program will simulate them with Ngspice:
 - resistor refs start with R, e.g. R1
 - capacitor refs start with C, e.g. C1
@@ -35,6 +35,20 @@ Component refs must be SPICE-compatible because the program will simulate them w
 - opamp components must use value LM358 in JSON and LM358 as the SPICE subcircuit name; do not use GENERIC or OPAMP.
 - load refs should be modeled as resistors and start with R, e.g. RLOAD
 - regulator refs may use U in the JSON, but include enough surrounding passives/load nodes for simulation.
+- microcontroller board refs (arduino_uno, raspberry_pi, esp32) start with U, e.g. U1.
+Microcontroller boards use fixed positional pin lists. The nodes array must have exactly this length and order, with "NC_<REF>_<pinNumber>" for every unused pin:
+- arduino_uno (12 nodes): 5V, 3V3, GND, VIN, D2, D3, D5, D9, D13, A0, A1, A2
+- raspberry_pi (10 nodes): 5V, 3V3, GND, GPIO2, GPIO3, GPIO4, GPIO17, GPIO18, GPIO27, GPIO22
+- esp32 (12 nodes): 3V3, GND, VIN, EN, GPIO2, GPIO4, GPIO5, GPIO13, GPIO18, GPIO19, GPIO21, GPIO22
+Use value for the board name, e.g. "Uno R3", "Pi 5", or "DevKit V1".
+Microcontroller boards are not simulated: never write a SPICE line for them; every other component must still appear in SPICE.
+Connect the board's GND pin to node 0. When no separate supply exists, power the circuit from the board's 5V or 3V3 pin and set supplyVoltage accordingly (5 for arduino_uno, 3.3 for raspberry_pi and esp32).
+A GPIO/digital pin driving a load must share its net with at least one other component, e.g. a series resistor. Only add a separate voltage_source or signal_source for a pin's waveform when the user explicitly wants to simulate that pin's behavior.
+When circuit.components includes a microcontroller board (arduino_uno, raspberry_pi, or esp32), also return a top-level "code" field with complete ready-to-run firmware for that board:
+- arduino_uno: an Arduino C++ sketch with setup() and loop(). Use the digit from the pin name: D13 is pin 13, A0 is A0.
+- esp32: an Arduino-style C++ sketch with setup() and loop(). Use the GPIO number: GPIO2 is pin 2.
+- raspberry_pi: a Python 3 script using the gpiozero library. Use the GPIO number: GPIO17 is LED(17) or Button(17).
+The firmware must implement the exact behavior the user asked for (blink, button, fade, sensor read) and must only use pins that circuit.components actually wires to other components. Keep it under 40 lines, beginner-friendly, with brief comments. The "code" value is plain source text in one JSON string with \\n newlines: no Markdown, no \`\`\` fences, no explanation. When the circuit has no microcontroller board, set "code" to an empty string.
 Use simple Ngspice-friendly values such as 1k, 100nF, 10uF, 5V, and SINE(0 1 1k).
 Use voltage_source for DC supplies and fixed DC input biases. Use signal_source only for waveform or time-varying sources such as SINE(...), PULSE(...), PWL(...), EXP(...), or AC.
 If SPICE uses "V... ... DC value", the matching JSON component kind must be voltage_source. If SPICE uses a waveform source, the matching JSON component kind must be signal_source.
@@ -127,6 +141,7 @@ export const CIRCUIT_SCHEMA = {
               'resistor', 'capacitor', 'inductor', 'diode', 'led',
               'bjt_npn', 'bjt_pnp', 'mosfet_n', 'mosfet_p',
               'opamp', 'regulator', 'voltage_source', 'signal_source', 'load',
+              'arduino_uno', 'raspberry_pi', 'esp32',
             ],
           },
           value: { type: 'string' },
@@ -148,6 +163,10 @@ export const AI_RESPONSE_SCHEMA = {
     reply: { type: 'string' },
     circuit: CIRCUIT_SCHEMA,
     spice: { type: 'string' },
+    // Firmware source for the circuit's microcontroller board. Declared so the
+    // structured-output grammar lets the model emit it; not required so
+    // non-MCU responses can omit it.
+    code: { type: 'string' },
   },
   required: ['reply', 'circuit', 'spice'],
 } as const;
@@ -380,6 +399,14 @@ export function validateAiSpice(spice: unknown, circuit: Record<string, unknown>
   }
 }
 
+// Firmware arrives as one JSON string; models occasionally wrap it in
+// Markdown fences despite instructions. Strip them defensively so every
+// provider path (streaming, non-streaming, correction retry) benefits.
+const sanitizeFirmwareCode = (value: unknown): string => {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text.replace(/^```[a-zA-Z0-9+-]*\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
+};
+
 export function parseCircuitResponse(text: string): ParsedCircuitResponse {
   const trimmed = text.trim();
   const { jsonText, balanced } = findBalancedJson(trimmed);
@@ -419,7 +446,12 @@ export function parseCircuitResponse(text: string): ParsedCircuitResponse {
   const normalizedCircuit = normalizeCircuitForValidation(circuit);
   validateAiSpice(responseObject.spice, normalizedCircuit);
 
-  return { reply, circuit: normalizedCircuit as unknown as Circuit, spice: responseObject.spice as string };
+  return {
+    reply,
+    circuit: normalizedCircuit as unknown as Circuit,
+    spice: responseObject.spice as string,
+    code: sanitizeFirmwareCode(responseObject.code),
+  };
 }
 
 const positiveIntegerOption = (value: string | undefined, fallback: number): number => {
@@ -477,7 +509,7 @@ export const buildOllamaRequestBody = (
     ? [
         {
           role: 'user',
-          content: `Your previous response was rejected: ${correction.error}. Return a smaller complete response as one valid JSON object with top-level "reply", "circuit", and "spice". Omit circuit.schematic unless it is essential for external terminals or op amp intent. The reply must be conversational and concise. The SPICE must exactly match the JSON circuit refs, values, and node names. Do not explain the correction and do not use Markdown outside the JSON.`,
+          content: `Your previous response was rejected: ${correction.error}. Return a smaller complete response as one valid JSON object with top-level "reply", "circuit", "spice", and "code" when a microcontroller board is present. Omit circuit.schematic unless it is essential for external terminals or op amp intent. The reply must be conversational and concise. The SPICE must exactly match the JSON circuit refs, values, and node names. Do not explain the correction and do not use Markdown outside the JSON.`,
         },
       ]
     : [];
@@ -509,6 +541,7 @@ Only include circuit.schematic when it adds essential layout intent. Keep it com
 Schematic metadata is visual only. Do not create extra SPICE lines for schematic fields.
 The SPICE field must describe the same circuit.components entries using the same refs, values, and node names.
 The reply field should sound like a helpful chat assistant: briefly explain what changed, mention relevant refs, and do not paste the netlist.
+If the circuit contains an arduino_uno, raspberry_pi, or esp32 board, add a top-level "code" field containing the firmware source for it as a single JSON string.
 Circuit prompt: ${prompt}
 This is a follow-up whenever canonical design context is present. Preserve all prior requirements and unchanged design details. Replace the whole circuit only when this request explicitly asks to start over, replace it, or create a different circuit.`,
       },

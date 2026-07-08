@@ -72,4 +72,36 @@ describe('pinLabelsFor', () => {
     expect(pinLabelsFor({ kind: 'capacitor', value: '100nF' })).toBeNull();
     expect(pinLabelsFor({ kind: 'resistor', value: '1k' })).toBeNull();
   });
+
+  it('labels microcontroller boards with their canonical header pins', () => {
+    expect(pinLabelsFor({ kind: 'arduino_uno' })).toEqual(['5V', '3V3', 'GND', 'VIN', 'D2', 'D3', 'D5', 'D9', 'D13', 'A0', 'A1', 'A2']);
+    expect(pinLabelsFor({ kind: 'raspberry_pi' })).toEqual(['5V', '3V3', 'GND', 'GPIO2', 'GPIO3', 'GPIO4', 'GPIO17', 'GPIO18', 'GPIO27', 'GPIO22']);
+    expect(pinLabelsFor({ kind: 'esp32' })).toEqual(['3V3', 'GND', 'VIN', 'EN', 'GPIO2', 'GPIO4', 'GPIO5', 'GPIO13', 'GPIO18', 'GPIO19', 'GPIO21', 'GPIO22']);
+  });
+});
+
+describe('MCU highlighting', () => {
+  const mcuModel = circuitToBreadboard({
+    nodes: ['VCC5', 'LED', '0'],
+    components: [
+      {
+        ref: 'U1',
+        kind: 'arduino_uno',
+        value: 'Uno R3',
+        nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'LED', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+      },
+      { ref: 'RLED', kind: 'resistor', value: '330', nodes: ['LED', '0'] },
+    ],
+  });
+
+  it('lights an MCU part plus the neighborhood of its connected pins only', () => {
+    const highlight = highlightFor(mcuModel, { type: 'part', ref: 'U1' });
+    expect(highlight.active).toBe(true);
+    expect(highlight.nets).toEqual(new Set(['VCC5', '0', 'LED']));
+    expect(highlight.railStrips.has('railTopPlus')).toBe(true);
+  });
+
+  it('describes an MCU part in the readout', () => {
+    expect(readoutFor(mcuModel, { type: 'part', ref: 'U1' })).toBe('U1 · arduino uno · Uno R3');
+  });
 });

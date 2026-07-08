@@ -24,7 +24,8 @@ no anonymous circuit generation path.
 `/api/generate-circuit` streams `{type: 'spice', provisional: true, ...}` events as the AI
 response arrives (via `streamCircuitWithOllama`'s callback, deduped by
 `${attempt}:${spice}`), then a final `{type: 'complete', data: {...}}` event containing the
-reconciled circuit, SPICE, reply, and updated chat memory. Errors become `{type: 'error'}`
+reconciled circuit, SPICE, reply, firmware `code` (from `ParsedCircuitResponse`; `''` when
+the circuit has no MCU board), and updated chat memory. Errors become `{type: 'error'}`
 if the stream already started, or a plain 500 JSON body if it hasn't.
 
 ## `server/auth`

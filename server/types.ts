@@ -95,6 +95,8 @@ export interface ParsedCircuitResponse {
   reply: string;
   circuit: Circuit;
   spice: string;
+  // Firmware source for the circuit's MCU board; '' when the circuit has none.
+  code: string;
 }
 
 export interface StreamState {
@@ -153,6 +155,7 @@ export interface CircuitResponse {
   simulation: unknown;
   source: string;
   reply?: string;
+  code?: string;
   memory?: ChatMemory;
   contextDiagnostics?: Record<string, unknown>;
 }

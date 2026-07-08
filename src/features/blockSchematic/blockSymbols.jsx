@@ -65,6 +65,34 @@ function symbolPaths(kind) {
       );
     case 'regulator':
       return <path d="M12 4h24v16h-24z M4 9h8 M4 15h8 M36 12h8" />;
+    case 'arduino_uno':
+      return (
+        <>
+          {/* board with USB notch and header pin ticks */}
+          <path d="M8 4h32v16h-32z M8 8h-4v4h4" />
+          <path d="M14 4v-2 M20 4v-2 M26 4v-2 M32 4v-2 M38 4v-2" />
+          <circle cx="28" cy="13" r="4" />
+        </>
+      );
+    case 'raspberry_pi':
+      return (
+        <>
+          {/* rounded board, GPIO pin ticks, port notches on the right edge */}
+          <rect x="8" y="4" width="32" height="16" rx="3" />
+          <path d="M12 4v-2 M17 4v-2 M22 4v-2 M27 4v-2 M32 4v-2" />
+          <path d="M40 8h4 M40 14h4" />
+          <rect x="18" y="9" width="7" height="7" />
+        </>
+      );
+    case 'esp32':
+      return (
+        <>
+          {/* module with shield can and antenna zigzag on the left */}
+          <path d="M14 4h26v16h-26z M22 8h14v8h-14" />
+          <path d="M4 12h4l2 -4l2 8l2 -4" />
+          <path d="M20 4v-2 M26 4v-2 M32 4v-2 M20 22v-2 M26 22v-2 M32 22v-2" />
+        </>
+      );
     case 'voltage_source':
       return (
         <>
