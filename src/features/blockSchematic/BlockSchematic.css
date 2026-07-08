@@ -3,8 +3,9 @@
   flex: 1;
   width: 100%;
   min-height: 480px;
-  background: #0e141b;
-  border-radius: 7px;
+  background: var(--color-diagram-bg);
+  border: 2px solid #111111;
+  border-radius: 8px;
   overflow: hidden;
 }
 
@@ -22,17 +23,17 @@
 }
 
 .block-schematic .react-flow__edge.selected .react-flow__edge-path {
-  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.85));
+  filter: drop-shadow(0 0 3px var(--nb-pink));
 }
 
 .block-node {
   min-width: 190px;
-  border: 1px solid #364050;
-  border-radius: 8px;
-  background: #1a232e;
-  color: #cdd6e0;
-  font: 12px Inter, Arial, sans-serif;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  border: 2px solid #111111;
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--color-text);
+  font: 12px var(--font-sans);
+  box-shadow: 4px 4px 0 #111111;
   overflow: hidden;
 }
 
@@ -41,19 +42,19 @@
   flex-direction: column;
   gap: 2px;
   padding: 8px 12px;
-  background: #26313e;
-  border-bottom: 1px solid #364050;
+  background: var(--nb-yellow-soft);
+  border-bottom: 2px solid #111111;
 }
 
 .block-node-symbol {
   display: block;
   width: 48px;
   height: 24px;
-  color: #f1c27d;
+  color: #111111;
 }
 
 .block-node-sub {
-  color: #8a97a6;
+  color: var(--color-text-muted);
   font-size: 11px;
 }
 
@@ -73,22 +74,23 @@
 }
 
 .block-node-pin-label {
-  color: #cdd6e0;
+  color: var(--color-text);
 }
 
 .block-node-pin.unconnected .block-node-pin-label {
-  color: #5c6672;
+  color: var(--color-text-subtle);
 }
 
 .block-node-pin-dot {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
+  border: 1px solid #111111;
   border-radius: 50%;
-  background: #6b7787;
+  background: var(--nb-blue);
 }
 
 .block-node-pin.unconnected .block-node-pin-dot {
-  background: #3a434f;
+  background: #ffffff;
 }
 
 /* Overlap both handles on the pin dot; keep them small and unobtrusive. */
@@ -96,7 +98,7 @@
   width: 8px;
   height: 8px;
   right: 12px;
-  background: #6b7787;
+  background: #111111;
   border: none;
 }
 
@@ -105,18 +107,18 @@
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  color: #8a97a6;
+  color: var(--color-text-muted);
 }
 
 .ground-node-symbol {
   width: 32px;
   height: 26px;
-  stroke: #cdd6e0;
+  stroke: #111111;
   stroke-width: 2;
 }
 
 .ground-node-label {
-  font: 700 10px Inter, Arial, sans-serif;
+  font: 700 10px var(--font-sans);
   letter-spacing: 0.04em;
 }
 
@@ -124,6 +126,6 @@
   width: 8px;
   height: 8px;
   top: 0;
-  background: #6b7787;
+  background: #111111;
   border: none;
 }

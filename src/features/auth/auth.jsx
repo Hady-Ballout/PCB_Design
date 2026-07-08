@@ -1,5 +1,23 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createTimeline, stagger } from 'animejs';
 import { API_BASE } from '../../core/config.js';
+
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined'
+  && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+// Shared flat backdrop for the entry pages: dot-grid paper with a few
+// bordered shapes floating off the grid.
+export function PageBackdrop() {
+  return (
+    <div className="page-backdrop" aria-hidden="true">
+      <div className="page-backdrop-grid" />
+      <div className="page-backdrop-shape shape-circle" />
+      <div className="page-backdrop-shape shape-square" />
+      <div className="page-backdrop-shape shape-pill" />
+    </div>
+  );
+}
 
 // ── Auth Context ──
 
@@ -68,9 +86,38 @@ export function useAuth() {
 // ── Home Page ──
 
 export function HomePage() {
+  const pageRef = useRef(null);
+
+  // Entrance choreography: hero copy pops in first, then the pipeline steps
+  // cascade. Skipped entirely for reduced-motion users.
+  useEffect(() => {
+    if (prefersReducedMotion() || !pageRef.current) return undefined;
+    const q = (selector) => pageRef.current.querySelectorAll(selector);
+    const tl = createTimeline({ defaults: { ease: 'outCubic', duration: 550 } });
+    tl.add(q('.home-eyebrow'), { translateY: [18, 0], opacity: [0, 1] })
+      .add(q('.home-title'), {
+        translateY: [26, 0],
+        opacity: [0, 1],
+        rotate: ['-6deg', '-1.5deg'],
+        duration: 700,
+        ease: 'outBack',
+      }, '-=350')
+      .add(q('.home-subtitle'), { translateY: [20, 0], opacity: [0, 1] }, '-=450')
+      .add(q('.home-actions'), { translateY: [16, 0], opacity: [0, 1], duration: 500 }, '-=400')
+      .add(q('.pipeline-step, .pipeline-arrow'), {
+        translateY: [24, 0],
+        opacity: [0, 1],
+        duration: 500,
+        delay: stagger(70),
+      }, '-=250');
+    return () => tl.revert();
+  }, []);
+
   return (
-    <main className="home-page">
+    <main className="home-page" ref={pageRef}>
+      <PageBackdrop />
       <div className="home-hero">
+        <p className="home-eyebrow">Prompt → Schematic → Simulation → Board</p>
         <h1 className="home-title">PCB Pilot</h1>
         <p className="home-subtitle">
           Describe a circuit in plain English. Get a validated schematic,
@@ -145,6 +192,7 @@ export function LoginPage() {
 
   return (
     <main className="auth-page">
+      <PageBackdrop />
       <form className="auth-card" onSubmit={handleSubmit} noValidate>
         <h2>Log in to PCB Pilot</h2>
         {error && <div className="auth-error">{error}</div>}
@@ -217,6 +265,7 @@ export function SignupPage() {
   if (success) {
     return (
       <main className="auth-page">
+        <PageBackdrop />
         <div className="auth-card">
           <h2>Check your email</h2>
           <p className="auth-success-msg">
@@ -230,6 +279,7 @@ export function SignupPage() {
 
   return (
     <main className="auth-page">
+      <PageBackdrop />
       <form className="auth-card" onSubmit={handleSubmit} noValidate>
         <h2>Create your account</h2>
         {error && <div className="auth-error">{error}</div>}
@@ -306,6 +356,7 @@ export function VerifyPage() {
 
   return (
     <main className="auth-page">
+      <PageBackdrop />
       <div className="auth-card">
         {status === 'verifying' && <p>Verifying your email...</p>}
         {status === 'success' && (

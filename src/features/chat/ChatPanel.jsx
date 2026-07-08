@@ -1,10 +1,42 @@
+import React from 'react';
 import { formatChatTime } from './chatFormat.js';
 
-const GENERATION_STAGE_LABELS = {
-  circuit: 'Generating circuit...',
-  reviewing: 'Reviewing design...',
-  reply: 'Writing summary...',
-};
+const GENERATION_STAGES = [
+  { id: 'circuit', node: 'Circuit', label: 'Generating circuit...' },
+  { id: 'reviewing', node: 'Review', label: 'Reviewing design...' },
+  { id: 'reply', node: 'Reply', label: 'Writing summary...' },
+];
+
+// Live pipeline readout: past stages are copper, the active stage pulses
+// phosphor, upcoming stages stay dim.
+function GenerationStatus({ stage }) {
+  const activeIndex = GENERATION_STAGES.findIndex((entry) => entry.id === stage);
+  const label = activeIndex === -1
+    ? 'Designing the circuit package...'
+    : GENERATION_STAGES[activeIndex].label;
+  return (
+    <div className="generation-status" role="status">
+      <div className="stage-trail" aria-hidden="true">
+        {GENERATION_STAGES.map((entry, index) => (
+          <React.Fragment key={entry.id}>
+            {index > 0 && <span className="stage-link" />}
+            <span
+              className={`stage-node ${
+                activeIndex === -1 ? '' : index < activeIndex ? 'done' : index === activeIndex ? 'active' : ''
+              }`}
+            >
+              {entry.node}
+            </span>
+          </React.Fragment>
+        ))}
+      </div>
+      <p>
+        {label}{' '}
+        <span className="typing-dots" aria-hidden="true"><i /><i /><i /></span>
+      </p>
+    </div>
+  );
+}
 
 // Conversation + history sidebar. All workspace state is supplied by the
 // app shell (src/app/App.jsx) so this feature can be edited independently.
@@ -134,7 +166,7 @@ export function ChatPanel({
               {isGenerating && (
                 <article className="chat-message assistant pending">
                   <div className="chat-message-meta"><strong>AI</strong></div>
-                  <p>{GENERATION_STAGE_LABELS[generationStage] || 'Designing the circuit package...'}</p>
+                  <GenerationStatus stage={generationStage} />
                 </article>
               )}
               <div ref={messagesEndRef} />

@@ -46,7 +46,8 @@ export function WaveformChart({ waveform }) {
   const margin = { top: 18, right: 20, bottom: 42, left: 62 };
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
-  const colors = ['#49c878', '#5aa7ff', '#ffd56d', '#c792ea'];
+  // Flat, bold trace colors that hold up on the light paper background.
+  const colors = ['#2fb344', '#3b7bff', '#f08c00', '#9d71ff'];
   const scaleX = (x) => margin.left + ((x - xMin) / Math.max(xMax - xMin, Number.EPSILON)) * plotWidth;
   const scaleY = (y) => margin.top + plotHeight - ((y - yMin) / Math.max(yMax - yMin, Number.EPSILON)) * plotHeight;
   const xTicks = [...new Set([xMin, xMin + (xMax - xMin) / 2, xMax])];
