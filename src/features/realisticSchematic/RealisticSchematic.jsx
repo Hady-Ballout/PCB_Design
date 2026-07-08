@@ -252,10 +252,16 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
       const { ref, startBoard, moved } = partDragRef.current;
       partDragRef.current = null;
       setPartDrag(null);
+      // Pointer capture retargets the ending click to the SVG, so the part's
+      // onClick never fires in real browsers — resolve selection here. Suppress
+      // the click for paths where it still reaches the part (no capture) so
+      // selection doesn't double-toggle.
+      suppressClickRef.current = true;
       if (moved) {
-        suppressClickRef.current = true; // don't let the release toggle selection
         const now = toBoard(event.clientX, event.clientY);
         commitPartMove(ref, now.x - startBoard.x, now.y - startBoard.y);
+      } else if (event.type === 'pointerup') { // a cancelled press must not toggle
+        toggleSelection({ type: 'part', ref });
       }
       return;
     }

@@ -97,7 +97,8 @@ describe('breadboard editing', () => {
     const partGroup = container.querySelector(`[aria-label="${label}"]`);
     firePointer(partGroup, 'pointerdown', { clientX: 5, clientY: 5 });
     firePointer(partGroup, 'pointerup', { clientX: 5, clientY: 5 });
-    // A press that never moves is a click → selection; dispatch the click too.
+    // Selection resolves on the release; the click that follows in environments
+    // without pointer capture must be swallowed (double-toggle guard).
     const click = new MouseEvent('click', { bubbles: true, cancelable: true });
     act(() => { partGroup.dispatchEvent(click); });
     return partGroup;
@@ -108,6 +109,21 @@ describe('breadboard editing', () => {
     expect(container.querySelectorAll('.rs-pin-handle')).toHaveLength(0);
     selectPart(svg, 'R1');
     expect(container.querySelectorAll('.rs-pin-handle')).toHaveLength(2);
+  });
+
+  it('selects a part on press+release without a click event (pointer-capture path)', () => {
+    // Real browsers retarget the post-capture click to the SVG, so the part's
+    // onClick never fires; selection must resolve from pointerup alone.
+    mount({ onCircuitChange: vi.fn(), onLayoutChange: vi.fn() });
+    const partGroup = container.querySelector('[aria-label="R1 resistor 1k"]');
+    firePointer(partGroup, 'pointerdown', { clientX: 5, clientY: 5 });
+    firePointer(partGroup, 'pointerup', { clientX: 5, clientY: 5 });
+    expect(container.querySelector('.realistic-readout').textContent).toBe('R1 · resistor · 1k');
+    expect(container.querySelectorAll('.rs-pin-handle')).toHaveLength(2);
+    // A second press on the same part toggles the selection back off.
+    firePointer(partGroup, 'pointerdown', { clientX: 5, clientY: 5 });
+    firePointer(partGroup, 'pointerup', { clientX: 5, clientY: 5 });
+    expect(container.querySelectorAll('.rs-pin-handle')).toHaveLength(0);
   });
 
   it('rewires a pin dragged to another net and calls onCircuitChange', () => {
