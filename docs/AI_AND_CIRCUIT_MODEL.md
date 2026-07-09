@@ -25,14 +25,26 @@ code can go stale until the next AI generation (known limitation). The
 }
 ```
 
-Allowed `kind` values: `resistor`, `capacitor`, `inductor`, `diode`, `led`, `bjt_npn`,
-`bjt_pnp`, `mosfet_n`, `mosfet_p`, `opamp`, `regulator`, `voltage_source`,
-`signal_source`, `load`, `arduino_uno`, `raspberry_pi`, `esp32`.
+Allowed `kind` values are the single source of truth in `src/core/componentKinds.js`
+(`ALLOWED_KINDS`). The AI schema `enum` and the "Allowed component kinds" / fixed-pin
+guidance in the system prompt (`server/ai/ollamaProvider.ts`) are **generated from it**, so
+adding a kind to the registry automatically offers it to the model. The current 37 kinds:
+
+- **Core (14):** `resistor`, `capacitor`, `inductor`, `diode`, `led`, `bjt_npn`, `bjt_pnp`,
+  `mosfet_n`, `mosfet_p`, `opamp`, `regulator`, `voltage_source`, `signal_source`, `load`.
+- **Extended (20):** `zener`, `photoresistor`, `thermistor`, `buzzer`, `crystal`,
+  `temp_sensor`, `comparator`, `pushbutton`, `potentiometer`, `switch_spdt`, `rgb_led`,
+  `seven_segment`, `timer_555`, `ultrasonic_sensor`, `dht_sensor`, `oled_display`,
+  `pir_sensor`, `servo`, `dc_motor`, `relay_module`.
+- **Microcontroller boards (3):** `arduino_uno`, `raspberry_pi`, `esp32`.
 
 Microcontroller boards (`arduino_uno`, `raspberry_pi`, `esp32`) use fixed positional pin
 lists (12/10/12 pins — see `MCU_PINS` in
 `src/features/realisticSchematic/breadboardModel.js` and `MCU_PIN_COUNTS` in
-`src/core/pcbGenerator.js`); unused pins carry `NC_<REF>_<pinNumber>` placeholder nets.
+`src/core/componentKinds.js`); unused pins carry `NC_<REF>_<pinNumber>` placeholder nets.
+Sensor/module parts (`temp_sensor`, `ultrasonic_sensor`, `dht_sensor`, `oled_display`,
+`pir_sensor`, `servo`, `relay_module`) are likewise **wiring-only** and use fixed pin lists
+(`FIXED_PIN_NAMES` in `src/core/componentKinds.js`), exported to SPICE only as a comment.
 They use `U` refs, are **wiring-only** — exported to SPICE as a comment (`* U1
 arduino_uno ...`), never as an element line — and `parseSpiceNetlist` carries them over
 from the base circuit during SPICE sync so editing the deck does not drop them.

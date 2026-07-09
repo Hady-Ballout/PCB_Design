@@ -12,6 +12,7 @@ import { createRoot } from 'react-dom/client';
 import { RealisticSchematic } from './RealisticSchematic.jsx';
 import { circuitToBreadboard } from './breadboardModel.js';
 import { holeCenter } from './breadboardGeometry.js';
+import { ALLOWED_KINDS } from '../../core/componentKinds.js';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -169,5 +170,59 @@ describe('breadboard editing', () => {
     const layout = onLayoutChange.mock.calls[0][0](null);
     expect(layout.parts.R2.column).toBe(r2.holes[0].column + 3);
     expect(layout.version).toBe(1);
+  });
+});
+
+const fireDouble = (target, { clientX = 40, clientY = 40 } = {}) => {
+  const event = new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX, clientY });
+  act(() => { target.dispatchEvent(event); });
+};
+
+const fireKey = (key) => {
+  act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })); });
+};
+
+describe('component library', () => {
+  it('opens a browse-only library of every registry component on double-click', () => {
+    const svg = mount({});
+    expect(container.querySelector('.realistic-library')).toBeNull();
+
+    fireDouble(svg, { clientX: 60, clientY: 40 });
+
+    const popover = container.querySelector('.realistic-library');
+    expect(popover).not.toBeNull();
+    // Every registry kind is listed, grouped into the three browse sections.
+    expect(container.querySelectorAll('.realistic-library-item')).toHaveLength(ALLOWED_KINDS.length);
+    expect(container.querySelectorAll('.realistic-library-group-title')).toHaveLength(3);
+    const labels = [...container.querySelectorAll('.realistic-library-item-label')].map((el) => el.textContent);
+    expect(labels).toContain('Potentiometer');
+    expect(labels).toContain('Arduino Uno');
+  });
+
+  it('filters the list by the search query', () => {
+    const svg = mount({});
+    fireDouble(svg);
+    const search = container.querySelector('.realistic-library-search');
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(search, 'servo');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const labels = [...container.querySelectorAll('.realistic-library-item-label')].map((el) => el.textContent);
+    expect(labels).toEqual(['Servo motor']);
+  });
+
+  it('closes on Escape and on backdrop click', () => {
+    const svg = mount({});
+
+    fireDouble(svg);
+    expect(container.querySelector('.realistic-library')).not.toBeNull();
+    fireKey('Escape');
+    expect(container.querySelector('.realistic-library')).toBeNull();
+
+    fireDouble(svg);
+    expect(container.querySelector('.realistic-library')).not.toBeNull();
+    firePointer(container.querySelector('.realistic-library-backdrop'), 'pointerdown', { clientX: 5, clientY: 5 });
+    expect(container.querySelector('.realistic-library')).toBeNull();
   });
 });

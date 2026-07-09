@@ -15,6 +15,13 @@ export function ComponentToolIcon({ type }) {
       </svg>
     );
   }
+  if (type === 'inductor') {
+    return (
+      <svg viewBox="0 0 64 32" aria-hidden="true" focusable="false">
+        <path d="M4 20H12Q17 6 22 20Q27 6 32 20Q37 6 42 20Q47 6 52 20H60" />
+      </svg>
+    );
+  }
   if (type === 'source') {
     return (
       <svg viewBox="0 0 64 32" aria-hidden="true" focusable="false">

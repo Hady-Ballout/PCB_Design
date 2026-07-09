@@ -11,6 +11,7 @@ import { highlightFor, readoutFor } from './selectionModel.js';
 import { HOLE_PITCH, clientToViewBox, holeAt, holeCenter, viewBoxToBoard } from './breadboardGeometry.js';
 import { Breadboard, HighlightOverlay } from './Breadboard.jsx';
 import { BatteryPack, JumperWire, PartDefs, PinLabels, RealisticPart } from './parts.jsx';
+import { ComponentLibrary } from './ComponentLibrary.jsx';
 import './RealisticSchematic.css';
 
 // Zoom scale bounds. s = 1 is "board fitted to the viewport" (viewBox + meet);
@@ -41,6 +42,7 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
   const [copied, setCopied] = useState(false);
   const [wireDrag, setWireDrag] = useState(null); // { ref, pinIndex, from:{x,y}, to:{x,y} } in board coords
   const [partDrag, setPartDrag] = useState(null); // { ref, dx, dy } ghost offset while moving a part
+  const [libraryAt, setLibraryAt] = useState(null); // client {x,y} anchor for the component library, or null
 
   const effective = selection ?? hovered;
   const highlight = useMemo(() => highlightFor(model, effective), [model, effective]);
@@ -439,6 +441,7 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
           onPointerMove={onPointerMove}
           onPointerUp={endPointer}
           onPointerCancel={endPointer}
+          onDoubleClick={(event) => setLibraryAt({ x: event.clientX, y: event.clientY })}
         >
           <PartDefs />
           <g className="rs-world" transform={`translate(${view.tx} ${view.ty}) scale(${view.s})`} style={{ willChange: 'transform' }}>
@@ -524,6 +527,9 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
           </g>
         </svg>
       </div>
+      {libraryAt && (
+        <ComponentLibrary position={libraryAt} onClose={() => setLibraryAt(null)} />
+      )}
     </div>
   );
 }

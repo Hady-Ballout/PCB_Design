@@ -1,7 +1,6 @@
 import {
   DiagramLayoutError,
   MCU_KINDS,
-  MCU_PIN_COUNTS,
   buildCircuitDiagram,
   layoutCircuitDiagram,
   nextFreeSlot,
@@ -16,6 +15,14 @@ import {
   toSpice,
   validateCircuit,
 } from './pcbGenerator.js';
+import {
+  ALLOWED_KINDS,
+  COMPOUND_SPICE_KINDS,
+  DEFAULT_PIN_COUNT_BY_KIND,
+  SPICE_PREFIX_BY_KIND,
+  SYMBOL_TYPE_BY_KIND,
+  WIRING_ONLY_KINDS,
+} from './componentKinds.js';
 
 const decodeXml = (value) =>
   String(value || '').replace(/&(#x[\da-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (entity, code) => {
@@ -93,58 +100,17 @@ const kindFromRef = (ref) => {
   return 'generic';
 };
 
-const defaultPinCount = (kind) => {
-  if (kind === 'opamp') return 5;
-  if (kind === 'bjt_npn' || kind === 'bjt_pnp' || kind === 'mosfet_n' || kind === 'mosfet_p') return 3;
-  if (MCU_PIN_COUNTS[kind]) return MCU_PIN_COUNTS[kind];
-  return 2;
-};
+const defaultPinCount = (kind) => DEFAULT_PIN_COUNT_BY_KIND[kind] ?? 2;
 
 const spiceRefForComponent = (component) => {
   const base = String(component.ref || 'X').replace(/[^a-z0-9_]/gi, '_').toUpperCase();
-  const prefixByKind = {
-    voltage_source: 'V',
-    signal_source: 'V',
-    resistor: 'R',
-    load: 'R',
-    capacitor: 'C',
-    inductor: 'L',
-    diode: 'D',
-    led: 'D',
-    bjt_npn: 'Q',
-    bjt_pnp: 'Q',
-    mosfet_n: 'M',
-    mosfet_p: 'M',
-    opamp: 'X',
-    arduino_uno: 'U',
-    raspberry_pi: 'U',
-    esp32: 'U',
-  };
-  const prefix = prefixByKind[component.kind] || 'X';
+  const prefix = SPICE_PREFIX_BY_KIND[component.kind] || 'X';
   return base.startsWith(prefix) ? base : `${prefix}_${base}`;
 };
 
 const voltageValue = (value) => (/v$/i.test(value) ? value : `${value}V`);
 
-const allowedCircuitKinds = new Set([
-  'resistor',
-  'capacitor',
-  'inductor',
-  'diode',
-  'led',
-  'bjt_npn',
-  'bjt_pnp',
-  'mosfet_n',
-  'mosfet_p',
-  'opamp',
-  'regulator',
-  'voltage_source',
-  'signal_source',
-  'load',
-  'arduino_uno',
-  'raspberry_pi',
-  'esp32',
-]);
+const allowedCircuitKinds = new Set(ALLOWED_KINDS);
 
 export const parseCircuitJson = (source, baseCircuit = null) => {
   let parsed;
@@ -228,6 +194,13 @@ export const parseCircuitJson = (source, baseCircuit = null) => {
 export const parseSpiceNetlist = (source, baseCircuit) => {
   const baseComponents = baseCircuit?.components || [];
   const baseBySpiceRef = new Map(baseComponents.map((component) => [spiceRefForComponent(component), component]));
+  // Compound kinds (potentiometer, rgb_led, …) export several derived lines
+  // suffixed `<ref>_A`, `<ref>_R`, …; recognize them so the compound part is
+  // carried over intact instead of degrading into primitive resistors/diodes.
+  const compoundBases = baseComponents
+    .filter((component) => COMPOUND_SPICE_KINDS.has(component.kind))
+    .map((component) => ({ derivedPrefix: `${spiceRefForComponent(component)}_`, component }));
+  const seenCompoundRefs = new Set();
   const components = [];
   const errors = [];
   let subcircuitDepth = 0;
@@ -252,6 +225,11 @@ export const parseSpiceNetlist = (source, baseCircuit) => {
     const tokens = line.split(/\s+/);
     const spiceRef = tokens[0]?.toUpperCase();
     const prefix = spiceRef?.[0];
+    const compound = compoundBases.find(({ derivedPrefix }) => spiceRef?.startsWith(derivedPrefix));
+    if (compound) {
+      seenCompoundRefs.add(compound.component.ref);
+      continue;
+    }
     const base = baseBySpiceRef.get(spiceRef);
     let record = null;
 
@@ -260,8 +238,13 @@ export const parseSpiceNetlist = (source, baseCircuit) => {
         errors.push(`Line ${index + 1}: ${tokens[0]} needs two nodes and a value.`);
         continue;
       }
-      const kind = prefix === 'R' ? (base?.kind === 'load' ? 'load' : 'resistor') : prefix === 'C' ? 'capacitor' : 'inductor';
-      record = { kind, nodes: tokens.slice(1, 3), value: tokens.slice(3).join(' ') };
+      // A two-lead part simulated as a plain R/C keeps its richer kind (load,
+      // photoresistor, buzzer, crystal, …) instead of degrading to a resistor.
+      const fallbackKind = prefix === 'R' ? 'resistor' : prefix === 'C' ? 'capacitor' : 'inductor';
+      const keepsBaseKind = base
+        && SPICE_PREFIX_BY_KIND[base.kind] === prefix
+        && (DEFAULT_PIN_COUNT_BY_KIND[base.kind] ?? 2) === 2;
+      record = { kind: keepsBaseKind ? base.kind : fallbackKind, nodes: tokens.slice(1, 3), value: tokens.slice(3).join(' ') };
     } else if (prefix === 'V') {
       if (tokens.length < 4) {
         errors.push(`Line ${index + 1}: ${tokens[0]} needs two nodes and a source value.`);
@@ -278,8 +261,11 @@ export const parseSpiceNetlist = (source, baseCircuit) => {
         continue;
       }
       const model = tokens[3];
+      const diodeKind = /DZEN/i.test(model) || base?.kind === 'zener'
+        ? 'zener'
+        : /DRED/i.test(model) || base?.kind === 'led' ? 'led' : 'diode';
       record = {
-        kind: /DRED/i.test(model) || base?.kind === 'led' ? 'led' : 'diode',
+        kind: diodeKind,
         nodes: tokens.slice(1, 3),
         value: base?.value || model,
       };
@@ -296,11 +282,17 @@ export const parseSpiceNetlist = (source, baseCircuit) => {
       }
       record = { kind: base?.kind || 'mosfet_n', nodes: tokens.slice(1, 4), value: base?.value || tokens.at(-1) };
     } else if (prefix === 'X') {
-      if (tokens.length < 7) {
-        errors.push(`Line ${index + 1}: ${tokens[0]} needs five op-amp nodes and a model.`);
+      // Subcircuit instance: nodes then the model name. The model decides the
+      // kind (LM358 op amp, LM393 comparator, TIMER555 8-pin timer).
+      const model = tokens.at(-1);
+      const kindByModel = { LM358: 'opamp', LM393: 'comparator', TIMER555: 'timer_555' };
+      const kind = kindByModel[String(model || '').toUpperCase()] || base?.kind || 'opamp';
+      const expectedNodes = DEFAULT_PIN_COUNT_BY_KIND[kind] ?? 5;
+      if (tokens.length < expectedNodes + 2) {
+        errors.push(`Line ${index + 1}: ${tokens[0]} needs ${expectedNodes} subcircuit nodes and a model.`);
         continue;
       }
-      record = { kind: 'opamp', nodes: tokens.slice(1, 6), value: tokens.slice(6).join(' ') };
+      record = { kind, nodes: tokens.slice(1, 1 + expectedNodes), value: model };
     } else {
       errors.push(`Line ${index + 1}: component ${tokens[0]} is not supported by the canvas editor.`);
       continue;
@@ -314,12 +306,12 @@ export const parseSpiceNetlist = (source, baseCircuit) => {
     });
   }
 
-  // Microcontroller boards are wiring-only and never appear in a SPICE deck;
-  // carry them over from the base circuit (at their original position, so the
-  // electrical signature does not register a spurious edit) instead of
-  // treating the deck as having dropped them.
+  // Wiring-only parts (microcontroller boards, sensors/modules) never appear
+  // in a SPICE deck, and compound parts appear only as derived lines; carry
+  // them over from the base circuit (at their original position) so
+  // hand-editing the SPICE text never silently drops them.
   baseComponents.forEach((component, index) => {
-    if (!MCU_KINDS.has(component.kind)) return;
+    if (!WIRING_ONLY_KINDS.has(component.kind) && !seenCompoundRefs.has(component.ref)) return;
     if (components.some((existing) => existing.ref === component.ref)) return;
     components.splice(Math.min(index, components.length), 0, { ...component });
   });
@@ -587,25 +579,17 @@ export const parseKiCadNetlist = (source, baseCircuit) => {
   };
 };
 
-const symbolTypeByKind = {
-  voltage_source: 'voltage_source',
-  signal_source: 'voltage_source',
-  resistor: 'resistor',
-  load: 'resistor',
-  capacitor: 'capacitor',
-  inductor: 'inductor',
-  diode: 'diode',
-  led: 'led',
-  bjt_npn: 'bjt_npn',
-  bjt_pnp: 'bjt_pnp',
-  opamp: 'opamp',
-  arduino_uno: 'mcu',
-  raspberry_pi: 'mcu',
-  esp32: 'mcu',
-};
+const symbolTypeByKind = SYMBOL_TYPE_BY_KIND;
 
 const defaultShapeForPart = (part) => {
   const symbolType = symbolTypeByKind[part.kind] || 'generic';
+  // Generic multi-pin parts (boards, 555, 7-segment, sensor modules) alternate
+  // pins down both sides 40px apart, so the body grows with the pin count.
+  const pins = Math.max(part.nodes?.length || 0, defaultPinCount(part.kind));
+  if (symbolType === 'generic' && pins > 3) {
+    const rows = Math.ceil(pins / 2);
+    return { width: pins >= 10 ? 160 : 120, height: (rows - 1) * 40 + 40, symbolType, orientation: 'horizontal' };
+  }
   if (symbolType === 'opamp') return { width: 150, height: 110, symbolType, orientation: 'horizontal' };
   if (symbolType === 'mcu') return { width: 150, height: 118, symbolType, orientation: 'horizontal' };
   if (symbolType === 'bjt_npn' || symbolType === 'bjt_pnp') return { width: 118, height: 100, symbolType, orientation: 'horizontal' };
@@ -653,7 +637,7 @@ const pinPointForComponent = (component, pinIndex, node) => {
   const rows = Math.ceil(component.pinCount / 2);
   return {
     x: component.x + side * component.width / 2,
-    y: component.y - ((rows - 1) * 14) / 2 + row * 28,
+    y: component.y - ((rows - 1) * 40) / 2 + row * 40,
   };
 };
 

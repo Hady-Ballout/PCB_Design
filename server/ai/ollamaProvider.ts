@@ -1,6 +1,14 @@
 import { normalizeChatMemory, sanitizeConversationHistory } from './chatMemory.js';
 import { circuitKnowledgePrompt } from './circuitKnowledge.js';
 import { parseSpiceNetlist } from '../../src/core/circuitSync.js';
+import {
+  ALLOWED_KINDS,
+  COMPOUND_SPICE_KINDS,
+  DEFAULT_PIN_COUNT_BY_KIND,
+  FIXED_PIN_NAMES,
+  MCU_KINDS,
+  WIRING_ONLY_KINDS,
+} from '../../src/core/componentKinds.js';
 import type {
   ChatMemory,
   ChatMessage,
@@ -13,6 +21,24 @@ import type {
   StreamState,
 } from '../types.js';
 
+// Prompt/schema guidance derived from the component registry (componentKinds.js)
+// so a kind added there is automatically offered to the model — no hand-editing
+// of this file. Microcontroller boards keep their bespoke firmware/power
+// guidance in the prompt below and are excluded from these generated lines.
+const FIXED_PIN_CONTRACT = ALLOWED_KINDS
+  .filter((kind) => FIXED_PIN_NAMES[kind] && !MCU_KINDS.has(kind))
+  .map((kind) => `- ${kind} (${FIXED_PIN_NAMES[kind].length} nodes): ${FIXED_PIN_NAMES[kind].join(', ')}`)
+  .join('\n');
+
+const WIRING_ONLY_PARTS = ALLOWED_KINDS
+  .filter((kind) => WIRING_ONLY_KINDS.has(kind) && !MCU_KINDS.has(kind))
+  .join(', ');
+
+const COMPOUND_NODE_HINTS = ALLOWED_KINDS
+  .filter((kind) => COMPOUND_SPICE_KINDS.has(kind) && !FIXED_PIN_NAMES[kind])
+  .map((kind) => `${kind} (${DEFAULT_PIN_COUNT_BY_KIND[kind]} nodes)`)
+  .join(', ');
+
 const SYSTEM_PROMPT = `You are a JSON API for beginner-safe electronics circuit generation.
 Return exactly one valid JSON object and no other text.
 The top-level object must contain "reply", "circuit", and "spice". When the circuit includes a microcontroller board it must also contain "code".
@@ -22,7 +48,7 @@ The "spice" field is a SPICE netlist generated from the same circuit.
 Use node "0" for ground.
 Every component needs ref, kind, value, nodes, and footprint.
 The circuit may include optional compact "schematic" metadata for layout intent. Omit schematic unless it is needed to mark external terminals or an op amp primaryRef. Schematic metadata is visual only and must not add SPICE components.
-Allowed component kinds: resistor, capacitor, inductor, diode, led, bjt_npn, bjt_pnp, mosfet_n, mosfet_p, opamp, regulator, voltage_source, signal_source, load, arduino_uno, raspberry_pi, esp32.
+Allowed component kinds: ${ALLOWED_KINDS.join(', ')}.
 Component refs must be SPICE-compatible because the program will simulate them with Ngspice:
 - resistor refs start with R, e.g. R1
 - capacitor refs start with C, e.g. C1
@@ -43,6 +69,10 @@ Microcontroller boards use fixed positional pin lists. The nodes array must have
 Use value for the board name, e.g. "Uno R3", "Pi 5", or "DevKit V1".
 Microcontroller boards are not simulated: never write a SPICE line for them; every other component must still appear in SPICE.
 Connect the board's GND pin to node 0. When no separate supply exists, power the circuit from the board's 5V or 3V3 pin and set supplyVoltage accordingly (5 for arduino_uno, 3.3 for raspberry_pi and esp32).
+Added sensor and module parts (${WIRING_ONLY_PARTS}) are wiring-only like microcontroller boards: they are never simulated, so emit each only as a SPICE comment line, for example "* U1 dht_sensor (wiring-only)". Every component that is not a microcontroller board or a wiring-only part must still appear as a real SPICE element.
+The following parts use fixed positional node lists; the nodes array length and order must match exactly, using "NC_<REF>_<pinNumber>" for any unused pin:
+${FIXED_PIN_CONTRACT}
+Compound parts expand into several SPICE lines and take a fixed node count: ${COMPOUND_NODE_HINTS}. The remaining two-lead additions (zener as D with a breakdown value like 5.1, photoresistor/thermistor/buzzer/dc_motor/pushbutton as R, crystal as C) follow the standard ref-prefix rules above.
 A GPIO/digital pin driving a load must share its net with at least one other component, e.g. a series resistor. Only add a separate voltage_source or signal_source for a pin's waveform when the user explicitly wants to simulate that pin's behavior.
 When circuit.components includes a microcontroller board (arduino_uno, raspberry_pi, or esp32), also return a top-level "code" field with complete ready-to-run firmware for that board:
 - arduino_uno: an Arduino C++ sketch with setup() and loop(). Use the digit from the pin name: D13 is pin 13, A0 is A0.
@@ -137,12 +167,7 @@ export const CIRCUIT_SCHEMA = {
           ref: { type: 'string' },
           kind: {
             type: 'string',
-            enum: [
-              'resistor', 'capacitor', 'inductor', 'diode', 'led',
-              'bjt_npn', 'bjt_pnp', 'mosfet_n', 'mosfet_p',
-              'opamp', 'regulator', 'voltage_source', 'signal_source', 'load',
-              'arduino_uno', 'raspberry_pi', 'esp32',
-            ],
+            enum: ALLOWED_KINDS,
           },
           value: { type: 'string' },
           nodes: { type: 'array', items: { type: 'string' }, minItems: 1 },

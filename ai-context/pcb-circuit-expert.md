@@ -61,11 +61,33 @@ Allowed component kinds:
 - `voltage_source`
 - `signal_source`
 - `load`
+- `zener`
+- `photoresistor`
+- `thermistor`
+- `buzzer`
+- `crystal`
+- `temp_sensor`
+- `comparator`
+- `pushbutton`
+- `potentiometer`
+- `switch_spdt`
+- `rgb_led`
+- `seven_segment`
+- `timer_555`
+- `ultrasonic_sensor`
+- `dht_sensor`
+- `oled_display`
+- `pir_sensor`
+- `servo`
+- `dc_motor`
+- `relay_module`
 - `arduino_uno`
 - `raspberry_pi`
 - `esp32`
 
-Do not invent additional component kinds.
+This list is the registry `ALLOWED_KINDS` in `src/core/componentKinds.js`, the single
+source of truth from which the AI schema/prompt are generated. Do not invent additional
+component kinds beyond it.
 
 ## Schematic Intent Metadata
 

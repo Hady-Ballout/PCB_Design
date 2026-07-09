@@ -1,4 +1,6 @@
-export const LAYOUT_VERSION = 5;
+import { DEFAULT_PIN_COUNT_BY_KIND, SYMBOL_TYPE_BY_KIND } from './componentKinds.js';
+
+export const LAYOUT_VERSION = 6;
 export const GRID_SIZE = 20;
 export const COMPONENT_CLEARANCE = 24;
 export const WIRE_CLEARANCE = 16;
@@ -43,25 +45,7 @@ export class DiagramLayoutError extends Error {
   }
 }
 
-const symbolTypeByKind = {
-  voltage_source: 'voltage_source',
-  signal_source: 'voltage_source',
-  resistor: 'resistor',
-  load: 'resistor',
-  capacitor: 'capacitor',
-  inductor: 'inductor',
-  diode: 'diode',
-  led: 'led',
-  bjt_npn: 'bjt_npn',
-  bjt_pnp: 'bjt_pnp',
-  mosfet_n: 'generic',
-  mosfet_p: 'generic',
-  opamp: 'opamp',
-  regulator: 'generic',
-  arduino_uno: 'mcu',
-  raspberry_pi: 'mcu',
-  esp32: 'mcu',
-};
+const symbolTypeByKind = SYMBOL_TYPE_BY_KIND;
 
 const snap = (value, grid = GRID_SIZE) => Math.round(value / grid) * grid;
 
@@ -259,9 +243,12 @@ const pinPoint = (component, pinIndex, node, netPosition) => {
   const side = pinIndex % 2 === 1 ? -1 : 1;
   const row = Math.floor((pinIndex - 1) / 2);
   const rows = Math.ceil(component.pinCount / 2);
+  // Symmetric, grid-multiple row pitch so every pin lands on the routing grid
+  // and inside the body's side edges (the router cannot reach a pin floating
+  // past a corner). Kept in sync with the other pin-point copies.
   return {
     x: component.x + side * component.width / 2,
-    y: component.y - ((rows - 1) * 14) / 2 + row * 28,
+    y: component.y - ((rows - 1) * 40) / 2 + row * 40,
   };
 };
 
@@ -272,6 +259,14 @@ const componentSize = (kind) => {
   if (symbolType === 'bjt_npn' || symbolType === 'bjt_pnp') return { width: 118, height: 100, symbolType };
   if (symbolType === 'voltage_source' || symbolType === 'capacitor' || symbolType === 'diode' || symbolType === 'led') {
     return { width: 98, height: 112, symbolType };
+  }
+  // Generic multi-pin parts (boards, 555, 7-segment, sensor modules) alternate
+  // pins down both sides 40px apart, so the body grows with the pin count and
+  // the half-width stays a grid multiple, keeping every pin on the grid.
+  const pins = DEFAULT_PIN_COUNT_BY_KIND[kind] ?? 2;
+  if (pins > 3) {
+    const rows = Math.ceil(pins / 2);
+    return { width: pins >= 10 ? 160 : 120, height: (rows - 1) * 40 + 40, symbolType };
   }
   return { width: 108, height: 58, symbolType };
 };
