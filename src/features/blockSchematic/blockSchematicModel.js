@@ -23,6 +23,9 @@ const KIND_LABELS = {
   voltage_source: 'Voltage Source',
   signal_source: 'Signal Source',
   load: 'Load',
+  arduino_uno: 'Arduino Uno',
+  raspberry_pi: 'Raspberry Pi',
+  esp32: 'ESP32',
 };
 
 // Positional pin labels for parts with more than two pins. The ordering mirrors
@@ -31,6 +34,9 @@ const MULTI_PIN_LABELS = {
   opamp: ['IN+', 'IN-', 'OUT', 'V+', 'V-'],
   bjt_npn: ['C', 'B', 'E'],
   bjt_pnp: ['C', 'B', 'E'],
+  arduino_uno: ['5V', '3V3', 'GND', 'VIN', 'D2', 'D3', 'D5', 'D9', 'D13', 'A0', 'A1', 'A2'],
+  raspberry_pi: ['5V', '3V3', 'GND', 'GPIO2', 'GPIO3', 'GPIO4', 'GPIO17', 'GPIO18', 'GPIO27', 'GPIO22'],
+  esp32: ['3V3', 'GND', 'VIN', 'EN', 'GPIO2', 'GPIO4', 'GPIO5', 'GPIO13', 'GPIO18', 'GPIO19', 'GPIO21', 'GPIO22'],
 };
 
 export const humanComponentName = (component) =>

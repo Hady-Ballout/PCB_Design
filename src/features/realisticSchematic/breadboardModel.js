@@ -3,7 +3,7 @@
 // stays unit-testable. Placement is a greedy, deterministic single pass over
 // `circuit.components` in array order.
 
-import { DEFAULT_COLUMNS, FULL_SIZE_COLUMNS, STRIP_ROWS, boardSize } from './breadboardGeometry.js';
+import { DEFAULT_COLUMNS, FULL_SIZE_COLUMNS, STRIP_ROWS, boardSize, mcuSlotRect } from './breadboardGeometry.js';
 
 // A pin is unconnected when its net is a placeholder (NC_… or `${ref}_${pin}`).
 // Duplicated here to keep this chunk from importing another feature chunk — the
@@ -16,6 +16,22 @@ const SUPPLY_NAME_PATTERN = /^(vcc|vdd|v\+|vin|vs|vsupply)$/i;
 
 const TO92_KINDS = new Set(['bjt_npn', 'bjt_pnp', 'mosfet_n', 'mosfet_p']);
 
+// Fixed, positional pin contracts for microcontroller boards — same order the
+// AI is instructed to use in server/ai/ollamaProvider.ts. Duplicated here (per
+// this feature's own convention of per-file pin-name tables) rather than
+// imported, since this chunk stays self-contained and unit-testable.
+export const MCU_PINS = {
+  arduino_uno: ['5V', '3V3', 'GND', 'VIN', 'D2', 'D3', 'D5', 'D9', 'D13', 'A0', 'A1', 'A2'],
+  raspberry_pi: ['5V', '3V3', 'GND', 'GPIO2', 'GPIO3', 'GPIO4', 'GPIO17', 'GPIO18', 'GPIO27', 'GPIO22'],
+  esp32: ['3V3', 'GND', 'VIN', 'EN', 'GPIO2', 'GPIO4', 'GPIO5', 'GPIO13', 'GPIO18', 'GPIO19', 'GPIO21', 'GPIO22'],
+};
+
+// Uno/Pi are drawn off-board in a fixed slot below the breadboard, with their
+// header pins fanned out to breadboard holes via colored wires. ESP32 is a
+// DIP-style module that straddles the trench like the opamp DIP-8 package.
+const OFFBOARD_MCU_KINDS = new Set(['arduino_uno', 'raspberry_pi']);
+const ESP32_WIDTH_COLUMNS = 6;
+
 const GROUND_WIRE_COLOR = '#1f1f1f';
 const SUPPLY_WIRE_COLOR = '#c0392b';
 const SIGNAL_WIRE_COLORS = ['#e6b422', '#3a9e4c', '#e07020', '#4a7fe0', '#9a5fd0', '#7d7d7d'];
@@ -26,10 +42,10 @@ const SIGNAL_WIRE_COLORS = ['#e6b422', '#3a9e4c', '#e07020', '#4a7fe0', '#9a5fd0
 const OPAMP_DIP_PINS = [3, 2, 6, 7, 4];
 const DIP_WIDTH_COLUMNS = 4;
 
-const LEAD_SPAN = 3; // default columns between a two-lead part's legs
+const LEAD_SPAN = 2; // default columns between a two-lead part's legs
 const MAX_DIRECT_SPAN = 8; // widest a part stretches to plug straight into home groups
 const MAX_REACH = 6; // how far back a leg reaches to reuse a home group
-const PART_GAP = 2; // free columns kept between parts
+const PART_GAP = 1; // free columns kept between parts
 
 export function circuitToBreadboard(circuit) {
   const components = circuit?.components ?? [];
@@ -128,6 +144,21 @@ export function circuitToBreadboard(circuit) {
     const named = (circuit?.nodes ?? []).find((net) => SUPPLY_NAME_PATTERN.test(String(net)));
     if (named) assignRail('railTopPlus', named);
   }
+
+  // A microcontroller's 5V/3V3 pin can power the whole circuit even with no
+  // explicit voltage_source in the circuit — give it a rail too.
+  components.forEach((component) => {
+    const pins = MCU_PINS[component.kind];
+    if (!pins) return;
+    (component.nodes ?? []).forEach((net, index) => {
+      if (isUnconnectedTerminal(net, component.ref, index + 1)) return;
+      const pinName = pins[index];
+      if (pinName !== '5V' && pinName !== '3V3') return;
+      if (isRailNet(net)) return;
+      if (rails.railTopPlus == null) assignRail('railTopPlus', net);
+      else if (rails.railBottomPlus == null) assignRail('railBottomPlus', net);
+    });
+  });
 
   // --- net home groups ---
   const netHome = new Map(); // net -> group key currently open for new taps
@@ -245,6 +276,26 @@ export function circuitToBreadboard(circuit) {
     return { column: Number(key.split(':')[1]) };
   };
 
+  // Same as usableHome, but strip-agnostic — used for MCU header pins, which
+  // can fly a wire to either strip rather than only the one they're placed on.
+  const anyUsableHome = (net) => {
+    if (net == null || isRailNet(net)) return null;
+    const key = netHome.get(net);
+    if (!key || !groupHasSpace(key) || !sharableGroups.has(key)) return null;
+    const [strip, columnText] = key.split(':');
+    return { strip, column: Number(columnText) };
+  };
+
+  // Claim the next free single-row hole on a rail strip (rails have one row
+  // per column, so this just walks columns until one is unused).
+  const takeFreeRailHole = (railKey) => {
+    for (let column = 1; ; column += 1) {
+      if (column > columns) growBoard();
+      const hole = takeHole(railKey, column);
+      if (hole) return hole;
+    }
+  };
+
   const placeTwoLead = (component) => {
     const nets = component.nodes ?? [];
     const strip = peekStrip(LEAD_SPAN + 1);
@@ -301,8 +352,92 @@ export function circuitToBreadboard(circuit) {
     });
   };
 
+  // ESP32 is a wide DIP-style module straddling the trench: the first half of
+  // its pins land on the bottom strip, the second half directly across on top.
+  const placeEsp32 = (component) => {
+    const column = allocDipSpan(ESP32_WIDTH_COLUMNS);
+    const nets = component.nodes ?? [];
+    const holes = new Array(nets.length).fill(null);
+    for (let offset = 0; offset < ESP32_WIDTH_COLUMNS; offset += 1) {
+      const bottomIndex = offset;
+      const topIndex = ESP32_WIDTH_COLUMNS + offset;
+      const pinColumn = column + offset;
+      if (bottomIndex < nets.length) {
+        holes[bottomIndex] = takeHole('bottom', pinColumn, 0);
+        if (!isUnconnectedTerminal(nets[bottomIndex], component.ref, bottomIndex + 1)) {
+          ensureConnected(nets[bottomIndex], 'bottom', pinColumn);
+        }
+      }
+      if (topIndex < nets.length) {
+        holes[topIndex] = takeHole('top', pinColumn, STRIP_ROWS.top - 1);
+        if (!isUnconnectedTerminal(nets[topIndex], component.ref, topIndex + 1)) {
+          ensureConnected(nets[topIndex], 'top', pinColumn);
+        }
+      }
+    }
+    parts.push({
+      ref: component.ref,
+      kind: component.kind,
+      value: component.value,
+      body: 'esp32',
+      strip: 'top',
+      holes,
+      pinNets: [...nets],
+      meta: { columnStart: column, columnEnd: column + ESP32_WIDTH_COLUMNS - 1 },
+    });
+  };
+
+  // Uno/Pi live off-board in a fixed slot; header pins fan out to breadboard
+  // holes via colored wires (power to the rail, signals to a shared tie group
+  // when one already exists for that net, else a fresh column).
+  let mcuSlotCount = 0;
+  const placeOffboardMcu = (component) => {
+    const nets = component.nodes ?? [];
+    const slotIndex = mcuSlotCount;
+    mcuSlotCount += 1;
+    const holes = [];
+    const pinColors = [];
+    nets.forEach((net, index) => {
+      const pinNumber = index + 1;
+      if (isUnconnectedTerminal(net, component.ref, pinNumber)) {
+        holes.push(null);
+        pinColors.push(null);
+        return;
+      }
+      if (isRailNet(net)) {
+        const railKey = railStripsFor(net)[0];
+        holes.push(takeFreeRailHole(railKey));
+        pinColors.push(wireColor(net));
+        return;
+      }
+      const home = anyUsableHome(net);
+      if (home) {
+        holes.push(takeHole(home.strip, home.column));
+        pinColors.push(wireColor(net));
+        return;
+      }
+      const spot = allocSpan(1);
+      holes.push(takeHole(spot.strip, spot.column));
+      pinColors.push(wireColor(net));
+      ensureConnected(net, spot.strip, spot.column);
+    });
+    parts.push({
+      ref: component.ref,
+      kind: component.kind,
+      value: component.value,
+      body: component.kind,
+      strip: 'top',
+      holes,
+      pinNets: [...nets],
+      meta: { slotIndex, pinColors },
+    });
+  };
+
+  const deferredMcus = [];
   components.forEach((component) => {
     if (component.kind === 'voltage_source') return; // handled in the rail pre-pass
+    if (OFFBOARD_MCU_KINDS.has(component.kind)) { deferredMcus.push(component); return; }
+    if (component.kind === 'esp32') return placeEsp32(component);
     const pinCount = component.nodes?.length ?? 0;
     if (component.kind === 'opamp' && pinCount === 5) return placeDip(component);
     if (TO92_KINDS.has(component.kind)) return placeInline(component, 'to92');
@@ -310,6 +445,9 @@ export function circuitToBreadboard(circuit) {
     if (pinCount === 2) return placeTwoLead(component);
     placeInline(component, 'module');
   });
+  // Off-board MCUs place last so their signal pins can reuse tie groups every
+  // other component has already created for the same net.
+  deferredMcus.forEach(placeOffboardMcu);
 
   // Tie groups per net, for highlight overlays.
   const netGroups = {};
@@ -332,7 +470,13 @@ export function circuitToBreadboard(circuit) {
   listNet(rails.railBottomMinus, rails.railBottomMinus === GROUND_NET ? 'ground' : 'supply');
   netGroupKeys.forEach((_, net) => listNet(net, 'signal'));
 
-  const size = boardSize(columns);
+  // Resolve each MCU's pixel slot only now that the final column count (and
+  // therefore board width) is known.
+  parts.forEach((part) => {
+    if (part.meta?.slotIndex != null) part.meta.slot = mcuSlotRect(part.meta.slotIndex, columns);
+  });
+
+  const size = boardSize(columns, mcuSlotCount);
   return {
     board: { columns, width: size.width, height: size.height },
     rails,

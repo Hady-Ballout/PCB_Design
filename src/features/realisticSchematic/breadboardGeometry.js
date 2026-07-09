@@ -43,6 +43,15 @@ export const TRENCH_HALF_HEIGHT = HOLE_PITCH * 0.55;
 // Extra room past the board's right edge for the rail net-name labels.
 const RIGHT_LABEL_MARGIN = 26;
 
+// Off-board slot geometry for MCU boards (arduino_uno, raspberry_pi): each
+// gets its own fixed-height strip stacked below the breadboard body.
+export const MCU_SLOT_HEIGHT = 150;
+export const MCU_SLOT_GAP = 14;
+export const MCU_MARGIN_TOP = 20;
+export const MCU_PIN_SPACING = HOLE_PITCH * 2;
+
+const BASE_HEIGHT = TOTAL_ROWS * HOLE_PITCH;
+
 export const columnX = (column) => BOARD_MARGIN_LEFT + BOARD_PAD_X + (column - 1) * HOLE_PITCH;
 
 export const holeCenter = (hole) => ({
@@ -50,10 +59,19 @@ export const holeCenter = (hole) => ({
   y: (STRIP_BASE_ROW[hole.strip] + (hole.row || 0)) * HOLE_PITCH,
 });
 
-// Full drawing size including the off-board battery margin and label gutter.
-export const boardSize = (columns) => ({
+// Full drawing size including the off-board battery margin and label gutter,
+// plus room for any stacked MCU slots below the board.
+export const boardSize = (columns, mcuSlots = 0) => ({
   width: BOARD_MARGIN_LEFT + BOARD_PAD_X * 2 + (columns - 1) * HOLE_PITCH + RIGHT_LABEL_MARGIN,
-  height: TOTAL_ROWS * HOLE_PITCH,
+  height: BASE_HEIGHT + (mcuSlots > 0 ? MCU_MARGIN_TOP + mcuSlots * (MCU_SLOT_HEIGHT + MCU_SLOT_GAP) : 0),
+});
+
+// Rect for the index-th (0-based) off-board MCU slot, stacked below the board.
+export const mcuSlotRect = (index, columns) => ({
+  x: BOARD_MARGIN_LEFT,
+  y: BASE_HEIGHT + MCU_MARGIN_TOP + index * (MCU_SLOT_HEIGHT + MCU_SLOT_GAP),
+  width: Math.min(BOARD_MARGIN_LEFT + BOARD_PAD_X * 2 + (columns - 1) * HOLE_PITCH, 470),
+  height: MCU_SLOT_HEIGHT,
 });
 
 // The plastic board body rectangle (excludes the battery margin).

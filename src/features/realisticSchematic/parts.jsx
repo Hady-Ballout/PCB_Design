@@ -1,7 +1,8 @@
 // Realistic SVG renderers for breadboard parts and jumper wires. Each renderer
 // receives the placement-model part and draws leads from its exact hole
 // positions up onto a photo-style body.
-import { HOLE_PITCH, TRENCH_CENTER_Y, holeCenter } from './breadboardGeometry.js';
+import { HOLE_PITCH, MCU_PIN_SPACING, TRENCH_CENTER_Y, holeCenter } from './breadboardGeometry.js';
+import { MCU_PINS } from './breadboardModel.js';
 import { BAND_COLOR_HEX, capStyle, ledColor, resistorColorBands } from './partVisuals.js';
 import { pinLabelsFor } from './selectionModel.js';
 
@@ -231,6 +232,117 @@ function DipBody({ part }) {
   );
 }
 
+// --- microcontroller boards ------------------------------------------------
+
+// ESP32 is a wide DIP-style module straddling the trench, same construction
+// as the opamp DIP-8 body just wider, plus a small "shield can" for the RF
+// module and its own silkscreen label.
+function Esp32Body({ part }) {
+  const { columnStart, columnEnd } = part.meta;
+  const left = holeCenter({ strip: 'top', column: columnStart, row: 4 });
+  const right = holeCenter({ strip: 'top', column: columnEnd, row: 4 });
+  const x0 = left.x - 5;
+  const x1 = right.x + 5;
+  const bodyTop = TRENCH_CENTER_Y - 16;
+  const bodyBottom = TRENCH_CENTER_Y + 16;
+  const legs = [];
+  for (let column = columnStart; column <= columnEnd; column += 1) {
+    const topHole = holeCenter({ strip: 'top', column, row: 4 });
+    const bottomHole = holeCenter({ strip: 'bottom', column, row: 0 });
+    legs.push(
+      <rect key={`t${column}`} x={topHole.x - 1.6} y={topHole.y - 1} width={3.2} height={bodyTop - topHole.y + 2} fill="url(#rsPartTab)" />,
+      <rect key={`b${column}`} x={bottomHole.x - 1.6} y={bodyBottom - 1} width={3.2} height={bottomHole.y - bodyBottom + 2} fill="url(#rsPartTab)" />,
+    );
+  }
+  return (
+    <g>
+      {legs}
+      <rect x={x0} y={bodyTop} width={x1 - x0} height={bodyBottom - bodyTop} rx={2} fill="url(#rsPartDip)" stroke="#000" strokeWidth="0.6" />
+      <rect x={(x0 + x1) / 2 - 12} y={TRENCH_CENTER_Y - 9} width={24} height={18} rx={1.5} fill="#7d868c" stroke="#000" strokeWidth="0.4" />
+      <text x={(x0 + x1) / 2} y={TRENCH_CENTER_Y - 20} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6.5, fontWeight: 600 }} fill="#f2f5f7">{part.ref} · ESP32</text>
+    </g>
+  );
+}
+
+// Off-board pin position for the index-th header pad of a slotted MCU part.
+function mcuPadPoint(slot, index) {
+  return { x: slot.x + 20 + index * MCU_PIN_SPACING, y: slot.y + 22 };
+}
+
+// Colored wires fanning from each header pad to the breadboard/rail hole it
+// resolved to. Painted last (after the body/header) so they visibly
+// terminate at the pads instead of being hidden under the opaque body.
+function McuPinWires({ part }) {
+  const slot = part.meta.slot;
+  if (!slot) return null;
+  return (
+    <g className="rs-mcu-wires">
+      {part.holes.map((hole, index) => {
+        if (!hole) return null;
+        const pad = mcuPadPoint(slot, index);
+        const target = holeCenter(hole);
+        const color = part.meta.pinColors?.[index] || '#7d7d7d';
+        const lift = Math.min(60, 22 + (index % 3) * 8);
+        const c1 = { x: pad.x, y: pad.y - lift };
+        const c2 = { x: target.x, y: target.y + lift };
+        return (
+          <g key={index}>
+            <path d={`M ${pad.x} ${pad.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${target.x} ${target.y}`} stroke={color} strokeWidth="1.8" fill="none" strokeLinecap="round" />
+            <circle cx={target.x} cy={target.y} r={2} fill="#20262b" />
+            <circle cx={pad.x} cy={pad.y} r={2} fill="#20262b" />
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+function McuHeader({ part }) {
+  const slot = part.meta.slot;
+  const pins = MCU_PINS[part.kind] || [];
+  const width = pins.length * MCU_PIN_SPACING + 12;
+  return (
+    <g>
+      <rect x={slot.x + 8} y={slot.y + 10} width={width} height={22} rx={2} fill="#1a1a1a" stroke="#000" strokeWidth="0.5" />
+      {pins.map((label, index) => {
+        const pad = mcuPadPoint(slot, index);
+        return (
+          <g key={label}>
+            <rect x={pad.x - 3} y={pad.y - 3} width={6} height={6} fill="url(#rsGoldPad)" stroke="#8a6d14" strokeWidth="0.4" />
+            <text x={pad.x} y={slot.y + 40} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 5 }}>{label}</text>
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+function ArduinoUnoBody({ part }) {
+  const slot = part.meta.slot;
+  if (!slot) return null;
+  return (
+    <g>
+      <rect x={slot.x} y={slot.y + 46} width={slot.width} height={slot.height - 46} rx={4} fill="url(#rsPartUno)" stroke="#0d3b33" strokeWidth="0.8" />
+      <text x={slot.x + slot.width / 2} y={slot.y + slot.height / 2 + 20} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 9, fontWeight: 600 }} fill="#eaf6f0">{part.ref} · {part.value}</text>
+      <McuHeader part={part} />
+      <McuPinWires part={part} />
+    </g>
+  );
+}
+
+function RaspberryPiBody({ part }) {
+  const slot = part.meta.slot;
+  if (!slot) return null;
+  return (
+    <g>
+      <rect x={slot.x} y={slot.y + 46} width={slot.width} height={slot.height - 46} rx={4} fill="url(#rsPartPi)" stroke="#123d1a" strokeWidth="0.8" />
+      <text x={slot.x + slot.width / 2} y={slot.y + slot.height / 2 + 20} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 9, fontWeight: 600 }} fill="#eafbea">{part.ref} · {part.value}</text>
+      <McuHeader part={part} />
+      <McuPinWires part={part} />
+    </g>
+  );
+}
+
 // --- battery + jumpers ----------------------------------------------------
 
 export function BatteryPack({ battery, index }) {
@@ -280,10 +392,16 @@ export function JumperWire({ jumper }) {
   const lift = Math.min(46, 16 + span * 0.14 + Math.abs(b.y - a.y) * 0.18) + stagger;
   let c1;
   let c2;
-  if (sides[0] !== sides[1] && span < HOLE_PITCH) {
-    // Same-column rail bridge: bow out to the right.
-    c1 = { x: a.x + lift + 14, y: a.y };
-    c2 = { x: b.x + lift + 14, y: b.y };
+  if (span < HOLE_PITCH) {
+    // Same-column bridge: a straight-across curve would overshoot the rails
+    // and strike through the net-name labels past the right edge. Bow
+    // sideways instead, and pull each control point toward the opposite
+    // endpoint's y so the curve never leaves the endpoints' vertical span.
+    // Rail-to-rail bridges only occur at the rightmost column, so they bow
+    // left (into the board); same-column rail-to-strip stubs bow right.
+    const bow = sides[0] !== sides[1] ? -(16 + stagger) : 8 + stagger;
+    c1 = { x: a.x + bow, y: a.y + (b.y - a.y) * 0.2 };
+    c2 = { x: b.x + bow, y: b.y - (b.y - a.y) * 0.2 };
   } else {
     const direction1 = sides[0] === 'bottom' ? 1 : -1;
     const direction2 = sides[1] === 'bottom' ? 1 : -1;
@@ -385,6 +503,18 @@ export function PartDefs() {
         <stop offset="0.12" stopColor="#22292f" />
         <stop offset="1" stopColor="#161b1f" />
       </linearGradient>
+      <linearGradient id="rsPartUno" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stopColor="#1a7a63" />
+        <stop offset="1" stopColor="#0f4a3c" />
+      </linearGradient>
+      <linearGradient id="rsPartPi" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stopColor="#2f9e44" />
+        <stop offset="1" stopColor="#1c5e29" />
+      </linearGradient>
+      <radialGradient id="rsGoldPad" cx="0.35" cy="0.3" r="0.9">
+        <stop offset="0" stopColor="#f2d375" />
+        <stop offset="1" stopColor="#c79a2e" />
+      </radialGradient>
     </defs>
   );
 }
@@ -398,8 +528,13 @@ const BODY_RENDERERS = {
 };
 
 export function RealisticPart({ part }) {
+  // Off-board MCU boards draw their body/header regardless of whether any
+  // pin is actually wired, so check them before the zero-pins bail-out.
+  if (part.body === 'arduino_uno') return <ArduinoUnoBody part={part} />;
+  if (part.body === 'raspberry_pi') return <RaspberryPiBody part={part} />;
   const points = part.holes.map((hole) => (hole ? holeCenter(hole) : null)).filter(Boolean);
   if (points.length === 0) return null;
+  if (part.body === 'esp32') return <Esp32Body part={part} />;
   if (part.body === 'dip') return <DipBody part={part} />;
   if (part.body === 'to92') return <To92Body part={part} points={points} />;
   if (part.body === 'to220') return <To220Body part={part} points={points} />;

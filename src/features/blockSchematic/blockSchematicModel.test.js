@@ -94,4 +94,22 @@ describe('blockSchematicModel', () => {
     expect(pinLabel(opamp, 3)).toBe('OUT');
     expect(humanComponentName(opamp)).toBe('Op-Amp');
   });
+
+  it('labels a microcontroller board with its fixed pin names and only wired pins as connected', () => {
+    const uno = {
+      ref: 'U1',
+      kind: 'arduino_uno',
+      value: 'Uno R3',
+      nodes: ['NC_U1_1', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'D13', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+    };
+    expect(humanComponentName(uno)).toBe('Arduino Uno');
+    expect(pinLabel(uno, 3)).toBe('GND');
+    expect(pinLabel(uno, 9)).toBe('D13');
+
+    const { nodes } = circuitToFlow({ components: [uno] });
+    const unoNode = nodes.find((node) => node.id === 'U1');
+    expect(unoNode.data.pins).toHaveLength(12);
+    const connected = unoNode.data.pins.filter((pin) => pin.connected).map((pin) => pin.label);
+    expect(connected).toEqual(['GND', 'D13']);
+  });
 });

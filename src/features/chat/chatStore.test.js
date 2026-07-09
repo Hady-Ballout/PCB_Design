@@ -58,6 +58,26 @@ describe('chat store', () => {
     expect(loadChatStore(storage).chats[0].editableCircuitJson).toContain('"ref": "R1"');
   });
 
+  it('defaults editableCode and pendingCodeChange, hydrates code from saved results, and keeps a user edit', () => {
+    expect(createChat({ id: 'chat-1', now: 10 })).toMatchObject({ editableCode: '', pendingCodeChange: null });
+
+    const storage = memoryStorage();
+    const chatWithoutEdit = {
+      ...createChat({ id: 'code-chat', now: 10 }),
+      result: { circuit: null, diagram: null, spice: '', kicadNetlist: '', code: 'void setup() {}\nvoid loop() {}' },
+    };
+    const chatWithEdit = {
+      ...createChat({ id: 'edited-chat', now: 10 }),
+      editableCode: '// my edit',
+      result: { circuit: null, diagram: null, spice: '', kicadNetlist: '', code: 'void setup() {}\nvoid loop() {}' },
+    };
+    storage.setItem(CHAT_STORAGE_KEY, JSON.stringify({ chats: [chatWithoutEdit, chatWithEdit], activeChatId: chatWithoutEdit.id }));
+
+    const [loadedWithoutEdit, loadedWithEdit] = loadChatStore(storage).chats;
+    expect(loadedWithoutEdit.editableCode).toBe('void setup() {}\nvoid loop() {}');
+    expect(loadedWithEdit.editableCode).toBe('// my edit');
+  });
+
   it('builds compact AI context from prior user prompts and generated circuits', () => {
     const messages = [
       { role: 'user', content: 'Make a filter' },

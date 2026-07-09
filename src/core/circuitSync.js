@@ -1,5 +1,7 @@
 import {
   DiagramLayoutError,
+  MCU_KINDS,
+  MCU_PIN_COUNTS,
   buildCircuitDiagram,
   findNearestLegalPlacement,
   layoutCircuitDiagram,
@@ -93,6 +95,7 @@ const kindFromRef = (ref) => {
 };
 
 const defaultPinCount = (kind) => {
+  if (MCU_PIN_COUNTS[kind]) return MCU_PIN_COUNTS[kind];
   if (kind === 'opamp') return 5;
   if (kind === 'bjt_npn' || kind === 'bjt_pnp' || kind === 'mosfet_n' || kind === 'mosfet_p') return 3;
   return 2;
@@ -114,6 +117,9 @@ const spiceRefForComponent = (component) => {
     mosfet_n: 'M',
     mosfet_p: 'M',
     opamp: 'X',
+    arduino_uno: 'U',
+    raspberry_pi: 'U',
+    esp32: 'U',
   };
   const prefix = prefixByKind[component.kind] || 'X';
   return base.startsWith(prefix) ? base : `${prefix}_${base}`;
@@ -136,6 +142,9 @@ const allowedCircuitKinds = new Set([
   'voltage_source',
   'signal_source',
   'load',
+  'arduino_uno',
+  'raspberry_pi',
+  'esp32',
 ]);
 
 export const parseCircuitJson = (source, baseCircuit = null) => {
@@ -305,6 +314,15 @@ export const parseSpiceNetlist = (source, baseCircuit) => {
       ...record,
     });
   }
+
+  // Microcontroller boards are wiring-only and never appear in a SPICE deck;
+  // carry them over from the base circuit (at their original position) so
+  // hand-editing the SPICE text never silently drops them.
+  baseComponents.forEach((component, index) => {
+    if (!MCU_KINDS.has(component.kind)) return;
+    if (components.some((existing) => existing.ref === component.ref)) return;
+    components.splice(Math.min(index, components.length), 0, { ...component });
+  });
 
   if (components.length === 0) errors.push('The SPICE netlist does not contain any supported components.');
   const duplicateRefs = components
@@ -581,10 +599,16 @@ const symbolTypeByKind = {
   bjt_npn: 'bjt_npn',
   bjt_pnp: 'bjt_pnp',
   opamp: 'opamp',
+  arduino_uno: 'generic',
+  raspberry_pi: 'generic',
+  esp32: 'generic',
 };
 
 const defaultShapeForPart = (part) => {
   const symbolType = symbolTypeByKind[part.kind] || 'generic';
+  // Boards carry 10-12 pins in the generic side-alternating layout, so they
+  // need a much taller body than the other 'generic' kinds (mosfet, regulator).
+  if (MCU_KINDS.has(part.kind)) return { width: 150, height: 200, symbolType, orientation: 'horizontal' };
   if (symbolType === 'opamp') return { width: 150, height: 110, symbolType, orientation: 'horizontal' };
   if (symbolType === 'bjt_npn' || symbolType === 'bjt_pnp') return { width: 118, height: 100, symbolType, orientation: 'horizontal' };
   if (symbolType === 'voltage_source' || symbolType === 'capacitor' || symbolType === 'diode' || symbolType === 'led') {

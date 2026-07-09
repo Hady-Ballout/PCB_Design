@@ -33,9 +33,15 @@ Component refs must be SPICE-compatible because the program will simulate them w
 - opamp components must use value LM358 in JSON; do not use GENERIC or OPAMP.
 - load refs should be modeled as resistors and start with R, e.g. RLOAD
 - regulator refs may use U in the JSON, but include enough surrounding passives/load nodes for simulation.
+- microcontroller board refs start with U, e.g. U1
 Use simple Ngspice-friendly values such as 1k, 100nF, 10uF, 5V, and SINE(0 1 1k).
 Use voltage_source for DC supplies and fixed DC input biases. Use signal_source only for waveform or time-varying sources such as SINE(...), PULSE(...), PWL(...), EXP(...), or AC.
 Every node except ground "0" must connect to at least two component pins and have a DC path to ground; never leave a node floating.
+Microcontroller boards (arduino_uno, raspberry_pi, esp32) are wiring-only: they are never simulated and must never appear in the SPICE deck. Each kind has a fixed, positional pin/node list that must always be present in full, in this exact order:
+- arduino_uno (12 nodes): 5V, 3V3, GND, VIN, D2, D3, D5, D9, D13, A0, A1, A2
+- raspberry_pi (10 nodes): 5V, 3V3, GND, GPIO2, GPIO3, GPIO4, GPIO17, GPIO18, GPIO27, GPIO22
+- esp32 (12 nodes): 3V3, GND, VIN, EN, GPIO2, GPIO4, GPIO5, GPIO13, GPIO18, GPIO19, GPIO21, GPIO22
+Fill any pin the circuit does not use with a unique placeholder node named NC_<REF>_<pinNumber>, e.g. NC_U1_5 for U1's fifth pin — never omit a pin and never leave it blank. Set value to the human board name, e.g. "Uno R3", "Pi 5", or "DevKit V1". Tie the board's GND pin to node "0". When there is no separate supply, power the circuit from the board's 5V or 3V3 pin and set supplyVoltage to match (5 for arduino_uno, 3.3 for raspberry_pi and esp32). A GPIO pin that drives a load must share its net with at least one other component, such as a series resistor; only add a separate voltage_source or signal_source when the user explicitly wants to simulate that pin's own waveform.
 Both op-amp inputs must be connected: wire the inverting input to the feedback/summing network, and the non-inverting input to a reference node — ground "0" for a dual-supply design, or a mid-rail bias-divider node for a single-supply design. Never put an op-amp input on a node that no other component uses.
 When you create a reference or bias node (for example a divider midpoint), connect the op-amp input to that exact node name. Do not invent a separate, otherwise-unused input node.`;
 
@@ -44,7 +50,8 @@ const REVIEWER_SYSTEM_PROMPT = `You are a circuit design reviewer. You will be g
 - Missing or incorrect bias/reference paths, especially op-amp inputs that aren't tied into the feedback network or a proper reference node.
 - A component kind that doesn't match its evident role (e.g. a load modeled as anything other than a resistor).
 - Component values that are physically implausible for the stated circuit type (e.g. a 1 ohm pull-up, a femtofarad decoupling cap).
-Return exactly one valid JSON object and no other text: {"ok": true} if the circuit has no issues worth fixing, or {"ok": false, "issues": ["..."], "circuit": {<the same circuit JSON schema, corrected>}} if you must fix something. When returning a corrected circuit, keep every ref, node name, and value that was already correct exactly as-is — change only what is actually wrong. Do not add unrelated components or redesign the circuit.`;
+Return exactly one valid JSON object and no other text: {"ok": true} if the circuit has no issues worth fixing, or {"ok": false, "issues": ["..."], "circuit": {<the same circuit JSON schema, corrected>}} if you must fix something. When returning a corrected circuit, keep every ref, node name, and value that was already correct exactly as-is — change only what is actually wrong. Do not add unrelated components or redesign the circuit. Preserve every microcontroller board's fixed pin count and order (arduino_uno 12, raspberry_pi 10, esp32 12) exactly; never drop or reorder its NC_<ref>_<pin> placeholder nodes.
+If the final circuit (after any correction) includes a microcontroller board (arduino_uno, raspberry_pi, or esp32), also return a top-level "code" field containing complete firmware for it as a single plain-text JSON string with \n newlines, no Markdown fences, no explanation. Use Arduino C++ (setup()/loop()) for arduino_uno and esp32, deriving pin numbers from the pin name (D13 -> 13, A0 -> A0, GPIO2 -> 2). Use Python 3 with gpiozero for raspberry_pi (GPIO17 -> LED(17) or Button(17), etc.). Only reference pins that are actually wired in circuit.components, implement exactly the behavior the user asked for, keep it under 40 lines, and keep it beginner-friendly with brief comments. When there is no microcontroller board, omit "code" or return an empty string.`;
 
 const REPLY_SYSTEM_PROMPT = `You are a helpful chat assistant writing the conversational reply for a circuit that has already been designed and finalized by another model. Return exactly one valid JSON object and no other text: {"reply": "..."}. The reply must be concise, conversational, and explain what was built or changed. Mention important component refs when helpful, such as RLOAD, R1, or C1. Do not use Markdown and do not paste the netlist.`;
 
@@ -132,6 +139,7 @@ export const CIRCUIT_SCHEMA = {
               'resistor', 'capacitor', 'inductor', 'diode', 'led',
               'bjt_npn', 'bjt_pnp', 'mosfet_n', 'mosfet_p',
               'opamp', 'regulator', 'voltage_source', 'signal_source', 'load',
+              'arduino_uno', 'raspberry_pi', 'esp32',
             ],
           },
           value: { type: 'string' },
@@ -161,6 +169,7 @@ export const REVIEWER_RESPONSE_SCHEMA = {
     ok: { type: 'boolean' },
     issues: { type: 'array', items: { type: 'string' } },
     circuit: CIRCUIT_SCHEMA,
+    code: { type: 'string' },
   },
   required: ['ok'],
 } as const;
@@ -367,10 +376,16 @@ function parseStage1Circuit(text: string): Circuit {
   return normalizeCircuitForValidation(circuit) as unknown as Circuit;
 }
 
+const sanitizeFirmwareCode = (value: unknown): string => {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text.replace(/^```[a-zA-Z0-9+-]*\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
+};
+
 interface ReviewerResult {
   ok: boolean;
   circuit: Circuit | null;
   issues: string[];
+  code: string;
 }
 
 function parseReviewerResponse(text: string): ReviewerResult {
@@ -393,7 +408,8 @@ function parseReviewerResponse(text: string): ReviewerResult {
   if (!isPlainObject(responseObject) || typeof responseObject.ok !== 'boolean') {
     throw new CircuitGenerationError('schema_validation', 'Reviewer response must include a boolean "ok" field.');
   }
-  if (responseObject.ok) return { ok: true, circuit: null, issues: [] };
+  const code = sanitizeFirmwareCode(responseObject.code);
+  if (responseObject.ok) return { ok: true, circuit: null, issues: [], code };
 
   if (!isPlainObject(responseObject.circuit)) {
     throw new CircuitGenerationError('schema_validation', 'Reviewer response must include a corrected circuit when ok is false.');
@@ -410,6 +426,7 @@ function parseReviewerResponse(text: string): ReviewerResult {
     ok: false,
     circuit: normalizeCircuitForValidation(responseObject.circuit as Record<string, unknown>) as unknown as Circuit,
     issues,
+    code,
   };
 }
 
@@ -803,7 +820,7 @@ async function streamOllamaChat(
   return content;
 }
 
-async function runReviewerStage(circuit: Circuit): Promise<{ circuit: Circuit; issues: string[] } | null> {
+async function runReviewerStage(circuit: Circuit): Promise<{ circuit: Circuit; issues: string[]; code: string } | null> {
   const config = providerConfig('reviewer');
   try {
     const result = await parseWithCorrectionRetry(
@@ -811,8 +828,8 @@ async function runReviewerStage(circuit: Circuit): Promise<{ circuit: Circuit; i
       (correction) => sendChatCompletion(config, buildStage2Messages(circuit, correction), REVIEWER_RESPONSE_SCHEMA),
       parseReviewerResponse,
     );
-    if (result.ok || !result.circuit) return null;
-    return { circuit: result.circuit, issues: result.issues };
+    if (result.ok || !result.circuit) return { circuit, issues: [], code: result.code };
+    return { circuit: result.circuit, issues: result.issues, code: result.code };
   } catch (error) {
     console.error(`[circuit-reviewer] ${(error as Error).message}`);
     return null;
@@ -863,17 +880,19 @@ export async function runCircuitPipeline(
 
   let finalCircuit = circuit;
   let reviewIssues: string[] = [];
+  let code = '';
   if (reviewerEnabled()) {
     onEvent({ type: 'stage', stage: 'reviewing' });
     const reviewed = await runReviewerStage(finalCircuit);
     if (reviewed) {
       finalCircuit = reviewed.circuit;
       reviewIssues = reviewed.issues;
+      code = reviewed.code;
     }
   }
 
   onEvent({ type: 'stage', stage: 'reply' });
   const reply = await runReplyStage(prompt, finalCircuit, reviewIssues);
 
-  return { reply, circuit: finalCircuit };
+  return { reply, circuit: finalCircuit, code };
 }

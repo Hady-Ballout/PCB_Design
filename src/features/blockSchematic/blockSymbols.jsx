@@ -65,6 +65,15 @@ function symbolPaths(kind) {
       );
     case 'regulator':
       return <path d="M12 4h24v16h-24z M4 9h8 M4 15h8 M36 12h8" />;
+    case 'arduino_uno':
+    case 'raspberry_pi':
+    case 'esp32':
+      return (
+        <>
+          <rect x="10" y="3" width="28" height="18" rx="2" />
+          <path d="M14 3v-3 M20 3v-3 M26 3v-3 M32 3v-3 M14 21v3 M20 21v3 M26 21v3 M32 21v3" />
+        </>
+      );
     case 'voltage_source':
       return (
         <>

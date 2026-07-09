@@ -41,6 +41,42 @@ const opampCircuit = {
   notes: [],
 };
 
+// Arduino Uno pin order: 5V,3V3,GND,VIN,D2,D3,D5,D9,D13,A0,A1,A2 (1-based pin numbers below).
+const unoCircuit = {
+  title: 'Uno Blink',
+  type: 'mcu_blink',
+  supplyVoltage: 5,
+  nodes: ['0', 'D13', 'LED_A', 'NC_U1_1', 'NC_U1_2', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+  components: [
+    {
+      ref: 'U1',
+      kind: 'arduino_uno',
+      value: 'Uno R3',
+      nodes: [
+        'NC_U1_1', 'NC_U1_2', '0', 'NC_U1_4',
+        'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8',
+        'D13', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12',
+      ],
+      footprint: 'Module:Arduino_UNO_R3',
+    },
+    {
+      ref: 'RLED',
+      kind: 'resistor',
+      value: '330',
+      nodes: ['D13', 'LED_A'],
+      footprint: 'Resistor_THT:R_Axial',
+    },
+    {
+      ref: 'DLED1',
+      kind: 'led',
+      value: 'LED',
+      nodes: ['LED_A', '0'],
+      footprint: 'LED_THT:LED_D5.0mm',
+    },
+  ],
+  notes: [],
+};
+
 // Ollama's streaming NDJSON response shape (used only by the stage-1 circuit call).
 const streamResponse = (content: string) => new Response(
   `${JSON.stringify({ message: { content } })}\n`,
@@ -77,7 +113,7 @@ describe('circuit generation pipeline', () => {
     const onEvent = vi.fn();
     const result = await runCircuitPipeline('Make an RC filter', [], null, null, onEvent);
 
-    expect(result).toEqual({ reply: 'I built an RC filter with R1 between IN and OUT.', circuit: validCircuit });
+    expect(result).toEqual({ reply: 'I built an RC filter with R1 between IN and OUT.', circuit: validCircuit, code: '' });
     expect(fetchMock).toHaveBeenCalledTimes(3);
 
     const stage1Body = JSON.parse(fetchMock.mock.calls[0][1].body);
@@ -262,7 +298,7 @@ describe('circuit generation pipeline', () => {
 
     const result = await runCircuitPipeline('Make an RC filter', []);
 
-    expect(result).toEqual({ reply: 'Built it.', circuit: validCircuit });
+    expect(result).toEqual({ reply: 'Built it.', circuit: validCircuit, code: '' });
     expect(fetchMock).toHaveBeenCalledTimes(3);
     fetchMock.mock.calls.forEach((call) => {
       expect(call[0]).toBe('https://open.bigmodel.cn/api/paas/v4/chat/completions');
@@ -298,5 +334,74 @@ describe('circuit generation pipeline', () => {
       code: 'provider_response',
       message: expect.stringContaining('max_tokens was exhausted'),
     });
+  });
+});
+
+describe('microcontroller board support', () => {
+  it('allows the three MCU kinds in the circuit schema', () => {
+    expect(CIRCUIT_SCHEMA.properties.components.items.properties.kind.enum).toEqual(
+      expect.arrayContaining(['arduino_uno', 'raspberry_pi', 'esp32']),
+    );
+  });
+
+  it('carries reviewer-written firmware through to the pipeline result when the circuit needs no correction', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(JSON.stringify({ circuit: unoCircuit })))
+      .mockResolvedValueOnce(ollamaResponse(JSON.stringify({
+        ok: true,
+        code: 'void setup() { pinMode(13, OUTPUT); }\nvoid loop() { digitalWrite(13, HIGH); delay(500); digitalWrite(13, LOW); delay(500); }',
+      })))
+      .mockResolvedValueOnce(okReply('I wired D13 through a resistor to the LED.'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runCircuitPipeline('Blink an LED from an Arduino Uno on pin 13', []);
+
+    expect(result.circuit).toEqual(unoCircuit);
+    expect(result.code).toContain('digitalWrite(13, HIGH)');
+  });
+
+  it('strips accidental Markdown fences from reviewer-written firmware', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(JSON.stringify({ circuit: unoCircuit })))
+      .mockResolvedValueOnce(ollamaResponse(JSON.stringify({
+        ok: true,
+        code: '```cpp\nvoid setup() {}\nvoid loop() {}\n```',
+      })))
+      .mockResolvedValueOnce(okReply());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runCircuitPipeline('Blink an LED from an Arduino Uno on pin 13', []);
+
+    expect(result.code).toBe('void setup() {}\nvoid loop() {}');
+  });
+
+  it('returns an empty code string when the circuit has no MCU board', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(JSON.stringify({ circuit: validCircuit })))
+      .mockResolvedValueOnce(okReviewer())
+      .mockResolvedValueOnce(okReply());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runCircuitPipeline('Make an RC filter', []);
+
+    expect(result.code).toBe('');
+  });
+
+  it('carries firmware through even when the reviewer also corrects the circuit', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(JSON.stringify({ circuit: unoCircuit })))
+      .mockResolvedValueOnce(ollamaResponse(JSON.stringify({
+        ok: false,
+        issues: ['RLED value was too small for a 5V logic level'],
+        circuit: { ...unoCircuit, components: unoCircuit.components.map((c) => (c.ref === 'RLED' ? { ...c, value: '220' } : c)) },
+        code: 'void setup() { pinMode(13, OUTPUT); }\nvoid loop() {}',
+      })))
+      .mockResolvedValueOnce(okReply());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runCircuitPipeline('Blink an LED from an Arduino Uno on pin 13', []);
+
+    expect(result.circuit.components.find((c: { ref: string }) => c.ref === 'RLED')).toMatchObject({ value: '220' });
+    expect(result.code).toContain('pinMode(13, OUTPUT)');
   });
 });

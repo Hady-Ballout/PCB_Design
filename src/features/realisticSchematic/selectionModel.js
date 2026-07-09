@@ -3,7 +3,7 @@
 // {type:'net', net}), computes everything the renderer should light up.
 // No React imports so it stays unit-testable.
 
-import { GROUND_NET } from './breadboardModel.js';
+import { GROUND_NET, MCU_PINS } from './breadboardModel.js';
 import { capStyle } from './partVisuals.js';
 
 // A pin is unconnected when its net is a placeholder (NC_… or `${ref}_${pin}`).
@@ -23,6 +23,7 @@ const PIN_LABELS = {
   mosfet_p: ['D', 'G', 'S'],
   led: ['A', 'K'],
   diode: ['A', 'K'],
+  ...MCU_PINS,
 };
 
 // Labels for a part's pins, or null when labels would add nothing (plain

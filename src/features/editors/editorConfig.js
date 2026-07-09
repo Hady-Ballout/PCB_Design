@@ -5,6 +5,7 @@ export const EDITOR_VIEW_LABELS = {
   canvas: 'Canvas',
   blockSchematic: 'Block schematic',
   realisticSchematic: 'Realistic schematic',
+  code: 'Code',
 };
 
 export const EDITOR_SPLIT_STORAGE_KEY = 'prompt-to-pcb-editor-split-v1';

@@ -167,3 +167,86 @@ describe('circuitToBreadboard', () => {
     expect(second).toEqual(first);
   });
 });
+
+describe('microcontroller boards', () => {
+  // Arduino Uno pin order: 5V,3V3,GND,VIN,D2,D3,D5,D9,D13,A0,A1,A2.
+  const unoCircuit = {
+    title: 'Uno Blink',
+    nodes: ['0', 'D13', 'LED_A'],
+    components: [
+      {
+        ref: 'U1',
+        kind: 'arduino_uno',
+        value: 'Uno R3',
+        nodes: [
+          'NC_U1_1', 'NC_U1_2', '0', 'NC_U1_4',
+          'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8',
+          'D13', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12',
+        ],
+      },
+      { ref: 'RLED', kind: 'resistor', value: '330', nodes: ['D13', 'LED_A'] },
+      { ref: 'DLED1', kind: 'led', value: 'LED', nodes: ['LED_A', '0'] },
+    ],
+  };
+
+  it('places an off-board Uno in a stacked slot and taps an existing tie group directly, with no extra jumper', () => {
+    const model = circuitToBreadboard(unoCircuit);
+    const uno = model.parts.find((part) => part.ref === 'U1');
+    const rled = model.parts.find((part) => part.ref === 'RLED');
+
+    expect(uno.body).toBe('arduino_uno');
+    expect(uno.meta.slotIndex).toBe(0);
+    expect(uno.meta.slot).toMatchObject({ width: expect.any(Number), height: expect.any(Number) });
+    // D13 is pin 9 (index 8) and must land in the exact same hole RLED's D13 leg uses.
+    expect(uno.holes[8]).toMatchObject({ strip: rled.holes[0].strip, column: rled.holes[0].column });
+    expect(model.jumpers.filter((jumper) => jumper.net === 'D13')).toHaveLength(0);
+    // Unused pins get no hole at all (off-board, never placed on the grid).
+    expect(uno.holes[0]).toBeNull();
+  });
+
+  it('powers the board from the rail even with no explicit voltage_source, and grounds it', () => {
+    const model = circuitToBreadboard(unoCircuit);
+    expect(model.rails.railTopMinus).toBe('0');
+    const uno = model.parts.find((part) => part.ref === 'U1');
+    // GND is pin 3 (index 2); it must resolve to a real rail hole, not null.
+    expect(uno.holes[2]).toMatchObject({ strip: 'railTopMinus' });
+  });
+
+  it('grows the board height to fit a stacked MCU slot', () => {
+    const withUno = circuitToBreadboard(unoCircuit);
+    const without = circuitToBreadboard(dividerCircuit);
+    expect(withUno.board.height).toBeGreaterThan(without.board.height);
+  });
+
+  it('places an ESP32 as a wide module straddling the trench', () => {
+    const esp32Circuit = {
+      title: 'ESP32 Blink',
+      nodes: ['0', 'GPIO2', 'LED_A'],
+      components: [
+        {
+          ref: 'U1',
+          kind: 'esp32',
+          value: 'DevKit V1',
+          nodes: [
+            'NC_U1_1', '0', 'NC_U1_3', 'NC_U1_4',
+            'GPIO2', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8',
+            'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12',
+          ],
+        },
+        { ref: 'RLED', kind: 'resistor', value: '330', nodes: ['GPIO2', 'LED_A'] },
+        { ref: 'DLED1', kind: 'led', value: 'LED', nodes: ['LED_A', '0'] },
+      ],
+    };
+    const model = circuitToBreadboard(esp32Circuit);
+    const esp32 = model.parts.find((part) => part.ref === 'U1');
+
+    expect(esp32.body).toBe('esp32');
+    expect(esp32.holes.filter(Boolean)).toHaveLength(12);
+    const { columnStart, columnEnd } = esp32.meta;
+    expect(columnEnd - columnStart).toBe(5);
+    esp32.holes.forEach((hole) => {
+      expect(hole.column).toBeGreaterThanOrEqual(columnStart);
+      expect(hole.column).toBeLessThanOrEqual(columnEnd);
+    });
+  });
+});

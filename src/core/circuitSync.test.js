@@ -384,3 +384,57 @@ V2 IN 0 DC 5
     expect(parsed.errors.join(' ')).toContain('unknown component MISSING');
   });
 });
+
+describe('microcontroller board synchronization', () => {
+  const unoCircuit = {
+    title: 'Uno Blink',
+    type: 'mcu_blink',
+    supplyVoltage: 5,
+    components: [
+      {
+        ref: 'U1',
+        kind: 'arduino_uno',
+        value: 'Uno R3',
+        footprint: 'Module:Arduino_UNO_R3',
+        nodes: [
+          'NC_U1_1', 'NC_U1_2', '0', 'NC_U1_4',
+          'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8',
+          'D13', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12',
+        ],
+      },
+      { ref: 'RLED', kind: 'resistor', value: '330', footprint: 'Resistor_THT:R_Axial', nodes: ['D13', 'LED_A'] },
+      { ref: 'DLED1', kind: 'led', value: 'LED', footprint: 'LED_THT:LED_D5.0mm', nodes: ['LED_A', '0'] },
+    ],
+    notes: [],
+  };
+
+  it('accepts the arduino_uno kind in circuit JSON', () => {
+    const parsed = parseCircuitJson(JSON.stringify(unoCircuit));
+    expect(parsed.ok).toBe(true);
+    expect(parsed.circuit.components.find((part) => part.ref === 'U1').kind).toBe('arduino_uno');
+  });
+
+  it('round-trips U1 through the SPICE deck as a comment, never an element line', () => {
+    const spice = toSpice(unoCircuit);
+    expect(spice).toContain('* U1 arduino_uno');
+    expect(spice).not.toMatch(/^U1\s/m);
+
+    const parsed = parseSpiceNetlist(spice, unoCircuit);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.circuit.components.map((part) => part.ref)).toEqual(['U1', 'RLED', 'DLED1']);
+    expect(parsed.circuit.components.find((part) => part.ref === 'U1')).toMatchObject(unoCircuit.components[0]);
+  });
+
+  it('keeps U1 present after editing an unrelated component value in the SPICE deck', () => {
+    const editedSpice = toSpice(unoCircuit).replace('RLED D13 LED_A 330', 'RLED D13 LED_A 470');
+    const parsed = parseSpiceNetlist(editedSpice, unoCircuit);
+
+    expect(parsed.ok).toBe(true);
+    expect(parsed.circuit.components.find((part) => part.ref === 'RLED').value).toBe('470');
+    expect(parsed.circuit.components.find((part) => part.ref === 'U1')).toMatchObject(unoCircuit.components[0]);
+    expect(circuitElectricalSignature({
+      ...unoCircuit,
+      components: unoCircuit.components.map((part) => (part.ref === 'RLED' ? { ...part, value: '470' } : part)),
+    })).toBe(circuitElectricalSignature(parsed.circuit));
+  });
+});

@@ -46,6 +46,14 @@ export function ComponentToolIcon({ type }) {
       </svg>
     );
   }
+  if (type === 'arduino_uno' || type === 'raspberry_pi' || type === 'esp32') {
+    return (
+      <svg viewBox="0 0 64 32" aria-hidden="true" focusable="false">
+        <rect x="14" y="4" width="36" height="24" rx="2" />
+        <path d="M20 4V0M28 4V0M36 4V0M44 4V0M20 28V32M28 28V32M36 28V32M44 28V32" />
+      </svg>
+    );
+  }
   return (
     <svg viewBox="0 0 64 32" aria-hidden="true" focusable="false">
       <path d="M8 16H22M42 16H58M22 5L22 27L46 16Z" />

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MCU_PIN_COUNTS,
   buildCircuitDiagram,
   diagramComponentsOverlap,
   layoutCircuitDiagram,
@@ -426,5 +427,62 @@ describe('prompt-to-pcb generator', () => {
     expect(spice).toContain('R2 OPP VBIAS 10k');
     expect(kicadNetlist).toContain('<net');
     expect(kicadNetlist).toContain('name="VBIAS"');
+  });
+});
+
+describe('microcontroller boards', () => {
+  const esp32Circuit = {
+    title: 'ESP32 Blink',
+    type: 'mcu_blink',
+    supplyVoltage: 3.3,
+    components: [
+      {
+        ref: 'U1',
+        kind: 'esp32',
+        value: 'DevKit V1',
+        nodes: [
+          'NC_U1_1', '0', 'NC_U1_3', 'NC_U1_4',
+          'GPIO2', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8',
+          'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12',
+        ],
+      },
+      { ref: 'RLED', kind: 'resistor', value: '330', nodes: ['GPIO2', 'LED_A'] },
+      { ref: 'DLED1', kind: 'led', value: 'LED', nodes: ['LED_A', '0'] },
+    ],
+    notes: [],
+  };
+
+  it('emits a comment-only SPICE line for a microcontroller board, never an element line', () => {
+    const spice = toSpice(esp32Circuit);
+
+    expect(spice).toContain('* U1 esp32 (microcontroller board, not simulated)');
+    expect(spice).not.toMatch(/^U1\s/m);
+    expect(spice).toContain('RLED GPIO2 LED_A 330');
+    expect(spice).toContain('DLED1 LED_A 0 DRED');
+    expect(spice.trim().endsWith('.end')).toBe(true);
+  });
+
+  it('does not flag a board\'s NC_ placeholder pins as floating nets', () => {
+    const result = validateCircuit(esp32Circuit);
+
+    expect(result.warnings.some((warning) => /NC_U1/.test(warning))).toBe(false);
+  });
+
+  it('warns when a board does not list its fixed pin count', () => {
+    const truncated = {
+      ...esp32Circuit,
+      components: esp32Circuit.components.map((part) => (part.ref === 'U1' ? { ...part, nodes: part.nodes.slice(0, 4) } : part)),
+    };
+    const result = validateCircuit(truncated);
+
+    expect(result.warnings.some((warning) => warning.includes(`exactly ${MCU_PIN_COUNTS.esp32} nodes`))).toBe(true);
+  });
+
+  it('assigns a diagram symbol to a placed microcontroller board', () => {
+    const diagram = buildCircuitDiagram(esp32Circuit);
+    const board = diagram.components.find((component) => component.ref === 'U1');
+
+    expect(board).toBeDefined();
+    expect(board.pins).toHaveLength(MCU_PIN_COUNTS.esp32);
   });
 });

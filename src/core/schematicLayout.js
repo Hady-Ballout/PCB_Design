@@ -58,6 +58,9 @@ const symbolTypeByKind = {
   mosfet_p: 'generic',
   opamp: 'opamp',
   regulator: 'generic',
+  arduino_uno: 'generic',
+  raspberry_pi: 'generic',
+  esp32: 'generic',
 };
 
 const snap = (value, grid = GRID_SIZE) => Math.round(value / grid) * grid;
@@ -253,6 +256,9 @@ const pinPoint = (component, pinIndex, node, netPosition) => {
 
 const componentSize = (kind) => {
   const symbolType = symbolTypeByKind[kind] || 'generic';
+  // Boards carry 10-12 pins in the generic side-alternating layout, so they
+  // need a much taller body than the other 'generic' kinds (mosfet, regulator).
+  if (kind === 'arduino_uno' || kind === 'raspberry_pi' || kind === 'esp32') return { width: 150, height: 200, symbolType };
   if (symbolType === 'opamp') return { width: 150, height: 110, symbolType };
   if (symbolType === 'bjt_npn' || symbolType === 'bjt_pnp') return { width: 118, height: 100, symbolType };
   if (symbolType === 'voltage_source' || symbolType === 'capacitor' || symbolType === 'diode' || symbolType === 'led') {

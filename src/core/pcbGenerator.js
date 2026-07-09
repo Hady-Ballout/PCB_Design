@@ -36,6 +36,9 @@ export {
   validateDiagramLayout,
 };
 
+export const MCU_KINDS = new Set(['arduino_uno', 'raspberry_pi', 'esp32']);
+export const MCU_PIN_COUNTS = { arduino_uno: 12, raspberry_pi: 10, esp32: 12 };
+
 export const validateCircuit = (circuit) => {
   const errors = [];
   const warnings = [];
@@ -59,7 +62,13 @@ export const validateCircuit = (circuit) => {
     if (part.kind === 'opamp' && part.nodes.length < 5) {
       warnings.push(`${part.ref} op amp should include + input, - input, output, V+, and V- nodes.`);
     }
-    part.nodes.forEach((node) => nodeUse.set(node, (nodeUse.get(node) ?? 0) + 1));
+    if (MCU_KINDS.has(part.kind) && part.nodes.length !== MCU_PIN_COUNTS[part.kind]) {
+      warnings.push(`${part.ref} ${part.kind} should list exactly ${MCU_PIN_COUNTS[part.kind]} nodes in its fixed pin order.`);
+    }
+    part.nodes.forEach((node, index) => {
+      if (isUnconnectedTerminal(node, part.ref, index + 1)) return;
+      nodeUse.set(node, (nodeUse.get(node) ?? 0) + 1);
+    });
   }
 
   if (!nodeUse.has('0')) errors.push('No ground node was generated.');
@@ -94,6 +103,9 @@ const spiceRef = (part) => {
     mosfet_p: 'M',
     opamp: 'X',
     regulator: 'V',
+    arduino_uno: 'U',
+    raspberry_pi: 'U',
+    esp32: 'U',
   };
   const prefix = prefixByKind[part.kind] || 'X';
   return base.startsWith(prefix) ? base : `${prefix}_${base}`;
@@ -129,6 +141,9 @@ const symbolTypeByKind = {
   mosfet_p: 'generic',
   opamp: 'opamp',
   regulator: 'generic',
+  arduino_uno: 'generic',
+  raspberry_pi: 'generic',
+  esp32: 'generic',
 };
 
 const isOutputNode = (node) => /(^|_)(v?out|out|load|filtered)(_|$)/i.test(node);
@@ -644,6 +659,7 @@ export const toSpice = (circuit) => {
     if (part.kind === 'mosfet_p') lines.push(`${ref} ${a} ${b} ${c} ${c} MPMOS`);
     if (part.kind === 'opamp') lines.push(`${ref} ${a} ${b} ${c} ${d} ${e} LM358`);
     if (part.kind === 'regulator') lines.push(`${ref} ${regulatorOutputNode(part.nodes)} 0 DC ${regulatorVoltage(part.value)}`);
+    if (MCU_KINDS.has(part.kind)) lines.push(`* ${ref} ${part.kind} (microcontroller board, not simulated)`);
   }
   lines.push('.model DGEN D(IS=1e-14 RS=1 N=1)');
   lines.push('.model DRED D(IS=1e-20 N=2 RS=10 CJO=2p BV=5 IBV=10u)');

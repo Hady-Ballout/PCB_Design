@@ -61,6 +61,9 @@ Allowed component kinds:
 - `voltage_source`
 - `signal_source`
 - `load`
+- `arduino_uno`
+- `raspberry_pi`
+- `esp32`
 
 Do not invent additional component kinds.
 
@@ -104,8 +107,13 @@ Use these node orders consistently:
 | `load` | `[positive_or_input, return]` |
 | `regulator` | `[input, ground, output]` |
 | `opamp` | `[non_inverting, inverting, output, positive_supply, negative_supply]` |
+| `arduino_uno` | `[5V, 3V3, GND, VIN, D2, D3, D5, D9, D13, A0, A1, A2]` (12 nodes, fixed order) |
+| `raspberry_pi` | `[5V, 3V3, GND, GPIO2, GPIO3, GPIO4, GPIO17, GPIO18, GPIO27, GPIO22]` (10 nodes, fixed order) |
+| `esp32` | `[3V3, GND, VIN, EN, GPIO2, GPIO4, GPIO5, GPIO13, GPIO18, GPIO19, GPIO21, GPIO22]` (12 nodes, fixed order) |
 
 For a single-supply op amp, connect the negative-supply node to `"0"`.
+
+Microcontroller boards always list every pin in the table above, in that exact order, even when a pin is unused. Fill an unused pin with a unique placeholder node named `NC_<REF>_<pinNumber>`, for example `NC_U1_5` for `U1`'s fifth pin (1-based). Tie the `GND` pin to `"0"`. When the circuit has no separate supply, power it from the board's `5V` or `3V3` pin and set `supplyVoltage` to match (`5` for `arduino_uno`, `3.3` for `raspberry_pi`/`esp32`).
 
 ## SPICE Compatibility Rules
 
@@ -132,6 +140,45 @@ For a single-supply op amp, connect the negative-supply node to `"0"`.
 - Use `1Meg` rather than `1M` when one megaohm is intended.
 - Use `voltage_source` for DC supplies and fixed DC input biases. A SPICE line like `V1 VIN 0 DC 1` must match a JSON `voltage_source`.
 - Use `signal_source` only for waveform or time-varying sources such as `SINE(...)`, `PULSE(...)`, `PWL(...)`, `EXP(...)`, or `AC`.
+- Microcontroller boards (`arduino_uno`, `raspberry_pi`, `esp32`) use an `U` reference, for example `U1`, and must never appear in the SPICE netlist — they are wiring-only and never simulated. Every other component in the circuit must still appear normally.
+
+## Firmware Code
+
+When `circuit.components` includes a microcontroller board, also return a top-level `"code"` field containing complete firmware for it, as a single plain-text JSON string with `\n` newlines — no Markdown fences, no explanation. When there is no microcontroller board, omit `code` or return an empty string.
+
+- `arduino_uno` and `esp32`: Arduino C++ using `setup()`/`loop()`. Derive the pin number from the pin name: `D13` -> `13`, `A0` -> `A0`, `GPIO2` -> `2`.
+- `raspberry_pi`: Python 3 using `gpiozero`. Derive the pin number the same way, e.g. `GPIO17` -> `LED(17)` or `Button(17)`.
+- Only reference pins that are actually wired in `circuit.components`. Implement exactly the behavior requested. Keep it under 40 lines and beginner-friendly with brief comments.
+
+Example — Arduino Uno blinking an LED on `D13`:
+
+```
+void setup() {
+  pinMode(13, OUTPUT);
+}
+
+void loop() {
+  digitalWrite(13, HIGH);
+  delay(500);
+  digitalWrite(13, LOW);
+  delay(500);
+}
+```
+
+Example — Raspberry Pi blinking an LED on `GPIO17` with gpiozero:
+
+```
+from gpiozero import LED
+from time import sleep
+
+led = LED(17)
+
+while True:
+    led.on()
+    sleep(0.5)
+    led.off()
+    sleep(0.5)
+```
 
 ## Circuit Sanity Checklist
 
@@ -248,6 +295,15 @@ Structure: input, ground, output regulator with capacitors from input to ground 
 - Typical `COUT`: `100nF` plus `1uF` to `10uF`.
 - Avoid ignoring dropout voltage and power dissipation.
 
+### MCU-Driven LED
+
+Structure: `U1(D13) -- RLED -- DLED1 -- 0`, with `U1(GND) -- 0`.
+
+- The MCU (`U1`) appears only in the JSON `components`, never in SPICE — the SPICE deck contains only `RLED` and `DLED1` (plus an optional `signal_source` only if the user wants to simulate the pin's own waveform).
+- Size `RLED` for the board's logic level: 5V for `arduino_uno`, 3.3V for `raspberry_pi`/`esp32`.
+- Never skip the series resistor.
+- The `code` field's firmware must drive the same pin named in the circuit (e.g. `D13`).
+
 ### Pull-Up, Pull-Down, and Debounce
 
 - Pull-up: `VCC -- RPULL -- INPUT`, switch from `INPUT` to `0`.
@@ -267,6 +323,9 @@ Structure: input, ground, output regulator with capacitors from input to ground 
 - Two-pin header: `Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical`
 - Three-pin header: `Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical`
 - DIP-8 op amp: `Package_DIP:DIP-8_W7.62mm`
+- Arduino Uno: `Module:Arduino_UNO_R3`
+- Raspberry Pi (GPIO header): `Connector_PinSocket_2.54mm:PinSocket_2x20_P2.54mm_Vertical`
+- ESP32 DevKit: `Module:ESP32-DevKitC`
 
 Verify physical pinouts before fabrication.
 
