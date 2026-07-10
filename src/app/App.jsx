@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   buildConversationContext,
   chatTitleFromPrompt,
@@ -16,6 +16,7 @@ import {
   synchronizeResult,
 } from '../core/circuitSync.js';
 import { toDiagramSvg } from '../core/pcbGenerator.js';
+import { toKiCadSchematic } from '../core/kicadSchematic.js';
 import { changedLineIndexes } from '../core/lineDiff.js';
 import { layoutCircuitDiagram } from '../core/schematicLayout.js';
 import { API_BASE } from '../core/config.js';
@@ -28,6 +29,12 @@ import { EDITOR_SPLIT_STORAGE_KEY, EDITOR_VIEW_LABELS, loadEditorSplit } from '.
 import { firmwareTargetForCircuit } from '../features/editors/firmwareInfo.js';
 import { WaveformChart } from '../features/waveform/WaveformChart.jsx';
 import { CircuitDiagram } from '../features/schematic/CircuitDiagram.jsx';
+import { KiCanvasEmbed } from '../features/kicanvas/KiCanvasEmbed.jsx';
+
+// three.js is heavy; load the 3D board viewer only when its window opens.
+const Pcb3DViewer = React.lazy(() =>
+  import('../features/pcb3d/Pcb3DViewer.jsx').then((module) => ({ default: module.Pcb3DViewer })),
+);
 import { BlockSchematic } from '../features/blockSchematic/BlockSchematic.jsx';
 import { RealisticSchematic } from '../features/realisticSchematic/RealisticSchematic.jsx';
 import { ComponentToolIcon } from '../features/schematic/symbols.jsx';
@@ -50,6 +57,7 @@ function App() {
   });
   const [chatStore, setChatStore] = useState(loadChatStore);
   const [diagramTool, setDiagramTool] = useState('select');
+  const [canvasMode, setCanvasMode] = useState('kicad');
   const [diagramSelection, setDiagramSelection] = useState(null);
   const [pendingTerminal, setPendingTerminal] = useState(null);
   const [openEditorViews, setOpenEditorViews] = useState(['spice']);
@@ -66,6 +74,8 @@ function App() {
   const messagesEndRef = useRef(null);
   const spiceEditorRef = useRef(null);
   const resizeDragRef = useRef(null);
+  const editorWindowRectsRef = useRef(new Map());
+  const editorLayoutSignatureRef = useRef('');
   const activeChat = chatStore.chats.find((chat) => chat.id === chatStore.activeChatId) || chatStore.chats[0];
   const prompt = activeChat?.draft || '';
   const result = activeChat?.result || null;
@@ -173,6 +183,82 @@ function App() {
       // Resizing still works when browser storage is unavailable.
     }
   }, [editorSplit]);
+
+  // Windows-snap style layout animation: whenever the set of open windows (or
+  // the maximized one) changes, glide every surviving window from its old rect
+  // to its new one, and let brand-new windows rise in from below so added
+  // sections read as stacking downwards. Runs on every commit so the stored
+  // rects stay fresh through splitter drags and pages without windows, but
+  // only animates when the layout itself changed.
+  useLayoutEffect(() => {
+    const signature = `${openEditorViews.join(',')}|${maximizedEditorView || ''}|${page}|${user ? 'in' : 'out'}`;
+    const layoutChanged = signature !== editorLayoutSignatureRef.current;
+    editorLayoutSignatureRef.current = signature;
+    const animate = layoutChanged
+      && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const rects = editorWindowRectsRef.current;
+    const seen = new Set();
+    document.querySelectorAll('[data-editor-view]').forEach((element) => {
+      if (typeof element.animate !== 'function') return;
+      const view = element.dataset.editorView;
+      seen.add(view);
+      if (!animate) {
+        // A transform mid-animation would corrupt the measurement; skip those.
+        if (!element.getAnimations().length) rects.set(view, element.getBoundingClientRect());
+        return;
+      }
+      element.getAnimations().forEach((animation) => animation.cancel());
+      const rect = element.getBoundingClientRect();
+      const before = rects.get(view);
+      rects.set(view, rect);
+      if (!rect.width || !rect.height) return;
+      if (!before) {
+        element.animate(
+          [
+            { opacity: 0, transform: 'translateY(32px) scale(0.98)' },
+            { opacity: 1, transform: 'none' },
+          ],
+          { duration: 260, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
+        );
+        return;
+      }
+      const deltaX = before.left - rect.left;
+      const deltaY = before.top - rect.top;
+      const scaleX = before.width / rect.width;
+      const scaleY = before.height / rect.height;
+      const moved = Math.abs(deltaX) > 0.5 || Math.abs(deltaY) > 0.5
+        || Math.abs(scaleX - 1) > 0.005 || Math.abs(scaleY - 1) > 0.005;
+      if (!moved) return;
+      element.animate(
+        [
+          {
+            transformOrigin: 'top left',
+            transform: `translate(${deltaX}px, ${deltaY}px) scale(${scaleX}, ${scaleY})`,
+          },
+          { transformOrigin: 'top left', transform: 'none' },
+        ],
+        { duration: 300, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
+      );
+    });
+    // Forget closed windows so reopening one plays the entrance again.
+    [...rects.keys()].forEach((view) => {
+      if (!seen.has(view)) rects.delete(view);
+    });
+  });
+
+  // Viewport resizes reflow the windows without a React commit; re-measure so
+  // the next layout animation starts from where the windows actually are.
+  useEffect(() => {
+    const refreshRects = () => {
+      const rects = editorWindowRectsRef.current;
+      document.querySelectorAll('[data-editor-view]').forEach((element) => {
+        if (element.getAnimations?.().length) return;
+        rects.set(element.dataset.editorView, element.getBoundingClientRect());
+      });
+    };
+    window.addEventListener('resize', refreshRects);
+    return () => window.removeEventListener('resize', refreshRects);
+  }, []);
 
   useEffect(() => {
     const syncPageFromHash = () => {
@@ -409,6 +495,17 @@ function App() {
     [editableCircuitJson, result?.circuit],
   );
 
+  // Regenerated on every diagram edit so the KiCanvas view tracks the canvas
+  // (and the downloadable .kicad_sch) in real time.
+  const kicadSchematicSource = useMemo(() => {
+    if (!result?.circuit || isGenerating) return '';
+    try {
+      return toKiCadSchematic(result.circuit, editedDiagram || result.diagram);
+    } catch {
+      return '';
+    }
+  }, [result?.circuit, result?.diagram, editedDiagram, isGenerating]);
+
   const openEditorView = (view) => {
     setOpenEditorViews((current) => {
       if (current.includes(view)) return current;
@@ -438,10 +535,12 @@ function App() {
     event.preventDefault();
     const container = event.currentTarget.parentElement;
     event.currentTarget.setPointerCapture(event.pointerId);
-    resizeDragRef.current = { axis, container };
+    resizeDragRef.current = { axis, container, target: null, frame: null };
     setResizingAxis(axis);
   };
 
+  // The splitter eases toward the pointer each frame instead of jumping to it,
+  // which smooths pointer jitter into the damped glide Windows snap-resize has.
   const moveEditorResize = (event) => {
     const drag = resizeDragRef.current;
     if (!drag || !drag.container) return;
@@ -451,15 +550,41 @@ function App() {
       : ((event.clientY - bounds.top) / bounds.height) * 100;
     const minimum = drag.axis === 'columns' ? 25 : 32;
     const maximum = drag.axis === 'columns' ? 75 : 72;
-    setEditorSplit((current) => ({
-      ...current,
-      [drag.axis]: Math.min(maximum, Math.max(minimum, raw)),
-    }));
+    let target = Math.min(maximum, Math.max(minimum, raw));
+    // Gentle magnet toward an even split, like Windows snap layouts.
+    if (Math.abs(target - 50) < 1.75) target = 50;
+    drag.target = target;
+    if (drag.frame != null) return;
+    const step = () => {
+      const active = resizeDragRef.current;
+      if (!active || active.target == null) return;
+      let settled = false;
+      setEditorSplit((current) => {
+        const value = current[active.axis];
+        const distance = active.target - value;
+        if (Math.abs(distance) < 0.05) {
+          settled = true;
+          return value === active.target ? current : { ...current, [active.axis]: active.target };
+        }
+        return { ...current, [active.axis]: value + distance * 0.35 };
+      });
+      active.frame = settled ? null : requestAnimationFrame(step);
+    };
+    drag.frame = requestAnimationFrame(step);
   };
 
   const stopEditorResize = (event) => {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    const drag = resizeDragRef.current;
+    if (drag) {
+      if (drag.frame != null) cancelAnimationFrame(drag.frame);
+      if (drag.target != null) {
+        const axis = drag.axis;
+        const target = drag.target;
+        setEditorSplit((current) => ({ ...current, [axis]: target }));
+      }
     }
     resizeDragRef.current = null;
     setResizingAxis(null);
@@ -940,12 +1065,41 @@ function App() {
     <div className="editor-window-body canvas-window-body">
       {!result ? (
         <div className="editor-window-empty">
-          <strong>No canvas available</strong>
-          <p>Generate a circuit to open its editable schematic canvas.</p>
+          <strong>No schematic available</strong>
+          <p>Generate a circuit to open its KiCad schematic and editing canvas.</p>
         </div>
+      ) : canvasMode === 'kicad' ? (
+        <>
+          <div className="canvas-window-toolbar">
+            <div className="diagram-editbar canvas-mode-toggle" aria-label="Schematic view mode">
+              <button className="active-tool" type="button">KiCad view</button>
+              <button onClick={() => setCanvasMode('edit')} type="button">Edit</button>
+            </div>
+            <div className="button-row">
+              <button
+                onClick={() => downloadText(`${(result.circuit?.title || 'schematic').replace(/[^a-z0-9]+/gi, '_').toLowerCase()}.kicad_sch`, kicadSchematicSource)}
+                disabled={!kicadSchematicSource}
+              >
+                Download .kicad_sch
+              </button>
+            </div>
+          </div>
+          {kicadSchematicSource ? (
+            <KiCanvasEmbed source={kicadSchematicSource} />
+          ) : (
+            <div className="editor-window-empty">
+              <strong>Schematic not ready</strong>
+              <p>The KiCad schematic appears here once generation finishes.</p>
+            </div>
+          )}
+        </>
       ) : (
         <>
           <div className="canvas-window-toolbar">
+            <div className="diagram-editbar canvas-mode-toggle" aria-label="Schematic view mode">
+              <button onClick={() => setCanvasMode('kicad')} type="button">KiCad view</button>
+              <button className="active-tool" type="button">Edit</button>
+            </div>
             <div className="canvas-tool-stack">
               <div className="diagram-editbar" aria-label="Diagram tools">
                 <button className={diagramTool === 'select' ? 'active-tool' : ''} onClick={() => { setDiagramTool('select'); setPendingTerminal(null); }}>Select</button>
@@ -1107,6 +1261,21 @@ function App() {
     </div>
   );
 
+  const renderPcb3dView = () => (
+    <div className="editor-window-body canvas-window-body">
+      {!result ? (
+        <div className="editor-window-empty">
+          <strong>No PCB available</strong>
+          <p>Generate a circuit to view its 3D printed circuit board.</p>
+        </div>
+      ) : (
+        <React.Suspense fallback={<div className="editor-window-empty"><p>Loading 3D viewer...</p></div>}>
+          <Pcb3DViewer circuit={result.circuit} />
+        </React.Suspense>
+      )}
+    </div>
+  );
+
   const renderRealisticSchematicView = () => (
     <div className="editor-window-body canvas-window-body">
       {!result ? (
@@ -1125,6 +1294,7 @@ function App() {
     return (
       <article
         className={`editor-window ${activeEditorView === view ? 'active' : ''} ${isMaximized ? 'maximized' : ''}`}
+        data-editor-view={view}
         key={view}
         onMouseDown={() => setActiveEditorView(view)}
       >
@@ -1168,6 +1338,7 @@ function App() {
         {view === 'canvas' && renderCanvasView()}
         {view === 'blockSchematic' && renderBlockSchematicView()}
         {view === 'realisticSchematic' && renderRealisticSchematicView()}
+        {view === 'pcb3d' && renderPcb3dView()}
         {view === 'code' && renderCodeView()}
       </article>
     );

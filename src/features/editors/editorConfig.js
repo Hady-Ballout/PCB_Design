@@ -2,9 +2,10 @@
 export const EDITOR_VIEW_LABELS = {
   spice: 'SPICE',
   json: 'JSON',
-  canvas: 'Canvas',
+  canvas: 'Schematic',
   blockSchematic: 'Block schematic',
   realisticSchematic: 'Realistic schematic',
+  pcb3d: '3D PCB',
   code: 'Code',
 };
 

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PCB feature harness (dev only)</title>
+  <!-- Dev-only harness: renders the KiCanvas schematic and the 3D PCB viewer
+       with a canned circuit, so both features can be checked without logging
+       in or running the AI backend. Open http://localhost:5173/preview-harness.html -->
+  <script>
+    // Harness-only: in hidden/headless windows requestAnimationFrame never
+    // fires, which stalls KiCanvas (its update() awaits a frame) and pauses
+    // the three.js loop. Fall back to timers when no real frame arrives.
+    (() => {
+      const nativeRaf = window.requestAnimationFrame.bind(window);
+      const nativeCancel = window.cancelAnimationFrame.bind(window);
+      // Race each callback: real frame if one arrives, 50ms timer otherwise.
+      window.requestAnimationFrame = (cb) => {
+        const handles = {};
+        const fire = () => {
+          if (handles.done) return;
+          handles.done = true;
+          nativeCancel(handles.raf);
+          clearTimeout(handles.timer);
+          cb(performance.now());
+        };
+        handles.raf = nativeRaf(fire);
+        handles.timer = setTimeout(fire, 50);
+        return handles;
+      };
+      window.cancelAnimationFrame = (handles) => {
+        if (!handles || typeof handles !== 'object') return nativeCancel(handles);
+        handles.done = true;
+        nativeCancel(handles.raf);
+        clearTimeout(handles.timer);
+      };
+    })();
+  </script>
+  <style>
+    body { margin: 0; background: #10151c; color: #e8ecf2; font-family: Inter, Arial, sans-serif; }
+    main { display: grid; grid-template-rows: 46vh 46vh; gap: 12px; padding: 12px; height: calc(100vh - 24px); box-sizing: border-box; }
+    section { display: flex; flex-direction: column; min-height: 0; border: 1px solid #2a3442; border-radius: 8px; padding: 10px; }
+    h2 { margin: 0 0 8px; font-size: 15px; }
+    section > div { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <h2>KiCanvas schematic (generated .kicad_sch)</h2>
+      <div id="schematic-root"></div>
+    </section>
+    <section>
+      <h2>3D PCB viewer (procedural layout)</h2>
+      <div id="pcb-root"></div>
+    </section>
+  </main>
+  <script type="module">
+    import React from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { buildCircuitDiagram } from '/src/core/pcbGenerator.js';
+    import { toKiCadSchematic } from '/src/core/kicadSchematic.js';
+    import { KiCanvasEmbed } from '/src/features/kicanvas/KiCanvasEmbed.jsx';
+    import { Pcb3DViewer } from '/src/features/pcb3d/Pcb3DViewer.jsx';
+
+    // Same difference-amplifier fixture the core test suite lays out.
+    const circuit = {
+      title: 'Harness: Difference Amplifier',
+      type: 'amplifier',
+      supplyVoltage: 5,
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'V2', kind: 'voltage_source', value: '2.5V', nodes: ['VBIAS', '0'] },
+        { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VINP', 'OPP'] },
+        { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['OPP', 'VBIAS'] },
+        { ref: 'R3', kind: 'resistor', value: '10k', nodes: ['VINN', 'OPN'] },
+        { ref: 'R4', kind: 'resistor', value: '10k', nodes: ['OPN', 'VBIAS'] },
+        { ref: 'XU1', kind: 'opamp', value: 'LM358', nodes: ['OPP', 'OPN', 'VOUT', 'VCC', '0'] },
+        { ref: 'RLOAD', kind: 'load', value: '10k', nodes: ['VOUT', '0'] },
+      ],
+      notes: [],
+    };
+
+    const diagram = buildCircuitDiagram(circuit);
+    const schematic = toKiCadSchematic(circuit, diagram);
+    window.__harness = { schematic, diagram };
+
+    createRoot(document.getElementById('schematic-root'))
+      .render(React.createElement(KiCanvasEmbed, { source: schematic }));
+    createRoot(document.getElementById('pcb-root'))
+      .render(React.createElement(Pcb3DViewer, { circuit }));
+  </script>
+</body>
+</html>

@@ -8,6 +8,18 @@
       "port": 5173
     },
     {
+      "name": "web-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--host", "127.0.0.1", "--port", "5174", "--strictPort", "--configLoader", "native"],
+      "port": 5174
+    },
+    {
+      "name": "web-preview-2",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--host", "127.0.0.1", "--port", "5175", "--strictPort", "--configLoader", "native"],
+      "port": 5175
+    },
+    {
       "name": "api",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:api"],
