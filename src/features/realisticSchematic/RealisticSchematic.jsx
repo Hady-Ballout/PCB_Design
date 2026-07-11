@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_PIN_COUNT_BY_KIND, SPICE_PREFIX_BY_KIND } from '../../core/componentKinds.js';
 import { downloadText } from '../../core/download.js';
+import { formatSI } from '../../core/sim/simObservables.js';
 import { circuitToBreadboard, netAtHole, reconcileOverrides, GROUND_NET } from './breadboardModel.js';
 import { describeBreadboard } from './breadboardDescription.js';
 import { highlightFor, readoutFor } from './selectionModel.js';
@@ -14,6 +15,8 @@ import { Breadboard, HighlightOverlay } from './Breadboard.jsx';
 import { BatteryPack, JumperWire, PartDefs, PinLabels, RealisticPart } from './parts.jsx';
 import { ComponentLibrary } from './ComponentLibrary.jsx';
 import { IssuesPanel } from './IssuesPanel.jsx';
+import { SimStimulusPanel } from './SimStimulusPanel.jsx';
+import { useSimulation } from './useSimulation.js';
 import './RealisticSchematic.css';
 
 // Zoom scale bounds. s = 1 is "board fitted to the viewport" (viewBox + meet);
@@ -82,6 +85,8 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
   const [wireDrag, setWireDrag] = useState(null); // { ref, pinIndex, from:{x,y}, to:{x,y} } in board coords
   const [partDrag, setPartDrag] = useState(null); // { ref, dx, dy } ghost offset while moving a part
   const [libraryAt, setLibraryAt] = useState(null); // client {x,y} anchor for the component library, or null
+  const [running, setRunning] = useState(false); // live-simulation mode
+  const { simFrame, setControl, controls } = useSimulation(circuit, running);
 
   const effective = selection ?? hovered;
   const highlight = useMemo(() => highlightFor(model, effective), [model, effective]);
@@ -101,6 +106,8 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
   const wireDragRef = useRef(null); // { ref, pinIndex, pointerId } while rewiring a pin
   const partDragRef = useRef(null); // { ref, pointerId, startBoard, moved } while moving a part
   const suppressClickRef = useRef(false); // swallow the click that ends a part move
+  const simButtonRef = useRef(null); // { ref, pointerId } while a pushbutton is held (run mode)
+  const simPotDragRef = useRef(null); // { ref, pointerId, startBoard, startWiper } while dragging a wiper (run mode)
 
   const commitView = () => {
     frameRef.current = 0;
@@ -198,6 +205,37 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
     }));
   };
 
+  // --- run-mode gestures: hold a pushbutton, drag a pot wiper ---------------
+  const controlValue = (ref, name, fallback) =>
+    controls.find((control) => control.ref === ref && control.name === name)?.value ?? fallback;
+
+  const startSimGesture = (event, part) => {
+    if (part.kind === 'pushbutton') {
+      event.stopPropagation();
+      suppressClickRef.current = false;
+      simButtonRef.current = { ref: part.ref, pointerId: event.pointerId };
+      setControl(part.ref, 'pressed', 1);
+      try { svgRef.current.setPointerCapture(event.pointerId); } catch { /* best-effort */ }
+      return;
+    }
+    if (part.kind === 'potentiometer') {
+      event.stopPropagation();
+      suppressClickRef.current = false;
+      simPotDragRef.current = {
+        ref: part.ref,
+        pointerId: event.pointerId,
+        startBoard: toBoard(event.clientX, event.clientY),
+        startWiper: controlValue(part.ref, 'wiper', 0.5),
+      };
+      try { svgRef.current.setPointerCapture(event.pointerId); } catch { /* best-effort */ }
+    }
+    // Other parts have no press gesture in run mode; a plain click still selects.
+  };
+
+  const toggleSimSwitch = (ref) => {
+    setControl(ref, 'position', controlValue(ref, 'position', 'A') === 'A' ? 'B' : 'A');
+  };
+
   const onPointerDown = (event) => {
     if (event.pointerType === 'mouse' && event.button !== 0) return; // left-drag only
     const svg = svgRef.current;
@@ -234,6 +272,14 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
   };
 
   const onPointerMove = (event) => {
+    if (simPotDragRef.current) {
+      if (event.pointerId !== simPotDragRef.current.pointerId) return;
+      const board = toBoard(event.clientX, event.clientY);
+      const dx = board.x - simPotDragRef.current.startBoard.x;
+      // 60 board px of horizontal drag = the full wiper sweep.
+      setControl(simPotDragRef.current.ref, 'wiper', clamp(simPotDragRef.current.startWiper + dx / 60, 0, 1));
+      return;
+    }
     if (wireDragRef.current) {
       if (event.pointerId !== wireDragRef.current.pointerId) return;
       const to = toBoard(event.clientX, event.clientY);
@@ -280,6 +326,19 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
   const endPointer = (event) => {
     const svg = svgRef.current;
     try { svg?.releasePointerCapture?.(event.pointerId); } catch { /* best-effort */ }
+    if (simButtonRef.current) {
+      if (event.pointerId !== simButtonRef.current.pointerId) return;
+      setControl(simButtonRef.current.ref, 'pressed', 0);
+      simButtonRef.current = null;
+      suppressClickRef.current = true;
+      return;
+    }
+    if (simPotDragRef.current) {
+      if (event.pointerId !== simPotDragRef.current.pointerId) return;
+      simPotDragRef.current = null;
+      suppressClickRef.current = true;
+      return;
+    }
     if (wireDragRef.current) {
       if (event.pointerId !== wireDragRef.current.pointerId) return;
       const { ref, pinIndex } = wireDragRef.current;
@@ -434,14 +493,34 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
     ? model.parts.find((part) => part.ref === selection.ref)
     : null;
 
+  const simWarnings = running ? [...new Set((simFrame?.warnings ?? []).map((warning) => warning.message))] : [];
+  const simStatusText = !running || !simFrame || simFrame.error
+    ? null
+    : !simFrame.converged
+      ? 'not converging'
+      : simFrame.isDynamic
+        ? (simFrame.speed >= 0.95 ? '1.0×' : `${simFrame.speed.toFixed(1)}× (slow)`)
+        : 'live';
+
   return (
     <div className="realistic-schematic">
       <div className="realistic-toolbar">
+        <button
+          type="button"
+          className={`realistic-run ${running ? 'running' : ''}`}
+          onClick={() => setRunning((value) => !value)}
+          title={running ? 'Stop the live simulation' : 'Simulate this circuit live on the board'}
+        >
+          {running ? '■ Stop' : '▶ Run'}
+        </button>
+        {simStatusText && (
+          <span className={`realistic-sim-status ${simFrame.converged ? '' : 'warn'}`}>{simStatusText}</span>
+        )}
         <button type="button" onClick={() => zoomAround(centerAnchor(), 1 / 1.25)}>−</button>
         <button type="button" onClick={() => zoomAround(centerAnchor(), 1.25)}>+</button>
         <button type="button" onClick={() => setView(IDENTITY_VIEW)}>Fit</button>
         <span className="realistic-zoom-readout">{Math.round(view.s * 100)}%</span>
-        <span className="realistic-readout">{readoutFor(model, effective) ?? 'Click a part or wire'}</span>
+        <span className="realistic-readout">{readoutFor(model, effective, running ? simFrame : null) ?? 'Click a part or wire'}</span>
         <button
           type="button"
           className="realistic-describe"
@@ -468,6 +547,9 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
               >
                 <span className="realistic-legend-swatch" style={{ background: color }} aria-hidden="true" />
                 {netDisplayName(net)}
+                {running && simFrame?.netVoltages?.has(net) && !simFrame.error && (
+                  <span className="realistic-legend-volts">{formatSI(simFrame.netVoltages.get(net), 'V')}</span>
+                )}
               </button>
             );
           })}
@@ -477,6 +559,18 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
         issues={issues}
         boardIssues={[...(model.integrity?.issues ?? []), ...model.warnings]}
       />
+      {running && simFrame?.error && (
+        <div className="realistic-sim-banner error" role="alert">{simFrame.error.message}</div>
+      )}
+      {running && !simFrame?.error && simWarnings.length > 0 && (
+        <div className="realistic-sim-banner" role="note">{simWarnings.join(' · ')}</div>
+      )}
+      {running && selection?.type === 'part' && (
+        <SimStimulusPanel
+          controls={controls.filter((control) => control.ref === selection.ref && control.type === 'slider')}
+          onChange={setControl}
+        />
+      )}
       <div className="realistic-scroll">
         <svg
           ref={svgRef}
@@ -497,20 +591,31 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
             <HighlightOverlay board={model.board} highlight={highlight} nets={model.nets} />
             {model.parts.map((part) => {
               const dragging = partDrag?.ref === part.ref;
+              const simInteractive = running
+                && (part.kind === 'pushbutton' || part.kind === 'potentiometer' || part.kind === 'switch_spdt');
+              const wrapper = interactive(
+                { type: 'part', ref: part.ref },
+                `${part.ref} ${String(part.kind).replaceAll('_', ' ')} ${part.value ?? ''}`.trim(),
+                highlight.partRefs.has(part.ref),
+              );
+              // In run mode the SPDT toggles on click instead of selecting.
+              if (running && part.kind === 'switch_spdt') {
+                wrapper.onClick = (event) => {
+                  event.stopPropagation();
+                  if (suppressClickRef.current) { suppressClickRef.current = false; return; }
+                  toggleSimSwitch(part.ref);
+                };
+              }
               return (
                 <g
                   key={part.ref}
-                  {...interactive(
-                    { type: 'part', ref: part.ref },
-                    `${part.ref} ${String(part.kind).replaceAll('_', ' ')} ${part.value ?? ''}`.trim(),
-                    highlight.partRefs.has(part.ref),
-                  )}
-                  onPointerDown={(event) => startPartDrag(event, part)}
+                  {...wrapper}
+                  onPointerDown={(event) => (running ? startSimGesture(event, part) : startPartDrag(event, part))}
                   transform={dragging ? `translate(${partDrag.dx} ${partDrag.dy})` : undefined}
-                  style={movable ? { cursor: 'grab' } : undefined}
+                  style={simInteractive ? { cursor: 'pointer' } : !running && movable ? { cursor: 'grab' } : undefined}
                 >
-                  <title>{readoutFor(model, { type: 'part', ref: part.ref })}</title>
-                  <RealisticPart part={part} />
+                  <title>{readoutFor(model, { type: 'part', ref: part.ref }, running ? simFrame : null)}</title>
+                  <RealisticPart part={part} sim={running ? simFrame?.observables?.get(part.ref) : undefined} />
                 </g>
               );
             })}

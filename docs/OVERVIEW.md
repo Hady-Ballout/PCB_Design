@@ -21,6 +21,9 @@ User prompt (chat UI)
      (plus read-only block-schematic and realistic-breadboard views of the same circuit)
   -> POST /api/simulate-circuit runs Ngspice on the current SPICE deck
   -> waveform data is parsed and charted in the frontend
+  -> the realistic-breadboard view can also simulate the circuit LIVE in the
+     browser (src/core/sim — a small MNA engine, no Ngspice/server round-trip):
+     LEDs glow with real currents, buttons/switches/pots are interactive
 ```
 
 The AI's only job is to produce a structured circuit model (+ matching SPICE). Everything

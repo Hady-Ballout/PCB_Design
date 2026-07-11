@@ -277,6 +277,34 @@ pin nodes, footprint. Visual layout — canvas (x/y) and breadboard part-placeme
   another wire. Interactive dragging is unconstrained (no snapping/collision correction while
   the user drags).
 
+## Live in-browser simulation (`src/core/sim`)
+
+The realistic-breadboard view's **Run** mode simulates the canonical circuit model
+client-side — a hand-rolled MNA engine, not Ngspice, and not the SPICE text (it consumes
+circuit JSON directly). The design contract is that **`buildSimNetlist` mirrors `toSpice()`
+element-for-element**: the same compound expansions (potentiometer → two half resistors
+around the wiper, switch_spdt with pin 2 as COM, rgb_led → three diodes, seven_segment →
+per-connected-segment diode, bridge_rectifier → four DGEN legs, current_sensor → 1.2 mΩ
+shunt gated on connected IP± pins), the same NC-leg skipping, and the same `.model`
+parameters (DGEN/DRED/DSCH/zener BV), so the live sim and the server-side Ngspice waveform
+page agree numerically. Where they intentionally differ:
+
+| Aspect | `toSpice()` / Ngspice | live sim (M1+M2) |
+|---|---|---|
+| pushbutton / switch / pot / LDR / thermistor | fixed snapshot (open button, 50 % wiper, 10 k defaults) | **interactive**: control state (pressed, throw, wiper α, lux, °C) parameterizes the stamps live |
+| BJT / MOSFET / opamp / comparator / 555 / optocoupler | simulated (models + subcircuits) | **deferred to a later milestone** — pins float under gmin, per-part `kind_not_simulated` warning |
+| relay_module | wiring-only comment | same (behavioral model deferred) |
+| analysis | one-shot `.tran 0.1ms 20ms` + `.op` | backward-Euler from a zero state (power-on transient is visible), real-time-paced with a per-frame budget and a speed chip |
+
+Solver notes: junction limiting (pnjlim) must veto NR convergence — with an LED off-seed,
+node voltages sit nearly still for ~10 iterations while the junction linearization climbs
+to conduction, so a plain delta-x test converges prematurely to the wrong operating point.
+DC fallbacks run gmin stepping then source stepping; a solve that still fails keeps the
+last good solution and flags `converged:false` instead of ever emitting NaN. Value parsing
+lives in `src/core/sim/simValues.js` (not the scattered per-module parsers) and keeps the
+codebase's suffix conventions: bare `m` is MEG for resistances but milli inside SPICE
+`SINE(...)` argument lists, and a bare capacitor number means µF.
+
 ## Known limitations (carried over from `SESSION_SUMMARY.md`)
 
 - The SPICE parser handles only this app's generated syntax, not arbitrary SPICE dialects.

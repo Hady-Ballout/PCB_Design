@@ -401,3 +401,74 @@
   color: var(--color-text-muted);
   margin: 4px 0;
 }
+
+/* --- live simulation (Run mode) ------------------------------------------ */
+
+.realistic-run.running {
+  background: #ffd43b;
+}
+
+.realistic-sim-status {
+  background: #d3f9d8;
+  border: 2px solid #111111;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+.realistic-sim-status.warn {
+  background: #ffe3e3;
+}
+
+/* Warning / error strips under the issues panel while simulating. */
+.realistic-sim-banner {
+  background: #fff3bf;
+  border-bottom: 2px solid #111111;
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.realistic-sim-banner.error {
+  background: #ffe3e3;
+  font-weight: 600;
+}
+
+.realistic-legend-volts {
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+/* Stimulus sliders for the selected interactive part (LDR light, thermistor
+   temperature, pot wiper). */
+.rs-stimulus-panel {
+  background: var(--color-surface);
+  border-bottom: 2px solid #111111;
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 6px 10px;
+}
+
+.rs-stimulus-row {
+  align-items: center;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.rs-stimulus-label {
+  font-weight: 600;
+}
+
+.rs-stimulus-row input[type='range'] {
+  width: 140px;
+}
+
+.rs-stimulus-value {
+  color: var(--color-text-muted);
+  min-width: 44px;
+}

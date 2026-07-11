@@ -276,6 +276,119 @@ describe('component library', () => {
   });
 });
 
+describe('live simulation (Run mode)', () => {
+  const buttonLedCircuit = {
+    title: 'Button LED',
+    nodes: ['VCC', 'VBTN', 'VLED', '0'],
+    components: [
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'SW1', kind: 'pushbutton', value: '', nodes: ['VCC', 'VBTN'] },
+      { ref: 'R1', kind: 'resistor', value: '330', nodes: ['VBTN', 'VLED'] },
+      { ref: 'D1', kind: 'led', value: 'red', nodes: ['VLED', '0'] },
+    ],
+  };
+
+  // The sim loop re-schedules itself every frame, so the synchronous rAF mock
+  // from beforeEach would recurse forever — swap in a manual queue instead.
+  let frameQueue;
+  let frameClock;
+  const useQueuedFrames = () => {
+    frameQueue = [];
+    frameClock = 0;
+    rafSpy.mockImplementation((cb) => {
+      frameQueue.push(cb);
+      return frameQueue.length;
+    });
+  };
+  const flushFrames = (count) => {
+    for (let i = 0; i < count; i += 1) {
+      const callbacks = frameQueue.splice(0);
+      frameClock += 16;
+      act(() => callbacks.forEach((cb) => cb(frameClock)));
+    }
+  };
+
+  const mountRunning = (circuit) => {
+    useQueuedFrames();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => root.render(<RealisticSchematic circuit={circuit} />));
+    const svg = container.querySelector('svg');
+    const bounds = circuitToBreadboard(circuit).board;
+    svg.getBoundingClientRect = () => ({
+      left: 0, top: 0, right: bounds.width, bottom: bounds.height,
+      width: bounds.width, height: bounds.height, x: 0, y: 0, toJSON() {},
+    });
+    act(() => {
+      container.querySelector('.realistic-run').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    return svg;
+  };
+
+  it('shows the Run toggle and a live status chip once running', () => {
+    mountRunning(dividerCircuit);
+    expect(container.querySelector('.realistic-run').textContent).toContain('Stop');
+    expect(container.querySelector('.realistic-sim-status').textContent).toBe('live');
+  });
+
+  it('appends live voltages to the net legend chips', () => {
+    mountRunning(dividerCircuit);
+    const chips = [...container.querySelectorAll('.realistic-legend-chip')];
+    const vout = chips.find((chip) => chip.textContent.includes('VOUT'));
+    expect(vout.textContent).toContain('2.50V');
+  });
+
+  it('lights the LED only while the pushbutton is held', () => {
+    mountRunning(buttonLedCircuit);
+    const glow = () => container.querySelector('circle[filter="url(#rsGlow)"]');
+    expect(glow()).toBeNull();
+
+    const button = container.querySelector('[aria-label="SW1 pushbutton"]');
+    firePointer(button, 'pointerdown', { clientX: 5, clientY: 5 });
+    flushFrames(4);
+    expect(glow()).not.toBeNull();
+
+    firePointer(button, 'pointerup', { clientX: 5, clientY: 5 });
+    flushFrames(4);
+    expect(glow()).toBeNull();
+  });
+
+  it('surfaces a friendly error for an unsimulatable circuit', () => {
+    mountRunning({
+      title: 'No ground',
+      nodes: ['VCC', 'VRET'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', 'VRET'] },
+        { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VCC', 'VRET'] },
+      ],
+    });
+    expect(container.querySelector('.realistic-sim-banner.error').textContent)
+      .toContain('Connect the circuit to GND');
+  });
+
+  it('banners MCU boards as not simulated while the rest still solves', () => {
+    mountRunning({
+      title: 'Uno blink',
+      nodes: ['VCC', '0'],
+      components: [
+        {
+          ref: 'U1',
+          kind: 'arduino_uno',
+          value: '',
+          nodes: ['VCC', '3V3', '0', ...Array.from({ length: 21 }, (_, i) => `NC_U1_${i + 4}`)],
+        },
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VCC', '0'] },
+      ],
+    });
+    expect(container.querySelector('.realistic-sim-banner').textContent).toContain('U1 (Arduino Uno) is not simulated');
+    const chips = [...container.querySelectorAll('.realistic-legend-chip')];
+    const vcc = chips.find((chip) => chip.textContent.includes('VCC'));
+    expect(vcc.textContent).toContain('5.00V');
+  });
+});
+
 describe('issues panel', () => {
   it('renders design issues by severity with fixes, errors expanded', () => {
     mount({

@@ -240,7 +240,7 @@ function CapacitorBody({ part, points }) {
   );
 }
 
-function LedBody({ part, points }) {
+function LedBody({ part, points, sim }) {
   const [a, b] = points;
   const dir = bodyDir(part.strip);
   const y = Math.min(a.y, b.y) + dir * 17;
@@ -252,12 +252,17 @@ function LedBody({ part, points }) {
   const chordY = Math.sqrt(9 * 9 - flat * flat);
   const sweep = flat > 0 ? 0 : 1;
   const lens = `M ${mid + flat} ${y - chordY} A 9 9 0 1 ${sweep} ${mid + flat} ${y + chordY} Z`;
+  const brightness = sim?.brightness ?? 0;
   return (
     <g>
       <Lead from={a} to={{ x: mid - 3.5, y: y + 9 }} />
       <Lead from={b} to={{ x: mid + 3.5, y: y + 9 }} />
+      {brightness > 0 && (
+        <circle cx={mid} cy={y} r={10 + 8 * brightness} fill={fill} opacity={0.25 + 0.6 * brightness} filter="url(#rsGlow)" />
+      )}
       <path d={lens} fill={fill} stroke="rgba(0,0,0,0.35)" strokeWidth="0.7" />
       <path d={lens} fill="url(#rsPartLens)" />
+      {brightness > 0 && <path d={lens} fill="#fff" opacity={0.5 * brightness} />}
       <line x1={mid + flat} y1={y - chordY + 1} x2={mid + flat} y2={y + chordY - 1} stroke="rgba(0,0,0,0.4)" strokeWidth="1.4" />
       <ellipse cx={mid - 3} cy={y - 3.5} rx={2.6} ry={1.8} fill="rgba(255,255,255,0.75)" />
       <RefLabel x={mid} y={y - 14} text={part.ref} />
@@ -463,11 +468,13 @@ function InductorBody({ part, points }) {
 // Trimmer potentiometer: blue square body with a white adjustment screw
 // (cross slot) on top. Canonical pins [A, W, B] — the wiper is the center leg,
 // matching the compound SPICE image's two half-value resistors.
-function PotentiometerBody({ part, points }) {
+function PotentiometerBody({ part, points, sim }) {
   const dir = bodyDir(part.strip);
   const mid = points[1].x;
   const y = Math.min(...points.map((point) => point.y)) + dir * 20;
   const edgeY = y - dir * 11; // body edge nearest the holes
+  // In run mode the cross slot rotates with the wiper: 0 → −135°, 1 → +135°.
+  const rotation = sim?.wiper === undefined ? 0 : (sim.wiper - 0.5) * 270;
   return (
     <g>
       {points.map((point, index) => (
@@ -475,8 +482,11 @@ function PotentiometerBody({ part, points }) {
       ))}
       <rect x={mid - 12} y={y - 11} width={24} height={22} rx={2} fill="url(#rsBluePlastic)" stroke="#173a75" strokeWidth="0.6" />
       <circle cx={mid} cy={y - 2.5} r={5.5} fill="#e9edf0" stroke="#7c848b" strokeWidth="0.6" />
-      <line x1={mid - 3.6} y1={y - 2.5} x2={mid + 3.6} y2={y - 2.5} stroke="#8a929a" strokeWidth="1.1" />
-      <line x1={mid} y1={y - 6.1} x2={mid} y2={y + 1.1} stroke="#8a929a" strokeWidth="1.1" />
+      <g transform={rotation ? `rotate(${rotation} ${mid} ${y - 2.5})` : undefined}>
+        <line x1={mid - 3.6} y1={y - 2.5} x2={mid + 3.6} y2={y - 2.5} stroke="#8a929a" strokeWidth="1.1" />
+        <line x1={mid} y1={y - 6.1} x2={mid} y2={y + 1.1} stroke="#8a929a" strokeWidth="1.1" />
+        {sim?.wiper !== undefined && <circle cx={mid} cy={y - 6.1} r={0.9} fill="#c8501e" />}
+      </g>
       <text x={mid} y={y + 8.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 4.2, fill: '#d7e2f4' }}>{part.value}</text>
       <RefLabel x={mid} y={y - 16} text={part.ref} />
     </g>
@@ -485,12 +495,15 @@ function PotentiometerBody({ part, points }) {
 
 // SPDT slide switch: brushed-metal case with the black knob thrown toward
 // pin 1 — throw A, the position the compound SPICE image simulates as closed.
-function SlideSwitchBody({ part, points }) {
+function SlideSwitchBody({ part, points, sim }) {
   const dir = bodyDir(part.strip);
   const mid = points[1].x;
   const y = Math.min(...points.map((point) => point.y)) + dir * 16;
   const edgeY = y - dir * 6.5;
-  const throwSign = points[0].x < mid ? -1 : 1;
+  // Knob sits toward the closed throw: pin 1 (A) by default, flipped to pin 3
+  // when the live simulation has the switch thrown to B.
+  const towardA = points[0].x < mid ? -1 : 1;
+  const throwSign = (sim?.position ?? 'A') === 'B' ? -towardA : towardA;
   return (
     <g>
       {points.map((point, index) => (
@@ -507,7 +520,7 @@ function SlideSwitchBody({ part, points }) {
 
 // RGB LED: oversized clear lens holding three tiny R/G/B dies. Canonical pins
 // [R, G, B, K] — the flat chord marks the common-cathode (pin 4) side.
-function RgbLedBody({ part, points }) {
+function RgbLedBody({ part, points, sim }) {
   const dir = bodyDir(part.strip);
   const y = Math.min(...points.map((point) => point.y)) + dir * 17;
   const first = points[0];
@@ -518,16 +531,35 @@ function RgbLedBody({ part, points }) {
   const sweep = flat > 0 ? 0 : 1;
   const lens = `M ${mid + flat} ${y - chordY} A 11 11 0 1 ${sweep} ${mid + flat} ${y + chordY} Z`;
   const dies = ['#e0453a', '#3fae5a', '#3f8fe8'];
+  // Live simulation: blend the lens glow from the per-channel brightnesses.
+  const channels = sim?.channels ?? {};
+  const [rB, gB, bB] = [channels.R?.brightness ?? 0, channels.G?.brightness ?? 0, channels.B?.brightness ?? 0];
+  const glow = Math.max(rB, gB, bB);
+  const glowColor = glow > 0
+    ? `rgb(${Math.round(80 + 175 * (rB / glow))} ${Math.round(80 + 175 * (gB / glow))} ${Math.round(80 + 175 * (bB / glow))})`
+    : null;
   return (
     <g>
       {points.map((point, index) => (
         <Lead key={index} from={point} to={{ x: mid + (index - 1.5) * 4.5, y: y + 10 }} />
       ))}
+      {glow > 0 && (
+        <circle cx={mid} cy={y} r={12 + 8 * glow} fill={glowColor} opacity={0.25 + 0.6 * glow} filter="url(#rsGlow)" />
+      )}
       <path d={lens} fill="#f2f2ee" fillOpacity="0.85" stroke="rgba(0,0,0,0.35)" strokeWidth="0.7" />
-      {dies.map((color, index) => (
-        <rect key={color} x={mid - 6.2 + index * 4.4} y={y - 1.5} width={3.2} height={3.2} rx={0.6} fill={color} />
-      ))}
+      {dies.map((color, index) => {
+        const channelBrightness = [rB, gB, bB][index];
+        return (
+          <g key={color}>
+            <rect x={mid - 6.2 + index * 4.4} y={y - 1.5} width={3.2} height={3.2} rx={0.6} fill={color} />
+            {channelBrightness > 0 && (
+              <rect x={mid - 6.2 + index * 4.4} y={y - 1.5} width={3.2} height={3.2} rx={0.6} fill="#fff" opacity={0.7 * channelBrightness} />
+            )}
+          </g>
+        );
+      })}
       <path d={lens} fill="url(#rsPartLens)" />
+      {glow > 0 && <path d={lens} fill={glowColor} opacity={0.35 * glow} />}
       <line x1={mid + flat} y1={y - chordY + 1} x2={mid + flat} y2={y + chordY - 1} stroke="rgba(0,0,0,0.4)" strokeWidth="1.4" />
       <ellipse cx={mid - 3.5} cy={y - 4.5} rx={3} ry={2} fill="rgba(255,255,255,0.75)" />
       <RefLabel x={mid} y={y - 17} text={part.ref} />
@@ -783,7 +815,8 @@ function DipBody({ part }) {
 // plunger. The two electrical legs sit on the bottom strip; the top-strip leg
 // stubs are decorative (their columns are reserved but hold no pins), drawn
 // from the package meta rather than part.holes.
-function PushbuttonBody({ part }) {
+function PushbuttonBody({ part, sim }) {
+  const pressed = Boolean(sim?.pressed);
   const { columnStart, columnEnd } = part.meta;
   const bodyTop = TRENCH_CENTER_Y - 13;
   const bodyBottom = TRENCH_CENTER_Y + 13;
@@ -806,8 +839,9 @@ function PushbuttonBody({ part }) {
       {legs}
       <rect x={x0} y={bodyTop} width={x1 - x0} height={bodyBottom - bodyTop} rx={2.5} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.6" />
       <rect x={x0 + 2.5} y={bodyTop + 2.5} width={x1 - x0 - 5} height={bodyBottom - bodyTop - 5} rx={2} fill="url(#rsPartTab)" stroke="#7c848b" strokeWidth="0.4" />
-      <circle cx={mid} cy={TRENCH_CENTER_Y} r={6.5} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.5" />
-      <circle cx={mid - 2} cy={TRENCH_CENTER_Y - 2} r={1.6} fill="rgba(255,255,255,0.14)" />
+      <circle cx={mid} cy={TRENCH_CENTER_Y + (pressed ? 0.8 : 0)} r={pressed ? 5.9 : 6.5} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.5" />
+      {pressed && <circle cx={mid} cy={TRENCH_CENTER_Y + 0.8} r={5.9} fill="rgba(0,0,0,0.35)" />}
+      <circle cx={mid - 2} cy={TRENCH_CENTER_Y - 2 + (pressed ? 0.8 : 0)} r={1.6} fill="rgba(255,255,255,0.14)" />
       <RefLabel x={mid} y={bodyTop - 5} text={part.ref} />
     </g>
   );
@@ -816,7 +850,7 @@ function PushbuttonBody({ part }) {
 // 7-segment display (5161AS-style DIP-10) bridging the trench: black face with
 // the unlit "8" figure-eight, a decimal point, and ten silver leg stubs (the
 // decorative second COM leg included).
-function SevenSegmentBody({ part }) {
+function SevenSegmentBody({ part, sim }) {
   const { columnStart, columnEnd } = part.meta;
   const faceTop = TRENCH_CENTER_Y - 22;
   const faceBottom = TRENCH_CENTER_Y + 22;
@@ -836,17 +870,23 @@ function SevenSegmentBody({ part }) {
   const cx = (x0 + x1) / 2;
   const cy = TRENCH_CENTER_Y;
   // Unlit segments on the dark face; the slight skew gives the classic italic
-  // digit. Horizontal A/G/D bars plus vertical F/B/E/C bars.
-  const seg = { fill: '#565b52', rx: 1.2 };
+  // digit. Horizontal A/G/D bars plus vertical F/B/E/C bars. When the live
+  // simulation drives a segment, it lights the classic 5161AS red.
+  const lit = (name) => sim?.segments?.[name]?.brightness ?? 0;
+  const segFill = (name) => {
+    const brightness = lit(name);
+    return brightness > 0 ? `rgba(255, 68, 51, ${0.55 + 0.45 * brightness})` : '#565b52';
+  };
+  const seg = { rx: 1.2 };
   const segments = (
     <g transform={`translate(${cx} ${cy}) skewX(-6)`}>
-      <rect x={-6.5} y={-16.5} width={13} height={3} {...seg} />
-      <rect x={-6.5} y={-1.5} width={13} height={3} {...seg} />
-      <rect x={-6.5} y={13.5} width={13} height={3} {...seg} />
-      <rect x={-9.5} y={-13} width={3} height={11} {...seg} />
-      <rect x={6.5} y={-13} width={3} height={11} {...seg} />
-      <rect x={-9.5} y={2} width={3} height={11} {...seg} />
-      <rect x={6.5} y={2} width={3} height={11} {...seg} />
+      <rect x={-6.5} y={-16.5} width={13} height={3} {...seg} fill={segFill('A')} />
+      <rect x={-6.5} y={-1.5} width={13} height={3} {...seg} fill={segFill('G')} />
+      <rect x={-6.5} y={13.5} width={13} height={3} {...seg} fill={segFill('D')} />
+      <rect x={-9.5} y={-13} width={3} height={11} {...seg} fill={segFill('F')} />
+      <rect x={6.5} y={-13} width={3} height={11} {...seg} fill={segFill('B')} />
+      <rect x={-9.5} y={2} width={3} height={11} {...seg} fill={segFill('E')} />
+      <rect x={6.5} y={2} width={3} height={11} {...seg} fill={segFill('C')} />
     </g>
   );
   return (
@@ -855,7 +895,7 @@ function SevenSegmentBody({ part }) {
       <rect x={x0} y={faceTop} width={x1 - x0} height={faceBottom - faceTop} rx={2.5} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.6" />
       <rect x={x0 + 1.4} y={faceTop + 1.4} width={x1 - x0 - 2.8} height={faceBottom - faceTop - 2.8} rx={2} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="0.6" />
       {segments}
-      <circle cx={cx + 12} cy={cy + 15.5} r={1.8} fill="#565b52" />
+      <circle cx={cx + 12} cy={cy + 15.5} r={1.8} fill={segFill('DP')} />
       <Silk x={x0 + 4} y={faceTop + 6.5} text={part.ref} size={4} fill="#8a9096" anchor="start" />
     </g>
   );
@@ -1932,6 +1972,11 @@ export function PartDefs() {
         <stop offset="0.5" stopColor="#1f7a41" />
         <stop offset="1" stopColor="#145c30" />
       </linearGradient>
+      {/* live-simulation LED halo: applied to a dedicated glow shape drawn
+          behind the lens, so blur-only (no merge) is what we want */}
+      <filter id="rsGlow" x="-120%" y="-120%" width="340%" height="340%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="4" />
+      </filter>
     </defs>
   );
 }
@@ -1965,7 +2010,7 @@ const KIND_RENDERERS = {
   imu_sensor: ImuBody,
 };
 
-export function RealisticPart({ part }) {
+export function RealisticPart({ part, sim }) {
   // Off-board parts draw in their slot even when no pin is wired up yet.
   if (part.body === 'arduino_uno') return <ArduinoUnoBody part={part} />;
   if (part.body === 'raspberry_pi') return <RaspberryPiBody part={part} />;
@@ -1982,12 +2027,12 @@ export function RealisticPart({ part }) {
   if (points.length === 0) return null;
   if (part.body === 'esp32') return <Esp32Body part={part} />;
   if (part.body === 'dip') return <DipBody part={part} />;
-  if (part.body === 'pushbutton') return <PushbuttonBody part={part} />;
-  if (part.body === 'seven_segment') return <SevenSegmentBody part={part} />;
+  if (part.body === 'pushbutton') return <PushbuttonBody part={part} sim={sim} />;
+  if (part.body === 'seven_segment') return <SevenSegmentBody part={part} sim={sim} />;
   if (part.body === 'to92') return <To92Body part={part} points={points} />;
   if (part.body === 'to220') return <To220Body part={part} points={points} />;
   const Renderer = ((part.body === 'twoLead' || part.body === 'module') && KIND_RENDERERS[part.kind]) || ModuleBody;
-  return <Renderer part={part} points={points} />;
+  return <Renderer part={part} points={points} sim={sim} />;
 }
 
 // --- component-library thumbnails ------------------------------------------

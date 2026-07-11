@@ -4,6 +4,7 @@
 // No React imports so it stays unit-testable.
 
 import { FIXED_PIN_NAMES } from '../../core/componentKinds.js';
+import { formatSI } from '../../core/sim/simObservables.js';
 import { GROUND_NET } from './breadboardModel.js';
 import { capStyle } from './partVisuals.js';
 
@@ -117,17 +118,36 @@ export function highlightFor(model, selection) {
 
 const netDisplayName = (net) => (net === GROUND_NET ? 'GND' : net);
 
-// One-line toolbar description of the current selection.
-export function readoutFor(model, selection) {
+// Live measurements appended to the readout while the simulation runs.
+const liveSuffixFor = (selection, simFrame) => {
+  if (!simFrame) return '';
+  if (selection.type === 'net') {
+    const volts = simFrame.netVoltages?.get?.(selection.net);
+    return volts === undefined ? '' : ` · ${formatSI(volts, 'V')}`;
+  }
+  const observable = simFrame.observables?.get?.(selection.ref);
+  if (!observable) return '';
+  const parts = [];
+  if (typeof observable.volts === 'number') parts.push(formatSI(observable.volts, 'V'));
+  if (typeof observable.amps === 'number') parts.push(formatSI(observable.amps, 'A'));
+  return parts.length ? ` · ${parts.join(' · ')}` : '';
+};
+
+// One-line toolbar description of the current selection. Pass the running
+// simulation's frame as the optional third argument to append live values.
+export function readoutFor(model, selection, simFrame = null) {
   if (!model || !selection) return null;
   if (selection.type === 'part') {
     const part = model.parts.find((candidate) => candidate.ref === selection.ref);
     if (part) {
       const kind = String(part.kind || 'part').replaceAll('_', ' ');
-      return part.value ? `${part.ref} · ${kind} · ${part.value}` : `${part.ref} · ${kind}`;
+      const base = part.value ? `${part.ref} · ${kind} · ${part.value}` : `${part.ref} · ${kind}`;
+      return `${base}${liveSuffixFor(selection, simFrame)}`;
     }
     const battery = model.batteries.find((candidate) => candidate.ref === selection.ref);
-    if (battery) return `${battery.ref} · voltage source · ${battery.value ?? ''}`.trim();
+    if (battery) {
+      return `${`${battery.ref} · voltage source · ${battery.value ?? ''}`.trim()}${liveSuffixFor(selection, simFrame)}`;
+    }
     return null;
   }
   if (selection.type === 'net') {
@@ -138,7 +158,7 @@ export function readoutFor(model, selection) {
     model.batteries.forEach((battery) => {
       pins += (battery.nets ?? []).filter((net) => net === selection.net).length;
     });
-    return `net ${netDisplayName(selection.net)} · ${pins} pin${pins === 1 ? '' : 's'}`;
+    return `net ${netDisplayName(selection.net)} · ${pins} pin${pins === 1 ? '' : 's'}${liveSuffixFor(selection, simFrame)}`;
   }
   return null;
 }
