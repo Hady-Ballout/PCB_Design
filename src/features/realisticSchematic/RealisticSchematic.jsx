@@ -15,6 +15,7 @@ import { Breadboard, HighlightOverlay } from './Breadboard.jsx';
 import { BatteryPack, JumperWire, PartDefs, PinLabels, RealisticPart } from './parts.jsx';
 import { ComponentLibrary } from './ComponentLibrary.jsx';
 import { IssuesPanel } from './IssuesPanel.jsx';
+import { SerialMonitor } from './SerialMonitor.jsx';
 import { SimStimulusPanel } from './SimStimulusPanel.jsx';
 import { useSimulation } from './useSimulation.js';
 import './RealisticSchematic.css';
@@ -70,7 +71,7 @@ const midpoint = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
 const netDisplayName = (net) => (net === GROUND_NET ? 'GND' : net);
 
-export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayoutChange, issues }) {
+export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayoutChange, issues, firmware, onCompileFirmware }) {
   const model = useMemo(
     () => circuitToBreadboard(circuit, reconcileOverrides(overrides, circuit) ?? {}),
     [circuit, overrides],
@@ -87,7 +88,40 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
   const [libraryAt, setLibraryAt] = useState(null); // client {x,y} anchor for the component library, or null
   const [running, setRunning] = useState(false); // live-simulation mode
   const [voltageOverlay, setVoltageOverlay] = useState(false); // tint carriers by live voltage
-  const { simFrame, setControl, controls } = useSimulation(circuit, running);
+  const [compiling, setCompiling] = useState(false);
+  const [compileError, setCompileError] = useState(null);
+  const [mcu, setMcu] = useState(null); // { hex } | { program } for the Uno bridge
+  const { simFrame, setControl, controls } = useSimulation(circuit, running, mcu);
+
+  // Run with firmware: compile first (cached per chat by code hash), then
+  // start the engine with the avr8js bridge attached.
+  const hasUno = (circuit?.components ?? []).some((part) => part.kind === 'arduino_uno');
+  const toggleRun = async () => {
+    if (running) {
+      setRunning(false);
+      return;
+    }
+    setCompileError(null);
+    if (hasUno && firmware?.trim() && typeof onCompileFirmware === 'function') {
+      setCompiling(true);
+      try {
+        const result = await onCompileFirmware(firmware);
+        if (!result?.ok) {
+          setCompileError((result?.errors ?? ['Compilation failed.']).join('\n'));
+          return;
+        }
+        setMcu({ hex: result.hex });
+      } catch (error) {
+        setCompileError(String(error?.message ?? error));
+        return;
+      } finally {
+        setCompiling(false);
+      }
+    } else {
+      setMcu(null);
+    }
+    setRunning(true);
+  };
 
   const effective = selection ?? hovered;
   const highlight = useMemo(() => highlightFor(model, effective), [model, effective]);
@@ -512,10 +546,11 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
         <button
           type="button"
           className={`realistic-run ${running ? 'running' : ''}`}
-          onClick={() => setRunning((value) => !value)}
+          onClick={toggleRun}
+          disabled={compiling}
           title={running ? 'Stop the live simulation' : 'Simulate this circuit live on the board'}
         >
-          {running ? '■ Stop' : '▶ Run'}
+          {compiling ? '⏳ Compiling…' : running ? '■ Stop' : '▶ Run'}
         </button>
         {simStatusText && (
           <span className={`realistic-sim-status ${simFrame.converged ? '' : 'warn'}`}>{simStatusText}</span>
@@ -573,11 +608,19 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
         issues={issues}
         boardIssues={[...(model.integrity?.issues ?? []), ...model.warnings]}
       />
+      {compileError && (
+        <div className="realistic-sim-banner error" role="alert">
+          <strong>Sketch failed to compile:</strong> {compileError}
+        </div>
+      )}
       {running && simFrame?.error && (
         <div className="realistic-sim-banner error" role="alert">{simFrame.error.message}</div>
       )}
       {running && !simFrame?.error && simWarnings.length > 0 && (
         <div className="realistic-sim-banner" role="note">{simWarnings.join(' · ')}</div>
+      )}
+      {running && simFrame?.hasMcu && (
+        <SerialMonitor text={simFrame.serial} />
       )}
       {running && selection?.type === 'part' && (
         <SimStimulusPanel

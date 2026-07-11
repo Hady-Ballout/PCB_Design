@@ -227,6 +227,17 @@ export interface SimulationResult {
   waveform: Waveform;
 }
 
+// ── Firmware compilation ──
+
+export interface CompileResult {
+  ok: boolean;
+  // Intel HEX text of the compiled sketch ('' on failure).
+  hex: string;
+  errors: string[];
+  warnings: string[];
+  rawOutput: string;
+}
+
 // ── Auth ──
 
 export interface JwtPayload {

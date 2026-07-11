@@ -402,7 +402,7 @@ describe('live simulation (Run mode)', () => {
       .toContain('Connect the circuit to GND');
   });
 
-  it('banners MCU boards as not simulated while the rest still solves', () => {
+  it('banners firmware-less MCU boards while the rest still solves', () => {
     mountRunning({
       title: 'Uno blink',
       nodes: ['VCC', '0'],
@@ -417,10 +417,67 @@ describe('live simulation (Run mode)', () => {
         { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VCC', '0'] },
       ],
     });
-    expect(container.querySelector('.realistic-sim-banner').textContent).toContain('U1 (Arduino Uno) is not simulated');
+    expect(container.querySelector('.realistic-sim-banner').textContent).toContain('U1 (Arduino Uno) has no firmware');
     const chips = [...container.querySelectorAll('.realistic-legend-chip')];
     const vcc = chips.find((chip) => chip.textContent.includes('VCC'));
     expect(vcc.textContent).toContain('5.00V');
+  });
+
+  const unoBlinkCircuit = {
+    title: 'Uno LED',
+    nodes: ['VPIN', 'VLED', '0'],
+    components: [
+      {
+        ref: 'U1',
+        kind: 'arduino_uno',
+        value: '',
+        // [5V, 3V3, GND, VIN, D0..D13, A0..A5] — D13 at index 17 drives VPIN.
+        nodes: ['NC_U1_1', 'NC_U1_2', '0', ...Array.from({ length: 14 }, (_, i) => `NC_U1_${i + 4}`), 'VPIN', ...Array.from({ length: 6 }, (_, i) => `NC_U1_${i + 19}`)],
+      },
+      { ref: 'R1', kind: 'resistor', value: '330', nodes: ['VPIN', 'VLED'] },
+      { ref: 'D1', kind: 'led', value: 'red', nodes: ['VLED', '0'] },
+    ],
+  };
+
+  const mountFirmware = (circuit, onCompileFirmware) => {
+    useQueuedFrames();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => root.render(
+      <RealisticSchematic circuit={circuit} firmware="void setup(){}" onCompileFirmware={onCompileFirmware} />,
+    ));
+    const svg = container.querySelector('svg');
+    const bounds = circuitToBreadboard(circuit).board;
+    svg.getBoundingClientRect = () => ({
+      left: 0, top: 0, right: bounds.width, bottom: bounds.height,
+      width: bounds.width, height: bounds.height, x: 0, y: 0, toJSON() {},
+    });
+    return svg;
+  };
+
+  it('shows compile errors and stays stopped when the sketch fails', async () => {
+    mountFirmware(unoBlinkCircuit, () => Promise.resolve({ ok: false, errors: ["sketch.ino:5:3: error: expected ';'"] }));
+    await act(async () => {
+      container.querySelector('.realistic-run').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(container.querySelector('.realistic-sim-banner.error').textContent).toContain("sketch.ino:5:3: error");
+    expect(container.querySelector('.realistic-run').textContent).toContain('Run');
+  });
+
+  it('runs compiled firmware and shows the serial monitor', async () => {
+    // The "hex" path is exercised via a real Intel HEX for the hand-assembled
+    // D13-high program: SBI DDRB,5; SBI PORTB,5; RJMP .-2 (little-endian).
+    const hex = ':06000000259A2D9AFFCFA6\n:00000001FF\n';
+    mountFirmware(unoBlinkCircuit, () => Promise.resolve({ ok: true, hex, errors: [] }));
+    await act(async () => {
+      container.querySelector('.realistic-run').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    flushFrames(6);
+    expect(container.querySelector('.realistic-run').textContent).toContain('Stop');
+    expect(container.querySelector('.realistic-serial')).not.toBeNull();
+    // D13 drives the LED through the bridge.
+    expect(container.querySelector('circle[filter="url(#rsGlow)"]')).not.toBeNull();
   });
 });
 

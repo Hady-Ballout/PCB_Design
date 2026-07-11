@@ -5,6 +5,7 @@
 import { clearMatrix, makeMatrix, solveDense } from './linalg.js';
 import { buildSimNetlist, GROUND } from './simNetlist.js';
 import { evalBjt, evalDiode, evalMosfet, evalOpamp, junctionCriticalVoltage, limitDiode, limitJunction, THERMAL_VOLTAGE, variableOhms } from './simDevices.js';
+import { AVR_CLOCK_HZ, createAvrRunner } from './avrRunner.js';
 import { observablesFor } from './simObservables.js';
 
 const GMIN = 1e-12;
@@ -58,8 +59,12 @@ const chooseTimestep = (devices) => {
   return Math.min(MAX_H, Math.max(MIN_H, h));
 };
 
-export const createSimulation = (circuit) => {
-  const netlist = buildSimNetlist(circuit);
+export const createSimulation = (circuit, options = {}) => {
+  // Firmware attaches to the first Uno in the circuit (single-Uno limit).
+  const mcuRef = options.mcu
+    ? (circuit?.components ?? []).find((part) => part.kind === 'arduino_uno')?.ref ?? null
+    : null;
+  const netlist = buildSimNetlist(circuit, { mcuRef });
   const { devices, nodeIndex, nodeCount, branchCount, controls, warnings } = netlist;
 
   const noop = {
@@ -126,9 +131,31 @@ export const createSimulation = (circuit) => {
     device.vState = 0;
     device.iState = 0;
   }
+  // LED-family diodes carry a persistence-of-vision current average so PWM
+  // reads as dimming instead of 30 Hz-sampled flicker (τ = 30 ms).
+  const ledDiodes = devices.filter((device) => device.type === 'diode'
+    && (device.kind === 'led' || device.kind === 'rgb_led' || device.kind === 'seven_segment'));
+  for (const led of ledDiodes) led.emaI = 0;
+
+  // Firmware bridge: the avr8js runner steps in lockstep with the MNA
+  // timestep; pin modes/levels are read before each solve and net voltages
+  // fed back after it.
+  const mcuPins = devices.filter((device) => device.type === 'mcu_pin');
+  let mcuRunner = null;
+  let serialBuffer = '';
+  if (mcuRef && mcuPins.length >= 0 && netlist.ok && options.mcu) {
+    mcuRunner = createAvrRunner(options.mcu);
+    mcuRunner.onSerialByte((byte) => {
+      serialBuffer += String.fromCharCode(byte);
+      if (serialBuffer.length > 4096) serialBuffer = serialBuffer.slice(-4096);
+    });
+  }
+
   const isDynamic = reactives.length > 0
+    || mcuRunner != null
     || devices.some((device) => device.type === 'vsource' && device.waveform.type !== 'dc');
   const h = chooseTimestep(devices);
+  const mcuCyclesPerStep = Math.round(h * AVR_CLOCK_HZ);
 
   let time = 0;
   let dirty = true; // force an initial solve on the first advance()
@@ -325,6 +352,27 @@ export const createSimulation = (circuit) => {
         case 'opto_out':
           stampConductance(device.c, device.e, 1 / (device.state.on ? 30 : 10e6));
           break;
+        case 'mcu_pin': {
+          const bi = nodeCount + device.branch;
+          if (device.mode === 'output') {
+            // Branch drives the internal node (behind the 40 Ω __ro resistor)
+            // at 0/5 V relative to global ground.
+            if (device.int !== GROUND) {
+              A[device.int][bi] += 1;
+              A[bi][device.int] += 1;
+            }
+            rhs[bi] = device.level * 5;
+          } else {
+            // Input / pullup: pin floats — pin the unused branch variable to
+            // zero current so allocation stays static and the matrix regular.
+            A[bi][bi] = 1;
+            rhs[bi] = 0;
+            if (device.mode === 'pullup') {
+              stampConductance(device.net, device.fiveV, 1 / 35e3);
+            }
+          }
+          break;
+        }
         case 'relay': {
           const energized = device.state.energized;
           stampConductance(device.com, device.no, 1 / (energized ? 0.05 : 10e6));
@@ -422,6 +470,8 @@ export const createSimulation = (circuit) => {
     const solution = robustSolve({ transient: false });
     if (solution) {
       x = solution;
+      // No PWM at DC: the perceived brightness IS the instantaneous current.
+      for (const led of ledDiodes) led.emaI = led.lastI;
       lastConverged = true;
     } else {
       lastConverged = false;
@@ -546,10 +596,34 @@ export const createSimulation = (circuit) => {
 
   const stepOnce = () => {
     time += h;
+    if (mcuRunner) {
+      // Lockstep: run the firmware for this timestep's worth of cycles, then
+      // latch each bridged pin's mode/level for the solve below.
+      mcuRunner.run(mcuCyclesPerStep);
+      for (const pin of mcuPins) {
+        const state = mcuRunner.pinState(pin.unoPin);
+        pin.mode = state.mode;
+        pin.level = state.high ? 1 : 0;
+      }
+    }
     const solution = newtonSolve({ transient: true }) ?? robustSolve({ transient: true });
     if (solution) {
       x = solution;
       commitReactiveStates(solution);
+      for (const led of ledDiodes) {
+        led.emaI += (led.lastI - led.emaI) * (h / 0.03);
+      }
+      if (mcuRunner) {
+        // Feed the solved net voltages back: digital reads and ADC channels
+        // see the circuit one step later (the event-device pattern).
+        for (const pin of mcuPins) {
+          const volts = atX(pin.net);
+          if (pin.mode !== 'output') mcuRunner.setDigitalInput(pin.unoPin, volts > 2.5);
+          if (pin.adcChannel != null) {
+            mcuRunner.setAnalogVolts(pin.adcChannel, Math.min(5, Math.max(0, volts)));
+          }
+        }
+      }
       // Buzzer frequency detection: rising crossings of 1 V, sim-timestamped.
       for (const buzzer of buzzers) {
         const v = atX(buzzer.n1) - atX(buzzer.n2);
@@ -639,6 +713,8 @@ export const createSimulation = (circuit) => {
     probe,
     observables: () => observablesFor(netlist, probe(), controlState),
     status: () => ({ converged: lastConverged, lastSpeed, iterations: lastIterations }),
+    mcuRunner,
+    serialText: () => serialBuffer,
   };
   return engine;
 };

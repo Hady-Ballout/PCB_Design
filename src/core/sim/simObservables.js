@@ -58,15 +58,18 @@ export const observablesFor = (netlist, probe, controlState = new Map()) => {
     switch (device.type) {
       case 'diode': {
         const amps = branchCurrents.get(device.id) ?? 0;
+        // Perceived brightness uses the persistence-of-vision average (emaI)
+        // so PWM dims instead of flickering; amps stays instantaneous.
+        const seenAmps = device.emaI ?? amps;
         if (device.kind === 'rgb_led') {
           entry.channels = entry.channels ?? {};
-          entry.channels[device.channel] = { amps, brightness: ledBrightness(amps) };
+          entry.channels[device.channel] = { amps, brightness: ledBrightness(seenAmps) };
         } else if (device.kind === 'seven_segment') {
           entry.segments = entry.segments ?? {};
-          entry.segments[device.channel] = { amps, brightness: ledBrightness(amps) };
+          entry.segments[device.channel] = { amps, brightness: ledBrightness(seenAmps) };
         } else {
           entry.amps = amps;
-          if (device.kind === 'led') entry.brightness = ledBrightness(amps);
+          if (device.kind === 'led') entry.brightness = ledBrightness(seenAmps);
         }
         break;
       }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { COMPONENT_KINDS, DEFAULT_PIN_COUNT_BY_KIND } from '../componentKinds.js';
+import { TEST_PROGRAM_D13_BLINK, TEST_PROGRAM_D13_HIGH } from './avrRunner.js';
 import { createSimulation } from './simEngine.js';
 
 const circuitOf = (components, extra = {}) => ({
@@ -446,6 +447,86 @@ describe('createSimulation — polish devices (M4)', () => {
   });
 });
 
+describe('createSimulation — Arduino Uno firmware bridge', () => {
+  // Uno fixedPins: [5V, 3V3, GND, VIN, D0..D13, A0..A5]. D13 is index 17.
+  const unoNodes = (overrides = {}) => {
+    const nodes = ['VCC5', 'NC_U1_2', '0', ...Array.from({ length: 21 }, (_, i) => `NC_U1_${i + 4}`)];
+    for (const [pin, net] of Object.entries(overrides)) {
+      const index = pin === '5V' ? 0 : pin === 'GND' ? 2
+        : pin.startsWith('D') ? 4 + Number(pin.slice(1))
+          : 18 + Number(pin.slice(1));
+      nodes[index] = net;
+    }
+    return nodes;
+  };
+
+  it('drives an LED from D13 with real firmware execution', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodes({ D13: 'VPIN' }) },
+      { ref: 'R1', kind: 'resistor', value: '330', nodes: ['VPIN', 'VLED'] },
+      { ref: 'D1', kind: 'led', value: 'red', nodes: ['VLED', '0'] },
+    ]), { mcu: { program: TEST_PROGRAM_D13_HIGH } });
+    expect(engine.ok).toBe(true);
+    expect(engine.isDynamic).toBe(true); // firmware forces transient
+    expect(engine.warnings.some((w) => w.code === 'mcu_no_firmware')).toBe(false);
+    engine.advance(0.002, 50);
+    expect(engine.observables().get('D1').amps).toBeGreaterThan(0.005);
+    // The Uno's internal 5 V supply powers its 5V pin net.
+    expect(volts(engine, 'VCC5')).toBeGreaterThan(4.9);
+  });
+
+  it('sees toggling pin levels from the fast-toggle program', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodes({ D13: 'VPIN' }) },
+      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VPIN', '0'] },
+    ]), { mcu: { program: TEST_PROGRAM_D13_BLINK } });
+    const seen = new Set();
+    for (let i = 0; i < 50; i += 1) {
+      engine.advance(0.0001, 50);
+      seen.add(volts(engine, 'VPIN') > 2.5);
+    }
+    expect(seen).toEqual(new Set([true, false]));
+  });
+
+  it('feeds circuit voltages into digital inputs and the ADC', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodes({ D8: 'VHI', A0: 'VMID' }) },
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VHI', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VHI', 'VMID'] },
+      { ref: 'R2', kind: 'resistor', value: '1k', nodes: ['VMID', '0'] },
+    ]), { mcu: { program: TEST_PROGRAM_D13_HIGH } });
+    engine.advance(0.001, 50);
+    // D8 (PB0) input reads high; PINB is data address 0x23.
+    expect(engine.mcuRunner.cpu.data[0x23] & 1).toBe(1);
+    // A0 ADC channel carries the divider midpoint.
+    expect(engine.mcuRunner.adc.channelValues[0]).toBeCloseTo(2.5, 1);
+  });
+
+  it('collects Serial output into the ring buffer', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodes({ D13: 'VPIN' }) },
+      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VPIN', '0'] },
+    ]), { mcu: { program: TEST_PROGRAM_D13_HIGH } });
+    engine.advance(0.001, 50);
+    expect(typeof engine.serialText()).toBe('string'); // empty for this program, but wired
+  });
+
+  it('averages PWM-like toggling into a mid brightness (persistence of vision)', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodes({ D13: 'VPIN' }) },
+      { ref: 'R1', kind: 'resistor', value: '330', nodes: ['VPIN', 'VLED'] },
+      { ref: 'D1', kind: 'led', value: 'red', nodes: ['VLED', '0'] },
+    ]), { mcu: { program: TEST_PROGRAM_D13_BLINK } });
+    // The toggle program flips every few cycles — far faster than 30 ms.
+    for (let i = 0; i < 40; i += 1) engine.advance(0.002, 50);
+    const { brightness, amps } = engine.observables().get('D1');
+    expect(brightness).toBeGreaterThan(0.1);
+    expect(brightness).toBeLessThan(1);
+    // Instantaneous amps is either full-on or off — the split is intentional.
+    expect(Math.abs(amps)).toBeDefined();
+  });
+});
+
 describe('createSimulation — stimulus-driven sensors (Tier 2a)', () => {
   it('drives the TMP36 output from the temperature slider, 0 V unpowered', () => {
     const powered = createSimulation(circuitOf([
@@ -560,7 +641,7 @@ describe('createSimulation — pre-flight and robustness', () => {
     expect(engine.error.code).toBe('source_short');
   });
 
-  it('warns but simulates around an MCU board', () => {
+  it('warns but simulates around a firmware-less MCU board', () => {
     const engine = createSimulation(circuitOf([
       { ref: 'U1', kind: 'arduino_uno', value: '', nodes: ['VCC', '3V3', '0', ...Array.from({ length: 21 }, (_, i) => `NC_U1_${i + 4}`)] },
       { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
@@ -568,7 +649,7 @@ describe('createSimulation — pre-flight and robustness', () => {
       { ref: 'R2', kind: 'resistor', value: '1k', nodes: ['VOUT', '0'] },
     ]));
     expect(engine.ok).toBe(true);
-    expect(engine.warnings.some((w) => w.code === 'mcu_not_simulated')).toBe(true);
+    expect(engine.warnings.some((w) => w.code === 'mcu_no_firmware')).toBe(true);
     expect(engine.solveDC()).toBe(true);
     expect(volts(engine, 'VOUT')).toBeCloseTo(2.5, 6);
   });

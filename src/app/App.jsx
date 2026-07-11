@@ -817,6 +817,29 @@ function App() {
     }
   };
 
+  // Compile the current sketch for the breadboard's live Uno emulation.
+  // Cached per chat by a cheap code hash so repeat Runs skip the server.
+  const compileFirmware = async (code) => {
+    let hash = 0;
+    for (let i = 0; i < code.length; i += 1) {
+      hash = ((hash << 5) - hash + code.charCodeAt(i)) | 0;
+    }
+    const cached = activeChat?.compiledFirmware;
+    if (cached && cached.hash === hash && cached.hex) {
+      return { ok: true, hex: cached.hex, errors: [] };
+    }
+    const response = await fetch(`${API_BASE}/api/compile-sketch`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ code }),
+    });
+    const data = await response.json().catch(() => ({ ok: false, errors: [`Compilation failed with HTTP ${response.status}.`] }));
+    if (data.ok && data.hex) {
+      setChatField('compiledFirmware', { hash, hex: data.hex });
+    }
+    return { ok: Boolean(data.ok && data.hex), hex: data.hex ?? '', errors: data.errors ?? [data.error ?? 'Compilation failed.'] };
+  };
+
   const addDiagramComponent = (type) => {
     applyDiagramChange((current) => {
       const base = current || result?.diagram;
@@ -1320,6 +1343,8 @@ function App() {
           onCircuitChange={applyCircuitChange}
           onLayoutChange={(value) => setChatField('editedBreadboard', value)}
           issues={circuitQualityIssues(result)}
+          firmware={editableCode || result?.code || ''}
+          onCompileFirmware={compileFirmware}
         />
       )}
     </div>

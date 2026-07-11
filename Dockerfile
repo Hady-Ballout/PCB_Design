@@ -2,8 +2,13 @@ FROM node:20-slim
 
 # Install Ngspice
 RUN apt-get update && \
-    apt-get install -y ngspice --no-install-recommends && \
+    apt-get install -y ngspice curl ca-certificates --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
+
+# Install arduino-cli + the AVR toolchain (for /api/compile-sketch)
+RUN curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh && \
+    arduino-cli core update-index && \
+    arduino-cli core install arduino:avr
 
 WORKDIR /app
 

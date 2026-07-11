@@ -500,3 +500,40 @@
 .realistic-vmap.active {
   background: #ffd43b;
 }
+
+/* Serial monitor strip (Uno firmware simulation). */
+.realistic-serial {
+  background: var(--color-surface);
+  border-bottom: 2px solid #111111;
+  flex: 0 0 auto;
+}
+
+.realistic-serial-bar {
+  display: flex;
+  gap: 6px;
+  padding: 4px 10px;
+}
+
+.realistic-serial-bar button {
+  background: #ffffff;
+  border: 2px solid #111111;
+  border-radius: 6px;
+  box-shadow: 2px 2px 0 #111111;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+.realistic-serial-body {
+  background: #111418;
+  color: #9fe8a8;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  margin: 0 10px 8px;
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

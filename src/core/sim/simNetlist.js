@@ -44,7 +44,14 @@ const SIMULATED_MODULE_KINDS = new Set([
 
 const regulatorOutputNode = (nodes = []) => nodes.find((node) => /^v?out/i.test(node)) || nodes.at(-1) || 'VOUT';
 
-export const buildSimNetlist = (circuit) => {
+// Uno signal-pin names in fixedPins positional order (after 5V/3V3/GND/VIN).
+const UNO_SIGNAL_PINS = [
+  ...Array.from({ length: 14 }, (_, i) => `D${i}`),
+  ...Array.from({ length: 6 }, (_, i) => `A${i}`),
+];
+
+export const buildSimNetlist = (circuit, options = {}) => {
+  const { mcuRef = null } = options;
   const components = circuit?.components ?? [];
   const devices = [];
   const controls = [];
@@ -103,7 +110,50 @@ export const buildSimNetlist = (circuit) => {
     const [a, b, c, d] = nodes;
 
     if (MCU_KINDS.has(kind)) {
-      warnOnce('mcu_not_simulated', `${ref} (${kindLabel(kind)}) is not simulated — its pins float`);
+      // The Uno carrying firmware becomes a live device: powered rails plus a
+      // bridged branch per connected signal pin (mode set each step from the
+      // avr8js pin states). Other boards — and firmware-less Unos — float.
+      if (kind === 'arduino_uno' && ref === mcuRef) {
+        // Internal 5 V reference always exists (USB power); 0.5 Ω series on
+        // the exposed power pins so a parallel user battery can't make two
+        // ideal sources fight.
+        const fiveV = internalNode(`${ref}_5V`);
+        addVsource(`${ref}_5V`, ref, 'mcu_power', fiveV, GROUND, parseSourceWaveform('DC 5'));
+        if (!isUnconnectedTerminal(nodes[0], ref, 1)) {
+          addResistor(`${ref}_5V__rs`, ref, 'mcu_power_rs', fiveV, indexOf(nodes[0]), 0.5);
+        }
+        if (!isUnconnectedTerminal(nodes[1], ref, 2)) {
+          const threeV = internalNode(`${ref}_3V3`);
+          addVsource(`${ref}_3V3`, ref, 'mcu_power', threeV, GROUND, parseSourceWaveform('DC 3.3'));
+          addResistor(`${ref}_3V3__rs`, ref, 'mcu_power_rs', threeV, indexOf(nodes[1]), 0.5);
+        }
+        if (!isUnconnectedTerminal(nodes[2], ref, 3) && indexOf(nodes[2]) !== GROUND) {
+          // Tie the GND pin's net to global ground — unless it already IS
+          // net '0', where a 0 V ground-to-ground branch would be degenerate.
+          addVsource(`${ref}_GND`, ref, 'mcu_power', indexOf(nodes[2]), GROUND, parseSourceWaveform('DC 0'));
+        }
+        UNO_SIGNAL_PINS.forEach((unoPin, index) => {
+          const pinIndex = index + 4; // after 5V/3V3/GND/VIN
+          const node = nodes[pinIndex];
+          if (node == null || isUnconnectedTerminal(node, ref, pinIndex + 1)) return;
+          const int = internalNode(`${ref}_${unoPin}`);
+          addResistor(`${ref}_${unoPin}__ro`, ref, 'mcu_pin_ro', int, indexOf(node), 40);
+          devices.push({
+            type: 'mcu_pin', id: `${ref}_${unoPin}`, owner: ref, kind,
+            unoPin, net: indexOf(node), int, fiveV,
+            adcChannel: unoPin.startsWith('A') ? Number(unoPin.slice(1)) : null,
+            branch: branchCount, mode: 'input', level: 0,
+          });
+          branchCount += 1;
+        });
+        continue;
+      }
+      warnOnce(
+        kind === 'arduino_uno' ? 'mcu_no_firmware' : 'mcu_not_simulated',
+        kind === 'arduino_uno'
+          ? `${ref} (${kindLabel(kind)}) has no firmware — its pins float; write a sketch in the Code tab`
+          : `${ref} (${kindLabel(kind)}) is not simulated — its pins float`,
+      );
       continue;
     }
     // Most wiring-only modules stay unsimulated (they need MCU firmware to be

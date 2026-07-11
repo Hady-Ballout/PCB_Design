@@ -6,6 +6,7 @@ import { streamCircuitWithOllama } from './ai/ollamaProvider.js';
 import { checkCircuitTopology } from '../src/core/topologyRules.js';
 import { generateClarifyingQuestions } from './ai/clarifyProvider.js';
 import { runNgspiceSimulation } from './simulation/simulator.js';
+import { compileSketch } from './compile/compiler.js';
 import { buildStreamingSpice } from './circuit/streamingCircuit.js';
 import { initDb } from './auth/db.js';
 import { handleSignup, handleLogin, handleVerifyEmail, handleMe, verifyJwt } from './auth/auth.js';
@@ -272,6 +273,21 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         spice: body.spice as string,
       });
       sendJson(response, simulation.ok ? 200 : 422, simulation);
+    } catch (error) {
+      sendJson(response, statusFor(error), { error: (error as Error).message });
+    }
+    return;
+  }
+
+  if (request.url === '/api/compile-sketch' && request.method === 'POST') {
+    try {
+      const body = await readJsonBody(request);
+      if (typeof body.code !== 'string' || !body.code.trim()) {
+        sendJson(response, 400, { error: 'Sketch source code is required.' });
+        return;
+      }
+      const compilation = await compileSketch({ code: body.code });
+      sendJson(response, compilation.ok ? 200 : 422, compilation);
     } catch (error) {
       sendJson(response, statusFor(error), { error: (error as Error).message });
     }

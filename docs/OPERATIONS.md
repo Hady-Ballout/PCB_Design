@@ -47,6 +47,23 @@ Must be installed and on `PATH`. On Windows, `ngspice_con.exe` (console/batch mo
 preferred over `ngspice.exe` to avoid launching a GUI (see `docs/BACKEND.md` /
 `server/simulation/simulator.ts`).
 
+## Arduino CLI
+
+Needed only for the breadboard view's live Uno firmware emulation (`POST
+/api/compile-sketch` in `server/compile/compiler.ts`). Must be on `PATH` (override with
+`ARDUINO_CLI_BINARY`). Install on Windows with `winget install ArduinoSA.CLI`, then run the
+one-time toolchain setup:
+
+```bash
+arduino-cli core update-index
+arduino-cli core install arduino:avr
+```
+
+Sketches are compiled locally in a temp dir (`sketch/sketch.ino`, `--fqbn
+arduino:avr:uno`) — source never leaves the machine — with an in-memory hash→hex cache for
+repeat runs. If the CLI is missing, the endpoint returns a friendly install hint instead of
+failing opaquely; the rest of the app (including non-firmware simulation) is unaffected.
+
 ## Deployment
 
 - **`Dockerfile`** — `node:20-slim` + `apt-get install ngspice`, installs prod deps only,

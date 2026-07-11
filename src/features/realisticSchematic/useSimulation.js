@@ -9,7 +9,7 @@ import { createSimAudio } from './simAudio.js';
 
 const FRAME_BUDGET_MS = 4;
 
-export function useSimulation(circuit, running) {
+export function useSimulation(circuit, running, mcu = null) {
   const engineRef = useRef(null);
   // Control values survive engine rebuilds (circuit edits while running): the
   // user's held button / thrown switch / wiper position carries over by ref.
@@ -43,6 +43,8 @@ export function useSimulation(circuit, running) {
       observables: engine.observables(),
       warnings: engine.warnings,
       error: engine.error,
+      serial: engine.serialText?.() ?? '',
+      hasMcu: Boolean(engine.mcuRunner),
     };
   }, []);
 
@@ -53,7 +55,7 @@ export function useSimulation(circuit, running) {
       setControls([]);
       return undefined;
     }
-    const engine = createSimulation(circuit);
+    const engine = createSimulation(circuit, mcu ? { mcu } : {});
     engineRef.current = engine;
     if (!engine.ok) {
       setSimFrame({
@@ -65,6 +67,8 @@ export function useSimulation(circuit, running) {
         observables: new Map(),
         warnings: engine.warnings,
         error: engine.error,
+        serial: '',
+        hasMcu: false,
       });
       setControls([]);
       return undefined;
@@ -99,7 +103,7 @@ export function useSimulation(circuit, running) {
     setSimFrame(snapshot());
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [circuit, running, snapshot]);
+  }, [circuit, running, mcu, snapshot]);
 
   const setControl = useCallback((ref, name, value) => {
     controlMemoryRef.current.set(`${ref}:${name}`, value);

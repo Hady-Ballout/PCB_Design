@@ -314,6 +314,28 @@ containing only event devices stay static (`isDynamic` false): they re-settle on
 control edit, and anything a 555 does usefully involves its timing capacitor, which
 already makes the circuit dynamic.
 
+### Arduino Uno firmware execution (avr8js)
+
+The biggest sim/deck divergence: **the live sim actually executes the chat's firmware; the
+ngspice deck never does.** Pressing Run on a circuit whose first `arduino_uno` has a sketch
+(`editableCode`) compiles it server-side (`POST /api/compile-sketch` → local `arduino-cli`,
+see docs/OPERATIONS.md; per-chat hash→hex cache client-side) and attaches an **avr8js**
+ATmega328P emulator (`src/core/sim/avrRunner.js`: CPU + timers 0/1/2 + ports B/C/D + USART
++ ADC, pinned `avr8js@0.21.0`) to the engine. `buildSimNetlist(circuit, {mcuRef})` then
+emits real devices for the board: an internal always-on 5 V supply (USB) behind 0.5 Ω on
+the 5V/3V3 pins (so a parallel user battery can't fight an ideal source), a 0 V tie for a
+non-`'0'` GND-pin net, and one `mcu_pin` branch + 40 Ω output resistance per connected
+D0–D13/A0–A5 pin. Each timestep runs **lockstep**: `h·16 MHz` AVR cycles execute, pin
+modes/levels latch into the stamps (output → 0/5 V drive; input → floating zero-current
+branch; INPUT_PULLUP → +35 kΩ to 5 V), the MNA solve runs, and the solved net voltages
+feed back (digital reads at a 2.5 V threshold, all six ADC channels) with one step of lag.
+`Serial.print` bytes stream into a 4 KB ring buffer shown in the breadboard's serial
+monitor strip. PWM (`analogWrite`) is electrically real — a 490/980 Hz square wave through
+the circuit — and LED **brightness** renders its 30 ms persistence-of-vision average
+(`emaI`) so PWM dims instead of flickering, while readout amps and the V map stay
+instantaneous. Firmware-less Unos warn `mcu_no_firmware` and float as before; ESP32/Pi
+remain `mcu_not_simulated`; one Uno per circuit executes (the first).
+
 Solver notes: junction limiting (pnjlim) must veto NR convergence — with an LED off-seed,
 node voltages sit nearly still for ~10 iterations while the junction linearization climbs
 to conduction, so a plain delta-x test converges prematurely to the wrong operating point.
