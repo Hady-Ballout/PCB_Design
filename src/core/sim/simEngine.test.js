@@ -446,6 +446,93 @@ describe('createSimulation — polish devices (M4)', () => {
   });
 });
 
+describe('createSimulation — stimulus-driven sensors (Tier 2a)', () => {
+  it('drives the TMP36 output from the temperature slider, 0 V unpowered', () => {
+    const powered = createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      // [VCC, OUT, GND]
+      { ref: 'U1', kind: 'temp_sensor', value: 'TMP36', nodes: ['VCC', 'VOUT', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VOUT', '0'] },
+    ]));
+    expect(powered.solveDC()).toBe(true);
+    expect(volts(powered, 'VOUT')).toBeCloseTo(0.75, 3); // 25 °C default
+    powered.setControl('U1', 'tempC', 100);
+    expect(powered.solveDC()).toBe(true);
+    expect(volts(powered, 'VOUT')).toBeCloseTo(1.5, 3);
+
+    const unpowered = createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'RL', kind: 'resistor', value: '10k', nodes: ['VCC', '0'] },
+      { ref: 'U1', kind: 'temp_sensor', value: 'TMP36', nodes: ['NC_U1_1', 'VOUT', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VOUT', '0'] },
+    ]));
+    expect(unpowered.solveDC()).toBe(true);
+    expect(Math.abs(volts(unpowered, 'VOUT'))).toBeLessThan(0.01);
+  });
+
+  it('lights an LED through a BJT when the PIR sees motion', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'PIR1', kind: 'pir_sensor', value: '', nodes: ['VCC', 'VPIR', '0'] },
+      { ref: 'RB', kind: 'resistor', value: '1k', nodes: ['VPIR', 'VB'] },
+      { ref: 'Q1', kind: 'bjt_npn', value: '2N2222', nodes: ['VC', 'VB', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '330', nodes: ['VCC', 'VLED'] },
+      { ref: 'D1', kind: 'led', value: 'red', nodes: ['VLED', 'VC'] },
+    ]));
+    expect(engine.solveDC()).toBe(true);
+    expect(Math.abs(engine.observables().get('D1').amps)).toBeLessThan(1e-4);
+    engine.setControl('PIR1', 'motion', 1);
+    expect(engine.solveDC()).toBe(true);
+    expect(engine.observables().get('D1').amps).toBeGreaterThan(0.005);
+  });
+
+  it('sweeps the soil and gas analog outputs monotonically; gas DO flips at threshold', () => {
+    const soil = createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      // [VCC, GND, AOUT]
+      { ref: 'U1', kind: 'soil_moisture', value: '', nodes: ['VCC', '0', 'AOUT'] },
+      { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['AOUT', '0'] },
+    ]));
+    const soilReadings = [0.1, 0.5, 0.9].map((moisture) => {
+      soil.setControl('U1', 'moisture', moisture);
+      soil.solveDC();
+      return volts(soil, 'AOUT');
+    });
+    expect(soilReadings[0]).toBeGreaterThan(soilReadings[1]);
+    expect(soilReadings[1]).toBeGreaterThan(soilReadings[2]);
+
+    const gas = createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      // [VCC, GND, DO, AO]
+      { ref: 'U1', kind: 'gas_sensor', value: 'MQ-2', nodes: ['VCC', '0', 'VDO', 'VAO'] },
+      { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VAO', '0'] },
+      { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['VDO', '0'] },
+    ]));
+    gas.setControl('U1', 'gas', 0.2);
+    gas.solveDC();
+    const lowAO = volts(gas, 'VAO');
+    expect(volts(gas, 'VDO')).toBeGreaterThan(4.5); // below threshold: DO high
+    gas.setControl('U1', 'gas', 0.8);
+    gas.solveDC();
+    expect(volts(gas, 'VAO')).toBeGreaterThan(lowAO);
+    expect(volts(gas, 'VDO')).toBeLessThan(0.2); // above threshold: DO low
+  });
+
+  it('pulls the hall sensor output low only while the magnet is near', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'RP', kind: 'resistor', value: '10k', nodes: ['VCC', 'VOUT'] },
+      // [VCC, GND, OUT]
+      { ref: 'U1', kind: 'hall_sensor', value: 'A3144', nodes: ['VCC', '0', 'VOUT'] },
+    ]));
+    expect(engine.solveDC()).toBe(true);
+    expect(volts(engine, 'VOUT')).toBeGreaterThan(4.9);
+    engine.setControl('U1', 'magnet', 1);
+    expect(engine.solveDC()).toBe(true);
+    expect(volts(engine, 'VOUT')).toBeLessThan(0.2);
+  });
+});
+
 describe('createSimulation — pre-flight and robustness', () => {
   it('rejects a circuit with no ground', () => {
     const engine = createSimulation(circuitOf([

@@ -667,9 +667,10 @@ function OledBody({ part, points }) {
 
 // HC-SR501 PIR motion sensor: green PCB dominated by the white Fresnel dome,
 // with the two orange trimmers peeking out beneath.
-function PirBody({ part, points }) {
+function PirBody({ part, points, sim }) {
   const { mid, cy, edgeY } = moduleFrame(part, points);
   const width = 44;
+  const triggered = Boolean(sim?.motion);
   return (
     <g>
       <rect x={mid - width / 2} y={cy - 15} width={width} height={30} rx={2} fill="url(#rsPartPi)" stroke="#0f4423" strokeWidth="0.6" />
@@ -677,6 +678,7 @@ function PirBody({ part, points }) {
         <rect key={side} x={mid + side * 15 - 2.2} y={cy + 9.5} width={4.4} height={4.4} rx={0.6} fill="#e07020" stroke="#8a4310" strokeWidth="0.4" />
       ))}
       <circle cx={mid} cy={cy - 1} r={12.5} fill="url(#rsPirDome)" stroke="#c9c9ba" strokeWidth="0.6" />
+      {triggered && <circle cx={mid} cy={cy - 1} r={12.5} fill="#ffb347" opacity="0.35" />}
       <circle cx={mid} cy={cy - 1} r={8.4} fill="none" stroke="#d8d8ca" strokeWidth="0.6" />
       <circle cx={mid} cy={cy - 1} r={4.4} fill="none" stroke="#d8d8ca" strokeWidth="0.6" />
       <path d={`M ${mid - 12.5} ${cy - 1} H ${mid + 12.5} M ${mid} ${cy - 13.5} V ${cy + 11.5}`} stroke="#d8d8ca" strokeWidth="0.6" fill="none" />

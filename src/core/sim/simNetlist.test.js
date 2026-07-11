@@ -68,6 +68,24 @@ describe('buildSimNetlist', () => {
     expect(netlist.devices.some((device) => device.owner === 'R1')).toBe(true);
   });
 
+  it('gives Tier-2a sensors controls and one branch per connected output', () => {
+    const netlist = buildSimNetlist(circuitOf(withSupply([
+      { ref: 'T1', kind: 'temp_sensor', value: '', nodes: ['VCC', 'VT', '0'] },
+      { ref: 'G1', kind: 'gas_sensor', value: '', nodes: ['VCC', '0', 'VDO', 'NC_G1_4'] },
+      { ref: 'H1', kind: 'hall_sensor', value: '', nodes: ['VCC', '0', 'VH'] },
+    ])));
+    expect(netlist.ok).toBe(true);
+    expect(netlist.devices.find((d) => d.id === 'T1_OUT')).toMatchObject({ type: 'sensor_source', law: 'tmp36' });
+    // Gas: DO connected → branch; AO unconnected → no branch.
+    expect(netlist.devices.some((d) => d.id === 'G1_DO')).toBe(true);
+    expect(netlist.devices.some((d) => d.id === 'G1_AO')).toBe(false);
+    expect(netlist.devices.find((d) => d.id === 'H1_OC')).toMatchObject({ type: 'vres', model: 'hall_switch' });
+    expect(netlist.controls).toContainEqual(expect.objectContaining({ ref: 'T1', type: 'slider', name: 'tempC', value: 25 }));
+    expect(netlist.controls).toContainEqual(expect.objectContaining({ ref: 'H1', type: 'toggle', name: 'magnet' }));
+    // None of these warn as unsimulated modules.
+    expect(netlist.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
+  });
+
   it('maps the zener breakdown voltage from its value', () => {
     const netlist = buildSimNetlist(circuitOf(withSupply([
       { ref: 'D1', kind: 'zener', value: '9.1V', nodes: ['VCC', '0'] },

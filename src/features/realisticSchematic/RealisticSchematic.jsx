@@ -233,8 +233,11 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
     // Other parts have no press gesture in run mode; a plain click still selects.
   };
 
-  const toggleSimSwitch = (ref) => {
-    setControl(ref, 'position', controlValue(ref, 'position', 'A') === 'A' ? 'B' : 'A');
+  // Kinds whose run-mode click toggles a control instead of selecting.
+  const RUN_CLICK_TOGGLES = {
+    switch_spdt: (ref) => setControl(ref, 'position', controlValue(ref, 'position', 'A') === 'A' ? 'B' : 'A'),
+    pir_sensor: (ref) => setControl(ref, 'motion', controlValue(ref, 'motion', 0) ? 0 : 1),
+    hall_sensor: (ref) => setControl(ref, 'magnet', controlValue(ref, 'magnet', 0) ? 0 : 1),
   };
 
   const onPointerDown = (event) => {
@@ -609,19 +612,21 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
             <HighlightOverlay board={model.board} highlight={highlight} nets={model.nets} />
             {model.parts.map((part) => {
               const dragging = partDrag?.ref === part.ref;
+              const clickToggle = running ? RUN_CLICK_TOGGLES[part.kind] : undefined;
               const simInteractive = running
-                && (part.kind === 'pushbutton' || part.kind === 'potentiometer' || part.kind === 'switch_spdt');
+                && (part.kind === 'pushbutton' || part.kind === 'potentiometer' || Boolean(clickToggle));
               const wrapper = interactive(
                 { type: 'part', ref: part.ref },
                 `${part.ref} ${String(part.kind).replaceAll('_', ' ')} ${part.value ?? ''}`.trim(),
                 highlight.partRefs.has(part.ref),
               );
-              // In run mode the SPDT toggles on click instead of selecting.
-              if (running && part.kind === 'switch_spdt') {
+              // In run mode a click on these kinds toggles their control
+              // (switch throw, PIR motion, hall magnet) instead of selecting.
+              if (clickToggle) {
                 wrapper.onClick = (event) => {
                   event.stopPropagation();
                   if (suppressClickRef.current) { suppressClickRef.current = false; return; }
-                  toggleSimSwitch(part.ref);
+                  clickToggle(part.ref);
                 };
               }
               return (

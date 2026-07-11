@@ -369,6 +369,26 @@ describe('live simulation (Run mode)', () => {
     expect(glow()).toBeNull();
   });
 
+  it('toggles PIR motion with a run-mode click and drives its OUT net', () => {
+    mountRunning({
+      title: 'PIR',
+      nodes: ['VCC', 'VPIR', '0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'PIR1', kind: 'pir_sensor', value: '', nodes: ['VCC', 'VPIR', '0'] },
+        { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VPIR', '0'] },
+      ],
+    });
+    const pirChip = () => [...container.querySelectorAll('.realistic-legend-chip')]
+      .find((chip) => chip.textContent.includes('VPIR')).textContent;
+    flushFrames(4);
+    expect(pirChip()).toContain('50.0mV'); // idle
+    const pir = container.querySelector('[aria-label*="PIR1"]');
+    act(() => { pir.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    flushFrames(4);
+    expect(pirChip()).toContain('3.30V'); // motion
+  });
+
   it('surfaces a friendly error for an unsimulatable circuit', () => {
     mountRunning({
       title: 'No ground',

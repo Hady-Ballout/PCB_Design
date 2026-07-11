@@ -98,6 +98,11 @@ export const observablesFor = (netlist, probe, controlState = new Map()) => {
       case 'sensor_out':
         entry.outVolts = device.overrideVolts;
         break;
+      case 'sensor_source':
+        // Two-output modules (gas/sound) surface the analog value; the DO
+        // level shows on its net in the legend anyway.
+        if (device.law !== 'module_do') entry.volts = device.overrideVolts;
+        break;
       case 'relay':
         entry.energized = device.state?.energized ?? false;
         break;

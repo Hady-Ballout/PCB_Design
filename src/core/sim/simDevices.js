@@ -36,6 +36,10 @@ export const variableOhms = (device, state = {}) => {
       const kelvin = tempC + 273.15;
       return device.params.r25 * Math.exp(3950 * (1 / kelvin - 1 / 298.15));
     }
+    case 'hall_switch':
+      // A3144 open-collector output: pulls to GND while the magnet is near.
+      // (Power gating ignored — documented simplification.)
+      return state.magnet ? 30 : OPEN_OHMS;
     default:
       return OPEN_OHMS;
   }

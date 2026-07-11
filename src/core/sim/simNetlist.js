@@ -35,6 +35,13 @@ const DIODE_MODELS = {
 
 const SEVEN_SEGMENT_SEGMENTS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'DP'];
 
+// Wiring-only registry kinds that nevertheless get behavioral models: the
+// relay, plus the Tier-2a stimulus-driven analog sensors (their outputs are
+// plain voltages/switches, so they work without MCU firmware).
+const SIMULATED_MODULE_KINDS = new Set([
+  'relay_module', 'temp_sensor', 'pir_sensor', 'soil_moisture', 'gas_sensor', 'sound_sensor', 'hall_sensor',
+]);
+
 const regulatorOutputNode = (nodes = []) => nodes.find((node) => /^v?out/i.test(node)) || nodes.at(-1) || 'VOUT';
 
 export const buildSimNetlist = (circuit) => {
@@ -99,9 +106,10 @@ export const buildSimNetlist = (circuit) => {
       warnOnce('mcu_not_simulated', `${ref} (${kindLabel(kind)}) is not simulated — its pins float`);
       continue;
     }
-    // relay_module is wiringOnly in the registry but gets a behavioral model
-    // here (contacts + coil + indicator) — the only module that does.
-    if (WIRING_ONLY_KINDS.has(kind) && kind !== 'relay_module') {
+    // Most wiring-only modules stay unsimulated (they need MCU firmware to be
+    // meaningful), but a few carry behavioral models: the relay, and the
+    // stimulus-driven analog sensors whose outputs work without an MCU.
+    if (WIRING_ONLY_KINDS.has(kind) && !SIMULATED_MODULE_KINDS.has(kind)) {
       warnOnce('module_not_simulated', `${ref} (${kindLabel(kind)}) is a wiring-only module — not simulated`);
       continue;
     }
@@ -230,6 +238,68 @@ export const buildSimNetlist = (circuit) => {
         }
         break;
       }
+      case 'temp_sensor': // [VCC, OUT, GND] — TMP36 analog out
+        if (!isUnconnectedTerminal(b, ref, 2)) {
+          devices.push({
+            type: 'sensor_source', id: `${ref}_OUT`, owner: ref, kind,
+            out: indexOf(b), gnd: indexOf(c), vcc: indexOf(a),
+            law: 'tmp36', stimulusName: 'tempC', branch: branchCount, overrideVolts: 0,
+          });
+          branchCount += 1;
+        }
+        controls.push({ ref, kind, type: 'slider', name: 'tempC', min: -40, max: 125, step: 1, value: 25, label: 'Temperature (°C)' });
+        break;
+      case 'pir_sensor': // [VCC, OUT, GND] — motion toggle drives OUT
+        if (!isUnconnectedTerminal(b, ref, 2)) {
+          devices.push({
+            type: 'sensor_source', id: `${ref}_OUT`, owner: ref, kind,
+            out: indexOf(b), gnd: indexOf(c), vcc: indexOf(a),
+            law: 'pir', stimulusName: 'motion', branch: branchCount, overrideVolts: 0,
+          });
+          branchCount += 1;
+        }
+        controls.push({ ref, kind, type: 'toggle', name: 'motion', value: 0 });
+        break;
+      case 'soil_moisture': // [VCC, GND, AOUT]
+        if (!isUnconnectedTerminal(c, ref, 3)) {
+          devices.push({
+            type: 'sensor_source', id: `${ref}_AOUT`, owner: ref, kind,
+            out: indexOf(c), gnd: indexOf(b), vcc: indexOf(a),
+            law: 'soil', stimulusName: 'moisture', branch: branchCount, overrideVolts: 0,
+          });
+          branchCount += 1;
+        }
+        controls.push({ ref, kind, type: 'slider', name: 'moisture', min: 0, max: 1, step: 0.01, value: 0.3, label: 'Moisture' });
+        break;
+      case 'gas_sensor': // [VCC, GND, DO, AO]
+      case 'sound_sensor': {
+        const stimulusName = kind === 'gas_sensor' ? 'gas' : 'level';
+        if (!isUnconnectedTerminal(c, ref, 3)) {
+          devices.push({
+            type: 'sensor_source', id: `${ref}_DO`, owner: ref, kind,
+            out: indexOf(c), gnd: indexOf(b), vcc: indexOf(a),
+            law: 'module_do', stimulusName, branch: branchCount, overrideVolts: 0,
+          });
+          branchCount += 1;
+        }
+        if (!isUnconnectedTerminal(d, ref, 4)) {
+          devices.push({
+            type: 'sensor_source', id: `${ref}_AO`, owner: ref, kind,
+            out: indexOf(d), gnd: indexOf(b), vcc: indexOf(a),
+            law: 'module_ao', stimulusName, branch: branchCount, overrideVolts: 0,
+          });
+          branchCount += 1;
+        }
+        controls.push({
+          ref, kind, type: 'slider', name: stimulusName, min: 0, max: 1, step: 0.01, value: 0.1,
+          label: kind === 'gas_sensor' ? 'Gas level' : 'Sound level',
+        });
+        break;
+      }
+      case 'hall_sensor': // [VCC, GND, OUT] — open-collector, needs a pull-up
+        addVariableResistor(`${ref}_OC`, ref, kind, indexOf(c), indexOf(b), 'hall_switch', {});
+        controls.push({ ref, kind, type: 'toggle', name: 'magnet', value: 0 });
+        break;
       case 'relay_module': {
         // [VCC, GND, IN, COM, NO, NC]: energized closes COM–NO, idle rests on
         // COM–NC; the coil loads the supply when energized.

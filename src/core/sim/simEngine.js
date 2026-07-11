@@ -109,6 +109,7 @@ export const createSimulation = (circuit) => {
   const eventDevices = devices.filter((device) => EVENT_TYPES.has(device.type)
     || device.type === 'relay'
     || device.type === 'sensor_out'
+    || device.type === 'sensor_source'
     || device.kind === 'fuse'
     || (device.type === 'vsource' && device.kind === 'regulator' && device.inNode != null));
   const diodeById = new Map(devices.filter((device) => device.type === 'diode').map((device) => [device.id, device]));
@@ -332,7 +333,8 @@ export const createSimulation = (circuit) => {
           stampConductance(device.vcc, device.gnd, 1 / (energized ? 70 : 10e3));
           break;
         }
-        case 'sensor_out': {
+        case 'sensor_out':
+        case 'sensor_source': {
           const bi = nodeCount + device.branch;
           if (device.out !== GROUND) {
             A[device.out][bi] += 1;
@@ -471,6 +473,24 @@ export const createSimulation = (circuit) => {
         const shunt = device.shunt;
         const amps = shunt ? (atX(shunt.n1) - atX(shunt.n2)) / shunt.lastOhms : 0;
         const next = 2.5 + 0.185 * amps;
+        if (Math.abs(device.overrideVolts - next) > 1e-3) {
+          device.overrideVolts = next;
+          changed = true;
+        }
+      } else if (device.type === 'sensor_source') {
+        // Tier-2a stimulus-driven sensors: output law from the control value,
+        // gated on the module being powered.
+        const supply = atX(device.vcc) - atX(device.gnd);
+        const powered = supply > 2.5;
+        const stimulus = controlState.get(device.owner)?.[device.stimulusName] ?? 0;
+        let next = 0;
+        if (powered) {
+          if (device.law === 'tmp36') next = 0.5 + 0.01 * stimulus;
+          else if (device.law === 'pir') next = stimulus ? 3.3 : 0.05;
+          else if (device.law === 'soil') next = 2.8 - 1.6 * stimulus;
+          else if (device.law === 'module_ao') next = 0.4 + 3.6 * stimulus;
+          else if (device.law === 'module_do') next = stimulus > 0.5 ? 0.1 : supply;
+        }
         if (Math.abs(device.overrideVolts - next) > 1e-3) {
           device.overrideVolts = next;
           changed = true;
