@@ -37,7 +37,20 @@ export {
 };
 
 export const MCU_KINDS = new Set(['arduino_uno', 'raspberry_pi', 'esp32']);
-export const MCU_PIN_COUNTS = { arduino_uno: 12, raspberry_pi: 10, esp32: 12 };
+// Fixed pin order for microcontroller boards; nodes[i] is pin i+1 of this list.
+export const MCU_PIN_NAMES = {
+  arduino_uno: ['5V', '3V3', 'GND', 'VIN', 'D2', 'D3', 'D5', 'D9', 'D13', 'A0', 'A1', 'A2'],
+  raspberry_pi: ['5V', '3V3', 'GND', 'GPIO2', 'GPIO3', 'GPIO4', 'GPIO17', 'GPIO18', 'GPIO27', 'GPIO22'],
+  esp32: ['3V3', 'GND', 'VIN', 'EN', 'GPIO2', 'GPIO4', 'GPIO5', 'GPIO13', 'GPIO18', 'GPIO19', 'GPIO21', 'GPIO22'],
+};
+export const MCU_PIN_COUNTS = Object.fromEntries(
+  Object.entries(MCU_PIN_NAMES).map(([kind, names]) => [kind, names.length]),
+);
+export const MCU_BOARD_TITLES = {
+  arduino_uno: 'Arduino UNO R3',
+  raspberry_pi: 'Raspberry Pi',
+  esp32: 'ESP32 DevKit',
+};
 
 export const validateCircuit = (circuit) => {
   const errors = [];

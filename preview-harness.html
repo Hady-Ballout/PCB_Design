@@ -38,7 +38,7 @@
   </script>
   <style>
     body { margin: 0; background: #10151c; color: #e8ecf2; font-family: Inter, Arial, sans-serif; }
-    main { display: grid; grid-template-rows: 46vh 46vh; gap: 12px; padding: 12px; height: calc(100vh - 24px); box-sizing: border-box; }
+    main { display: grid; grid-template-rows: 60vh 60vh 46vh; gap: 12px; padding: 12px; box-sizing: border-box; }
     section { display: flex; flex-direction: column; min-height: 0; border: 1px solid #2a3442; border-radius: 8px; padding: 10px; }
     h2 { margin: 0 0 8px; font-size: 15px; }
     section > div { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -49,6 +49,10 @@
     <section>
       <h2>KiCanvas schematic (generated .kicad_sch)</h2>
       <div id="schematic-root"></div>
+    </section>
+    <section>
+      <h2>KiCanvas schematic — ESP32 blink (module box + library symbols)</h2>
+      <div id="mcu-root"></div>
     </section>
     <section>
       <h2>3D PCB viewer (procedural layout)</h2>
@@ -81,12 +85,38 @@
       notes: [],
     };
 
+    // ESP32 blink: exercises the synthesized MCU module box plus real
+    // Device:R / Device:LED / power:GND library symbols.
+    const mcuCircuit = {
+      title: 'Harness: ESP32 LED Blink',
+      type: 'mcu_blink',
+      supplyVoltage: 3.3,
+      components: [
+        {
+          ref: 'U1',
+          kind: 'esp32',
+          value: '',
+          nodes: [
+            'NC_U1_1', '0', 'NC_U1_3', 'NC_U1_4', 'GPIO2', 'NC_U1_6',
+            'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12',
+          ],
+        },
+        { ref: 'RLED', kind: 'resistor', value: '330', nodes: ['GPIO2', 'LED_A'] },
+        { ref: 'D1', kind: 'led', value: 'red', nodes: ['LED_A', '0'] },
+      ],
+      notes: [],
+    };
+
     const diagram = buildCircuitDiagram(circuit);
     const schematic = toKiCadSchematic(circuit, diagram);
-    window.__harness = { schematic, diagram };
+    const mcuDiagram = buildCircuitDiagram(mcuCircuit);
+    const mcuSchematic = toKiCadSchematic(mcuCircuit, mcuDiagram);
+    window.__harness = { schematic, diagram, mcuSchematic, mcuDiagram };
 
     createRoot(document.getElementById('schematic-root'))
       .render(React.createElement(KiCanvasEmbed, { source: schematic }));
+    createRoot(document.getElementById('mcu-root'))
+      .render(React.createElement(KiCanvasEmbed, { source: mcuSchematic }));
     createRoot(document.getElementById('pcb-root'))
       .render(React.createElement(Pcb3DViewer, { circuit }));
   </script>
