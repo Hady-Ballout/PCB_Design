@@ -8,14 +8,33 @@ const SLIDER_PRESENTATION = {
 };
 
 export function SimStimulusPanel({ controls, onChange }) {
-  const sliders = controls.filter((control) => control.type === 'slider');
-  if (sliders.length === 0) return null;
+  const interactive = controls.filter((control) => ['slider', 'stepper', 'button'].includes(control.type));
+  if (interactive.length === 0) return null;
   return (
     <div className="rs-stimulus-panel">
-      {sliders.map((control) => {
+      {interactive.map((control) => {
+        const key = `${control.ref}:${control.name}`;
+        if (control.type === 'stepper') {
+          // Event-style control: each click emits ±1 (encoder detents).
+          return (
+            <span key={key} className="rs-stimulus-row">
+              <span className="rs-stimulus-label">{control.ref} · {control.label ?? control.name}</span>
+              <button type="button" onClick={() => onChange(control.ref, control.name, -1)}>◀ CCW</button>
+              <button type="button" onClick={() => onChange(control.ref, control.name, 1)}>CW ▶</button>
+            </span>
+          );
+        }
+        if (control.type === 'button') {
+          return (
+            <span key={key} className="rs-stimulus-row">
+              <span className="rs-stimulus-label">{control.ref} · {control.label ?? control.name}</span>
+              <button type="button" onClick={() => onChange(control.ref, control.name, 1)}>Press</button>
+            </span>
+          );
+        }
         const presentation = SLIDER_PRESENTATION[control.name] ?? { icon: '', endIcon: '', format: String };
         return (
-          <label key={`${control.ref}:${control.name}`} className="rs-stimulus-row">
+          <label key={key} className="rs-stimulus-row">
             <span className="rs-stimulus-label">
               {control.ref} · {control.label ?? control.name}
             </span>

@@ -624,7 +624,7 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
       )}
       {running && selection?.type === 'part' && (
         <SimStimulusPanel
-          controls={controls.filter((control) => control.ref === selection.ref && control.type === 'slider')}
+          controls={controls.filter((control) => control.ref === selection.ref)}
           onChange={setControl}
         />
       )}

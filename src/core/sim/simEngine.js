@@ -6,6 +6,7 @@ import { clearMatrix, makeMatrix, solveDense } from './linalg.js';
 import { buildSimNetlist, GROUND } from './simNetlist.js';
 import { evalBjt, evalDiode, evalMosfet, evalOpamp, junctionCriticalVoltage, limitDiode, limitJunction, THERMAL_VOLTAGE, variableOhms } from './simDevices.js';
 import { AVR_CLOCK_HZ, createAvrRunner } from './avrRunner.js';
+import { createPeripheral } from './avrPeripherals.js';
 import { observablesFor } from './simObservables.js';
 
 const GMIN = 1e-12;
@@ -89,7 +90,13 @@ export const createSimulation = (circuit, options = {}) => {
   const rhs = new Float64Array(size);
   let x = new Float64Array(size); // last committed solution
 
-  const controlState = new Map(controls.map((control) => [control.ref, { [control.name]: control.value }]));
+  // Merge per ref — parts can carry several controls (DHT temp + humidity).
+  const controlState = new Map();
+  for (const control of controls) {
+    const state = controlState.get(control.ref) ?? {};
+    state[control.name] = control.value;
+    controlState.set(control.ref, state);
+  }
 
   const NR_TYPES = new Set(['diode', 'bjt', 'mosfet', 'opamp']);
   const EVENT_TYPES = new Set(['comparator', 'timer_555', 'opto_out']);
@@ -143,12 +150,19 @@ export const createSimulation = (circuit, options = {}) => {
   const mcuPins = devices.filter((device) => device.type === 'mcu_pin');
   let mcuRunner = null;
   let serialBuffer = '';
+  const peripheralsByOwner = new Map();
   if (mcuRef && mcuPins.length >= 0 && netlist.ok && options.mcu) {
     mcuRunner = createAvrRunner(options.mcu);
     mcuRunner.onSerialByte((byte) => {
       serialBuffer += String.fromCharCode(byte);
       if (serialBuffer.length > 4096) serialBuffer = serialBuffer.slice(-4096);
     });
+    // Protocol modules attach at cycle resolution (listeners + clock events
+    // fire inside mcuRunner.run() during the lockstep).
+    for (const record of devices.filter((device) => device.type === 'avr_peripheral')) {
+      const peripheral = createPeripheral(record, mcuRunner, controlState);
+      if (peripheral) peripheralsByOwner.set(record.owner, peripheral);
+    }
   }
 
   const isDynamic = reactives.length > 0
@@ -352,6 +366,18 @@ export const createSimulation = (circuit, options = {}) => {
         case 'opto_out':
           stampConductance(device.c, device.e, 1 / (device.state.on ? 30 : 10e6));
           break;
+        case 'periph_pin': {
+          // Display-only presence of a module-driven protocol pin (behind the
+          // netlist's 1 kΩ resistor): tracks the peripheral's digital level.
+          const bi = nodeCount + device.branch;
+          const level = peripheralsByOwner.get(device.owner)?.level(device.pinName) ?? 0;
+          if (device.int !== GROUND) {
+            A[device.int][bi] += 1;
+            A[bi][device.int] += 1;
+          }
+          rhs[bi] = level * 5;
+          break;
+        }
         case 'mcu_pin': {
           const bi = nodeCount + device.branch;
           if (device.mode === 'output') {
@@ -671,6 +697,9 @@ export const createSimulation = (circuit, options = {}) => {
     state[name] = value;
     const control = controls.find((entry) => entry.ref === ref && entry.name === name);
     if (control) control.value = value;
+    // Peripherals treat stepper/button controls as events (quadrature pulses,
+    // switch presses), not persistent state.
+    peripheralsByOwner.get(ref)?.onControl?.(name, value);
     dirty = true;
   };
 
@@ -711,7 +740,13 @@ export const createSimulation = (circuit, options = {}) => {
     solveDC,
     setControl,
     probe,
-    observables: () => observablesFor(netlist, probe(), controlState),
+    observables: () => {
+      const observables = observablesFor(netlist, probe(), controlState);
+      for (const [owner, peripheral] of peripheralsByOwner) {
+        observables.set(owner, { ...(observables.get(owner) ?? {}), ...peripheral.observe() });
+      }
+      return observables;
+    },
     status: () => ({ converged: lastConverged, lastSpeed, iterations: lastIterations }),
     mcuRunner,
     serialText: () => serialBuffer,

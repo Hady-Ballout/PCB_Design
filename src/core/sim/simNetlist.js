@@ -42,6 +42,29 @@ const SIMULATED_MODULE_KINDS = new Set([
   'relay_module', 'temp_sensor', 'pir_sensor', 'soil_moisture', 'gas_sensor', 'sound_sensor', 'hall_sensor',
 ]);
 
+// Protocol modules that ride the Arduino firmware bridge at cycle resolution
+// (avrPeripherals.js). Simulated only when their protocol pins are wired
+// DIRECTLY to the firmware-carrying Uno's signal pins — a series resistor
+// between module and pin breaks the net-identity discovery.
+const AVR_PERIPHERAL_KINDS = new Set(['servo', 'ultrasonic_sensor', 'dht_sensor', 'rotary_encoder']);
+
+// Protocol pins per kind: which the MCU drives vs the module drives, and
+// which are required for the peripheral to attach.
+const PERIPHERAL_PIN_SPECS = {
+  servo: { required: ['SIG'], moduleDriven: [] },
+  ultrasonic_sensor: { required: ['TRIG', 'ECHO'], moduleDriven: ['ECHO'] },
+  dht_sensor: { required: ['DATA'], moduleDriven: ['DATA'] },
+  rotary_encoder: { required: ['CLK', 'DT'], optional: ['SW'], moduleDriven: ['CLK', 'DT', 'SW'] },
+};
+
+// Module pin-name → fixedPins index (protocol pins only).
+const PERIPHERAL_PIN_INDEX = {
+  servo: { SIG: 2 }, // [VCC, GND, SIG]
+  ultrasonic_sensor: { TRIG: 1, ECHO: 2 }, // [VCC, TRIG, ECHO, GND]
+  dht_sensor: { DATA: 1 }, // [VCC, DATA, GND]
+  rotary_encoder: { CLK: 0, DT: 1, SW: 2 }, // [CLK, DT, SW, VCC, GND]
+};
+
 const regulatorOutputNode = (nodes = []) => nodes.find((node) => /^v?out/i.test(node)) || nodes.at(-1) || 'VOUT';
 
 // Uno signal-pin names in fixedPins positional order (after 5V/3V3/GND/VIN).
@@ -58,6 +81,10 @@ export const buildSimNetlist = (circuit, options = {}) => {
   const warnings = [];
   const nodeIndex = new Map();
   let branchCount = 0;
+  // net name → Uno pin name, built while emitting the firmware Uno's pins;
+  // resolved against protocol-module pins in the post-loop pass.
+  const mcuPinByNet = new Map();
+  const peripheralCandidates = [];
 
   const warnOnce = (code, message) => {
     if (!warnings.some((entry) => entry.code === code && entry.message === message)) {
@@ -136,6 +163,7 @@ export const buildSimNetlist = (circuit, options = {}) => {
           const pinIndex = index + 4; // after 5V/3V3/GND/VIN
           const node = nodes[pinIndex];
           if (node == null || isUnconnectedTerminal(node, ref, pinIndex + 1)) return;
+          mcuPinByNet.set(String(node), unoPin);
           const int = internalNode(`${ref}_${unoPin}`);
           addResistor(`${ref}_${unoPin}__ro`, ref, 'mcu_pin_ro', int, indexOf(node), 40);
           devices.push({
@@ -157,9 +185,14 @@ export const buildSimNetlist = (circuit, options = {}) => {
       continue;
     }
     // Most wiring-only modules stay unsimulated (they need MCU firmware to be
-    // meaningful), but a few carry behavioral models: the relay, and the
-    // stimulus-driven analog sensors whose outputs work without an MCU.
+    // meaningful), but a few carry behavioral models: the relay, the
+    // stimulus-driven analog sensors, and — when a firmware Uno is present —
+    // the protocol modules resolved in the post-loop pass below.
     if (WIRING_ONLY_KINDS.has(kind) && !SIMULATED_MODULE_KINDS.has(kind)) {
+      if (AVR_PERIPHERAL_KINDS.has(kind) && mcuRef) {
+        peripheralCandidates.push(part);
+        continue;
+      }
       warnOnce('module_not_simulated', `${ref} (${kindLabel(kind)}) is a wiring-only module — not simulated`);
       continue;
     }
@@ -477,6 +510,47 @@ export const buildSimNetlist = (circuit, options = {}) => {
       default:
         warnOnce('kind_not_simulated', `${ref} (${kindLabel(kind)}) is not yet simulated — its pins float`);
         break;
+    }
+  }
+
+  // Post-loop pass: attach protocol modules whose pins are wired directly to
+  // the firmware Uno's signal pins (net-name identity — a series resistor
+  // between module and pin breaks discovery, documented).
+  for (const part of peripheralCandidates) {
+    const spec = PERIPHERAL_PIN_SPECS[part.kind];
+    const indexByName = PERIPHERAL_PIN_INDEX[part.kind];
+    const pins = {};
+    let wired = true;
+    for (const name of [...spec.required, ...(spec.optional ?? [])]) {
+      const node = part.nodes?.[indexByName[name]];
+      const unoPin = node != null ? mcuPinByNet.get(String(node)) : undefined;
+      if (unoPin) pins[name] = unoPin;
+      else if (spec.required.includes(name)) wired = false;
+    }
+    if (!wired) {
+      warnOnce('module_not_simulated', `${part.ref} (${kindLabel(part.kind)}) is a wiring-only module — not simulated`);
+      continue;
+    }
+    devices.push({ type: 'avr_peripheral', id: part.ref, owner: part.ref, kind: part.kind, pins });
+    if (part.kind === 'ultrasonic_sensor') {
+      controls.push({ ref: part.ref, kind: part.kind, type: 'slider', name: 'distanceCm', min: 2, max: 400, step: 1, value: 50, label: 'Distance (cm)' });
+    } else if (part.kind === 'dht_sensor') {
+      controls.push({ ref: part.ref, kind: part.kind, type: 'slider', name: 'tempC', min: -40, max: 80, step: 1, value: 25, label: 'Temperature (°C)' });
+      controls.push({ ref: part.ref, kind: part.kind, type: 'slider', name: 'humidity', min: 0, max: 100, step: 1, value: 40, label: 'Humidity (%)' });
+    } else if (part.kind === 'rotary_encoder') {
+      controls.push({ ref: part.ref, kind: part.kind, type: 'stepper', name: 'step', value: 0, label: 'Rotate' });
+      if (pins.SW) controls.push({ ref: part.ref, kind: part.kind, type: 'button', name: 'sw', value: 0, label: 'Press' });
+    }
+    // Display-only presence for module-driven pins: a weak (1 kΩ) Thevenin so
+    // the legend/V-map track the digital level while the MCU's 40 Ω driver
+    // still visibly wins any shared-net moments (e.g. the DHT start pulse).
+    for (const name of spec.moduleDriven) {
+      if (!pins[name]) continue;
+      const node = part.nodes[indexByName[name]];
+      const int = internalNode(`${part.ref}_${name}`);
+      addResistor(`${part.ref}_${name}__rp`, part.ref, 'periph_pin_r', int, indexOf(node), 1000);
+      devices.push({ type: 'periph_pin', id: `${part.ref}_${name}`, owner: part.ref, pinName: name, int, branch: branchCount });
+      branchCount += 1;
     }
   }
 

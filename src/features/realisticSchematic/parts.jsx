@@ -1096,7 +1096,7 @@ function McuHeader({ part, light = false }) {
 
 // SG90 micro servo in a compact off-board slot: blue body with mounting ears,
 // the output hub, and a white two-arm cross horn.
-function ServoBody({ part }) {
+function ServoBody({ part, sim }) {
   const slot = part.meta.slot;
   if (!slot) return null;
   const x0 = slot.x + 16;
@@ -1106,6 +1106,8 @@ function ServoBody({ part }) {
   const hubX = x0 + 26;
   const names = FIXED_PIN_NAMES[part.kind] ?? OFFBOARD_PIN_NAMES[part.kind] ?? [];
   const pinCount = part.pinNets?.length ?? names.length;
+  // Live simulation: the horn tracks the decoded PWM angle (90° = neutral).
+  const hornAngle = (sim?.angle ?? 90) - 90;
   return (
     <g>
       <rect x={x0 - 12} y={bodyY + 17} width={14} height={16} rx={2} fill="url(#rsBluePlastic)" stroke="#173a75" strokeWidth="0.5" />
@@ -1116,8 +1118,10 @@ function ServoBody({ part }) {
       <rect x={x0 + 1.6} y={bodyY + 1.6} width={bodyW - 3.2} height={bodyH - 3.2} rx={3.2} fill="none" stroke="rgba(255,255,255,0.14)" strokeWidth="0.6" />
       {/* output hub + white cross horn */}
       <circle cx={hubX} cy={bodyY} r={10} fill="url(#rsBluePlastic)" stroke="#173a75" strokeWidth="0.7" />
-      <rect x={hubX - 21} y={bodyY - 2.5} width={42} height={5} rx={2.5} fill="#f0f0ea" stroke="#c9c9bd" strokeWidth="0.5" />
-      <rect x={hubX - 2.5} y={bodyY - 17} width={5} height={17} rx={2.5} fill="#f0f0ea" stroke="#c9c9bd" strokeWidth="0.5" />
+      <g transform={hornAngle ? `rotate(${hornAngle} ${hubX} ${bodyY})` : undefined}>
+        <rect x={hubX - 21} y={bodyY - 2.5} width={42} height={5} rx={2.5} fill="#f0f0ea" stroke="#c9c9bd" strokeWidth="0.5" />
+        <rect x={hubX - 2.5} y={bodyY - 17} width={5} height={17} rx={2.5} fill="#f0f0ea" stroke="#c9c9bd" strokeWidth="0.5" />
+      </g>
       <circle cx={hubX} cy={bodyY} r={2.8} fill="#f0f0ea" stroke="#c9c9bd" strokeWidth="0.5" />
       <Silk x={x0 + bodyW * 0.66} y={bodyY + 24} text={part.value || 'SG90'} size={6} weight={700} fill="#eaf1f4" />
       <Silk x={x0 + bodyW * 0.66} y={bodyY + 33} text="Micro Servo" size={3.8} fill="#cdd8ea" />
@@ -2041,7 +2045,7 @@ export function RealisticPart({ part, sim }) {
   // Off-board parts draw in their slot even when no pin is wired up yet.
   if (part.body === 'arduino_uno') return <ArduinoUnoBody part={part} />;
   if (part.body === 'raspberry_pi') return <RaspberryPiBody part={part} />;
-  if (part.body === 'servo') return <ServoBody part={part} />;
+  if (part.body === 'servo') return <ServoBody part={part} sim={sim} />;
   if (part.body === 'dc_motor') return <DcMotorBody part={part} sim={sim} />;
   if (part.body === 'relay_module') return <RelayModuleBody part={part} sim={sim} />;
   if (part.body === 'lcd_display') return <LcdDisplayBody part={part} />;

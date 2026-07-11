@@ -63,6 +63,47 @@ export const TEST_PROGRAM_D13_BLINK = Uint16Array.from([
   0xcff7, // RJMP loop
 ]);
 
+// LDI Rd,K encodes K's nibbles around the register: 1110 KKKK dddd KKKK.
+const ldi = (reg, value) => 0xe000 | ((value & 0xf0) << 4) | ((reg - 16) << 4) | (value & 0x0f);
+
+// Servo PWM on D9 (PB1): a pulse of `pulseIterations`·4 cycles (SBIW+BRNE)
+// every ~20 ms (LDI r26,5 outer loop holds the ~18.5 ms low phase).
+const buildServoProgram = (pulseIterations) => Uint16Array.from([
+  0x9a21, // SBI DDRB,1
+  0x9a29, // loop: SBI PORTB,1
+  ldi(24, pulseIterations & 0xff), ldi(25, (pulseIterations >> 8) & 0xff),
+  0x9701, 0xf7f1, // SBIW r24,1; BRNE .-2
+  0x9829, // CBI PORTB,1
+  ldi(26, 5), // outer counter
+  ldi(24, 14800 & 0xff), ldi(25, 14800 >> 8), // 59 200-cycle inner block
+  0x9701, 0xf7f1,
+  0x95aa, // DEC r26
+  0xf7d1, // BRNE outer (back to the LDI pair)
+  0xcff2, // RJMP loop
+]);
+
+// 1500 µs (24 000 cycles → 6000 SBIW iterations) and 1750 µs (7000).
+export const TEST_PROGRAM_SERVO_1500 = buildServoProgram(6000);
+export const TEST_PROGRAM_SERVO_1750 = buildServoProgram(7000);
+
+// Single ~12 µs TRIG pulse on D7 (PD7), then spin.
+export const TEST_PROGRAM_TRIG_PULSE = Uint16Array.from([
+  0x9a57, // SBI DDRD,7
+  0x9a5f, // SBI PORTD,7
+  0xe480, 0x958a, 0xf7f1, // ~192-cycle delay (12 µs)
+  0x985f, // CBI PORTD,7
+  0xcfff, // spin
+]);
+
+// DHT start condition on D2 (PD2): drive low ~1.2 ms, release to input, spin.
+export const TEST_PROGRAM_DHT_START = Uint16Array.from([
+  0x9a52, // SBI DDRD,2 (output)
+  0x985a, // CBI PORTD,2 (low)
+  0xec80, 0xe192, 0x9701, 0xf7f1, // 4800 SBIW iterations ≈ 19 200 cycles ≈ 1.2 ms
+  0x9852, // CBI DDRD,2 (release to input)
+  0xcfff, // spin
+]);
+
 export const createAvrRunner = ({ hex, program }) => {
   const flash = new Uint16Array(FLASH_WORDS);
   if (program) flash.set(program);

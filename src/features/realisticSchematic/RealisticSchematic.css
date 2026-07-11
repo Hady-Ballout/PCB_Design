@@ -537,3 +537,19 @@
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+.rs-stimulus-row button {
+  background: #ffffff;
+  border: 2px solid #111111;
+  border-radius: 6px;
+  box-shadow: 2px 2px 0 #111111;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+.rs-stimulus-row button:active {
+  box-shadow: 1px 1px 0 #111111;
+  transform: translate(1px, 1px);
+}

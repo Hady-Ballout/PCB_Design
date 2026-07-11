@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { COMPONENT_KINDS, DEFAULT_PIN_COUNT_BY_KIND } from '../componentKinds.js';
-import { TEST_PROGRAM_D13_BLINK, TEST_PROGRAM_D13_HIGH } from './avrRunner.js';
+import { TEST_PROGRAM_D13_BLINK, TEST_PROGRAM_D13_HIGH, TEST_PROGRAM_SERVO_1750, TEST_PROGRAM_TRIG_PULSE } from './avrRunner.js';
 import { createSimulation } from './simEngine.js';
 
 const circuitOf = (components, extra = {}) => ({
@@ -524,6 +524,64 @@ describe('createSimulation — Arduino Uno firmware bridge', () => {
     expect(brightness).toBeLessThan(1);
     // Instantaneous amps is either full-on or off — the split is intentional.
     expect(Math.abs(amps)).toBeDefined();
+  });
+});
+
+describe('createSimulation — protocol peripherals (Tier 2b)', () => {
+  const unoNodesForPins = (overrides) => {
+    const nodes = ['NC_U1_1', 'NC_U1_2', '0', ...Array.from({ length: 21 }, (_, i) => `NC_U1_${i + 4}`)];
+    for (const [pin, net] of Object.entries(overrides)) {
+      const index = pin.startsWith('D') ? 4 + Number(pin.slice(1)) : 18 + Number(pin.slice(1));
+      nodes[index] = net;
+    }
+    return nodes;
+  };
+
+  it('decodes servo PWM from real firmware into a horn angle', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodesForPins({ D9: 'VSIG' }) },
+      // [VCC, GND, SIG]
+      { ref: 'M1', kind: 'servo', value: 'SG90', nodes: ['NC_M1_1', '0', 'VSIG'] },
+    ]), { mcu: { program: TEST_PROGRAM_SERVO_1750 } });
+    expect(engine.ok).toBe(true);
+    expect(engine.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
+    // Two full 20 ms PWM periods.
+    for (let i = 0; i < 45; i += 1) engine.advance(0.001, 50);
+    const { angle } = engine.observables().get('M1');
+    expect(angle).toBeGreaterThan(133);
+    expect(angle).toBeLessThan(137);
+  });
+
+  it('answers TRIG with an ECHO visible on the display branch', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodesForPins({ D7: 'VTRIG', D8: 'VECHO' }) },
+      // [VCC, TRIG, ECHO, GND]
+      { ref: 'U2', kind: 'ultrasonic_sensor', value: '', nodes: ['NC_U2_1', 'VTRIG', 'VECHO', '0'] },
+    ]), { mcu: { program: TEST_PROGRAM_TRIG_PULSE } });
+    expect(engine.ok).toBe(true);
+    // Echo at 50 cm default: high from ~250 µs to ~3.15 ms after the pulse.
+    let sawHigh = false;
+    for (let i = 0; i < 40; i += 1) {
+      engine.advance(0.0001, 50);
+      if (volts(engine, 'VECHO') > 4) sawHigh = true;
+    }
+    expect(sawHigh).toBe(true);
+    // After the echo window the net returns low.
+    for (let i = 0; i < 20; i += 1) engine.advance(0.001, 50);
+    expect(volts(engine, 'VECHO')).toBeLessThan(1);
+  });
+
+  it('keeps unwired protocol modules on the warning path', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodesForPins({ D13: 'VPIN' }) },
+      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VPIN', '0'] },
+      // Servo SIG on its own net — not shared with any Uno pin.
+      { ref: 'M1', kind: 'servo', value: 'SG90', nodes: ['NC_M1_1', '0', 'VLOOSE'] },
+      { ref: 'R2', kind: 'resistor', value: '1k', nodes: ['VLOOSE', '0'] },
+    ]), { mcu: { program: TEST_PROGRAM_D13_HIGH } });
+    expect(engine.ok).toBe(true);
+    expect(engine.warnings.some((w) => w.code === 'module_not_simulated' && w.message.startsWith('M1'))).toBe(true);
+    expect(engine.observables().get('M1')?.angle).toBeUndefined();
   });
 });
 

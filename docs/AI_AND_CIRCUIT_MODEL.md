@@ -336,6 +336,23 @@ the circuit — and LED **brightness** renders its 30 ms persistence-of-vision a
 instantaneous. Firmware-less Unos warn `mcu_no_firmware` and float as before; ESP32/Pi
 remain `mcu_not_simulated`; one Uno per circuit executes (the first).
 
+**Protocol modules on the bridge** (`src/core/sim/avrPeripherals.js`): `servo`,
+`ultrasonic_sensor`, `dht_sensor`, and `rotary_encoder` attach at **cycle resolution** —
+their timing (10 µs TRIG pulses, 26/70 µs DHT bits, µs-precision servo PWM) is far finer
+than the 20 µs lockstep, so they listen to MCU port writes via `AVRIOPort.addListener`
+and answer with `cpu.addClockEvent` + `port.setPin` (Wokwi's architecture). Attachment is
+by **direct-wire discovery**: a module simulates only when its protocol pins share nets
+with the firmware Uno's signal pins (a series resistor in between breaks it; unwired
+modules keep the `module_not_simulated` warning). Behaviors: servo decodes 500–2500 µs
+pulses to a 0–180° horn angle (drawn live); HC-SR04 answers a ≥10 µs TRIG with an ECHO of
+`distanceCm·58 µs` (distance slider); DHT emits the full DHT22 40-bit packet (temp and
+humidity sliders, checksummed) after the MCU's ≥0.9 ms start pulse; the encoder emits
+quadrature detents from CW/CCW stimulus buttons plus a 50 ms switch press.
+Module-driven pins (ECHO, DATA, CLK/DT/SW) carry a **display-only 1 kΩ presence branch**
+so the legend/V-map track the digital levels while the MCU's 40 Ω driver still wins any
+shared-net moments. Still deferred: keypad matrix, shift-register/display framebuffers,
+SPI/I2C register modules, serial input.
+
 Solver notes: junction limiting (pnjlim) must veto NR convergence — with an LED off-seed,
 node voltages sit nearly still for ~10 iterations while the junction linearization climbs
 to conduction, so a plain delta-x test converges prematurely to the wrong operating point.
