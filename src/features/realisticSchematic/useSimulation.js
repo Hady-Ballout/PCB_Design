@@ -57,6 +57,8 @@ export function useSimulation(circuit, running, mcu = null) {
     }
     const engine = createSimulation(circuit, mcu ? { mcu } : {});
     engineRef.current = engine;
+    // Debug hook: lets the console (and dev harnesses) poke the live engine.
+    if (typeof window !== 'undefined') window.__simEngine = engine;
     if (!engine.ok) {
       setSimFrame({
         time: 0,

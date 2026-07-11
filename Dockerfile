@@ -8,7 +8,10 @@ RUN apt-get update && \
 # Install arduino-cli + the AVR toolchain (for /api/compile-sketch)
 RUN curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh && \
     arduino-cli core update-index && \
-    arduino-cli core install arduino:avr
+    arduino-cli core install arduino:avr && \
+    arduino-cli lib install "LiquidCrystal I2C" "Keypad" "Adafruit SSD1306" \
+      "Adafruit GFX Library" "Adafruit BusIO" "Servo" \
+      "DHT sensor library" "Adafruit Unified Sensor"
 
 WORKDIR /app
 

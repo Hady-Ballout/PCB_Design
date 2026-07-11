@@ -151,6 +151,7 @@ export const createSimulation = (circuit, options = {}) => {
   let mcuRunner = null;
   let serialBuffer = '';
   const peripheralsByOwner = new Map();
+  const digitallyOwnedPins = new Set();
   if (mcuRef && mcuPins.length >= 0 && netlist.ok && options.mcu) {
     mcuRunner = createAvrRunner(options.mcu);
     mcuRunner.onSerialByte((byte) => {
@@ -162,6 +163,7 @@ export const createSimulation = (circuit, options = {}) => {
     for (const record of devices.filter((device) => device.type === 'avr_peripheral')) {
       const peripheral = createPeripheral(record, mcuRunner, controlState);
       if (peripheral) peripheralsByOwner.set(record.owner, peripheral);
+      for (const unoPin of record.ownedPins ?? []) digitallyOwnedPins.add(unoPin);
     }
   }
 
@@ -641,10 +643,14 @@ export const createSimulation = (circuit, options = {}) => {
       }
       if (mcuRunner) {
         // Feed the solved net voltages back: digital reads and ADC channels
-        // see the circuit one step later (the event-device pattern).
+        // see the circuit one step later (the event-device pattern). Pins a
+        // peripheral digitally owns (keypad rows, protocol lines) are skipped
+        // — the crossbar/protocol is their source of truth.
         for (const pin of mcuPins) {
           const volts = atX(pin.net);
-          if (pin.mode !== 'output') mcuRunner.setDigitalInput(pin.unoPin, volts > 2.5);
+          if (pin.mode !== 'output' && !digitallyOwnedPins.has(pin.unoPin)) {
+            mcuRunner.setDigitalInput(pin.unoPin, volts > 2.5);
+          }
           if (pin.adcChannel != null) {
             mcuRunner.setAnalogVolts(pin.adcChannel, Math.min(5, Math.max(0, volts)));
           }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { COMPONENT_KINDS, DEFAULT_PIN_COUNT_BY_KIND } from '../componentKinds.js';
-import { TEST_PROGRAM_D13_BLINK, TEST_PROGRAM_D13_HIGH, TEST_PROGRAM_SERVO_1750, TEST_PROGRAM_TRIG_PULSE } from './avrRunner.js';
+import { TEST_PROGRAM_D13_BLINK, TEST_PROGRAM_D13_HIGH, TEST_PROGRAM_SERVO_1750, TEST_PROGRAM_TRIG_PULSE, buildShiftOutProgram } from './avrRunner.js';
 import { createSimulation } from './simEngine.js';
 
 const circuitOf = (components, extra = {}) => ({
@@ -569,6 +569,47 @@ describe('createSimulation — protocol peripherals (Tier 2b)', () => {
     // After the echo window the net returns low.
     for (let i = 0; i < 20; i += 1) engine.advance(0.001, 50);
     expect(volts(engine, 'VECHO')).toBeLessThan(1);
+  });
+
+  it('drives an LED through a shift register from real firmware', () => {
+    // 595 fixedPins: [QB..QH, GND, QH2, SRCLR, SRCLK, RCLK, OE, SER, QA, VCC].
+    // Shift 0x01 → QA (last-shifted bit 0) high; QA is index 14.
+    const srNodes = Array.from({ length: 16 }, (_, i) => `NC_SR1_${i + 1}`);
+    srNodes[7] = '0'; // GND
+    srNodes[13] = 'VSER';
+    srNodes[10] = 'VSRCLK';
+    srNodes[11] = 'VRCLK';
+    srNodes[14] = 'VQA';
+    const engine = createSimulation(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodesForPins({ D2: 'VSER', D3: 'VSRCLK', D4: 'VRCLK' }) },
+      { ref: 'SR1', kind: 'shift_register', value: '74HC595', nodes: srNodes },
+      { ref: 'R1', kind: 'resistor', value: '330', nodes: ['VQA', 'VLED'] },
+      { ref: 'D1', kind: 'led', value: 'red', nodes: ['VLED', '0'] },
+    ]), { mcu: { program: buildShiftOutProgram(0x01) } });
+    expect(engine.ok).toBe(true);
+    expect(engine.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
+    engine.advance(0.002, 50);
+    expect(engine.observables().get('D1').amps).toBeGreaterThan(0.005);
+    expect(engine.observables().get('SR1').latch).toBe(0x01);
+  });
+
+  it('rejects I2C displays not wired to the hardware TWI pins', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodesForPins({ D2: 'VSDA', D3: 'VSCL' }) },
+      // OLED on plain digital pins — software I2C, not simulated.
+      { ref: 'O1', kind: 'oled_display', value: '', nodes: ['NC_O1_1', '0', 'VSCL', 'VSDA'] },
+      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VSDA', '0'] },
+    ]), { mcu: { program: TEST_PROGRAM_D13_HIGH } });
+    expect(engine.warnings.some((w) => w.code === 'module_not_simulated' && w.message.startsWith('O1'))).toBe(true);
+
+    const wired = createSimulation(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodesForPins({ A4: 'VSDA', A5: 'VSCL' }) },
+      { ref: 'O1', kind: 'oled_display', value: '', nodes: ['NC_O1_1', '0', 'VSCL', 'VSDA'] },
+    ]), { mcu: { program: TEST_PROGRAM_D13_HIGH } });
+    expect(wired.ok).toBe(true);
+    expect(wired.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
+    wired.advance(0.001, 50);
+    expect(wired.observables().get('O1').fb).toBeInstanceOf(Uint8Array);
   });
 
   it('keeps unwired protocol modules on the warning path', () => {

@@ -5,6 +5,7 @@
 import {
   AVRADC,
   AVRIOPort,
+  AVRTWI,
   AVRTimer,
   AVRUSART,
   CPU,
@@ -17,6 +18,7 @@ import {
   timer0Config,
   timer1Config,
   timer2Config,
+  twiConfig,
   usart0Config,
 } from 'avr8js';
 
@@ -104,6 +106,19 @@ export const TEST_PROGRAM_DHT_START = Uint16Array.from([
   0xcfff, // spin
 ]);
 
+// shiftOut(SER=D2/PD2, SRCLK=D3/PD3, MSBFIRST, byte) + RCLK(D4/PD4) latch
+// pulse, unrolled: per bit, set/clear SER then pulse SRCLK.
+export const buildShiftOutProgram = (byte) => {
+  const words = [0x9a52, 0x9a53, 0x9a54]; // SBI DDRD,2/3/4
+  for (let bit = 7; bit >= 0; bit -= 1) {
+    words.push((byte >> bit) & 1 ? 0x9a5a : 0x985a); // SER = bit (PORTD,2)
+    words.push(0x9a5b, 0x985b); // SRCLK pulse (PORTD,3)
+  }
+  words.push(0x9a5c, 0x985c); // RCLK latch pulse (PORTD,4)
+  words.push(0xcfff); // spin
+  return Uint16Array.from(words);
+};
+
 export const createAvrRunner = ({ hex, program }) => {
   const flash = new Uint16Array(FLASH_WORDS);
   if (program) flash.set(program);
@@ -124,10 +139,39 @@ export const createAvrRunner = ({ hex, program }) => {
   };
   const usart = new AVRUSART(cpu, usart0Config, AVR_CLOCK_HZ);
   const adc = new AVRADC(cpu, adcConfig);
+  const twi = new AVRTWI(cpu, twiConfig, AVR_CLOCK_HZ);
 
   let serialListener = null;
   usart.onByteTransmit = (value) => {
     serialListener?.(value);
+  };
+
+  // I2C bus router: ACK only registered slave addresses and forward bytes.
+  // Completions are synchronous — the avr8js NoopTWIEventHandler pattern. If
+  // re-entrancy ever bites, defer each complete* via cpu.addClockEvent(cb, 1).
+  const i2cSlaves = new Map(); // 7-bit address -> {start?, stop?, writeByte, readByte?}
+  let activeI2cSlave = null;
+  twi.eventHandler = {
+    start() {
+      twi.completeStart();
+    },
+    stop() {
+      activeI2cSlave?.stop?.();
+      activeI2cSlave = null;
+      twi.completeStop();
+    },
+    connectToSlave(addr, write) {
+      activeI2cSlave = i2cSlaves.get(addr) ?? null;
+      activeI2cSlave?.start?.(write);
+      twi.completeConnect(Boolean(activeI2cSlave));
+    },
+    writeByte(value) {
+      activeI2cSlave?.writeByte(value);
+      twi.completeWrite(Boolean(activeI2cSlave));
+    },
+    readByte(ack) {
+      twi.completeRead(activeI2cSlave?.readByte?.(ack) ?? 0xff);
+    },
   };
 
   return {
@@ -135,6 +179,10 @@ export const createAvrRunner = ({ hex, program }) => {
     timers,
     ports,
     adc,
+    twi,
+    registerI2cSlave(address, slave) {
+      i2cSlaves.set(address, slave);
+    },
     run(cycles) {
       const target = cpu.cycles + cycles;
       while (cpu.cycles < target) {

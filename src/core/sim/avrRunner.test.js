@@ -54,6 +54,28 @@ describe('createAvrRunner', () => {
     expect(target[1]).toBe(0x94);
   });
 
+  it('routes I2C traffic to registered slaves and NACKs unknown addresses', () => {
+    const runner = createAvrRunner({ program: TEST_PROGRAM_D13_HIGH });
+    const received = [];
+    runner.registerI2cSlave(0x3c, {
+      writeByte: (value) => received.push(value),
+    });
+    const handler = runner.twi.eventHandler;
+    // Drive the researched master-write sequence directly.
+    handler.start(false);
+    handler.connectToSlave(0x3c, true);
+    handler.writeByte(0x00);
+    handler.writeByte(0xaf);
+    handler.stop();
+    expect(received).toEqual([0x00, 0xaf]);
+    // Unregistered address: bytes must not reach the slave.
+    handler.start(false);
+    handler.connectToSlave(0x27, true);
+    handler.writeByte(0x55);
+    handler.stop();
+    expect(received).toEqual([0x00, 0xaf]);
+  });
+
   it('maps all 20 Uno pins onto ports B/C/D', () => {
     expect(Object.keys(UNO_PIN_MAP)).toHaveLength(20);
     expect(UNO_PIN_MAP.D13).toEqual({ port: 'B', bit: 5 });

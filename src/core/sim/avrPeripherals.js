@@ -5,6 +5,7 @@
 // deliver timed responses. The MNA engine stays the electrical truth; the
 // engine reads each module's current output level for display-only branches.
 import { UNO_PIN_MAP, AVR_CLOCK_HZ } from './avrRunner.js';
+import { createHd44780, createSsd1306 } from './displayModels.js';
 
 const usToCycles = (us) => Math.round((us * AVR_CLOCK_HZ) / 1e6);
 
@@ -187,11 +188,124 @@ const createEncoder = (record, runner, controlState) => {
   };
 };
 
+// SSD1306 OLED on the hardware I2C bus at 0x3C: the parser lives in
+// displayModels.js; the React layer renders the raw framebuffer.
+const createOled = (record, runner) => {
+  const oled = createSsd1306();
+  runner.registerI2cSlave(0x3c, oled.i2cSlave);
+  return {
+    observe: () => ({
+      fb: oled.framebuffer,
+      fbVersion: oled.state.version,
+      on: oled.state.on,
+      invert: oled.state.invert,
+    }),
+    level: () => 1, // SDA/SCL idle high
+    dispose: () => {},
+  };
+};
+
+// PCF8574-backpack HD44780 16×2 at 0x27.
+const createLcd = (record, runner) => {
+  const lcd = createHd44780();
+  runner.registerI2cSlave(0x27, lcd.i2cSlave);
+  return {
+    observe: () => ({
+      lines: lcd.lines(),
+      backlight: lcd.state.backlight,
+      displayOn: lcd.state.displayOn,
+      lcdVersion: lcd.state.version,
+    }),
+    level: () => 1,
+    dispose: () => {},
+  };
+};
+
+// 74HC595: SRCLK rising shifts SER in (MSB-first as shiftOut produces),
+// RCLK rising latches to the outputs. OE high forces outputs low (Hi-Z
+// approximated as 0 — real circuits tie OE low); SRCLR low clears.
+const createShiftRegister = (record, runner) => {
+  let shiftReg = 0;
+  let latch = 0;
+  const pinLevel = (unoPin) => {
+    const state = runner.pinState(unoPin);
+    return state.mode === 'output' && state.high ? 1 : 0;
+  };
+  const enabled = () => (record.pins.OE ? pinLevel(record.pins.OE) === 0 : true);
+  const unwatchers = [];
+  unwatchers.push(pinWatch(runner, record.pins.SRCLK, ({ mode, high }) => {
+    if (mode !== 'output' || !high) return; // rising edges only
+    if (record.pins.SRCLR && pinLevel(record.pins.SRCLR) === 0) {
+      shiftReg = 0;
+      return;
+    }
+    shiftReg = ((shiftReg << 1) | pinLevel(record.pins.SER)) & 0xff;
+  }));
+  unwatchers.push(pinWatch(runner, record.pins.RCLK, ({ mode, high }) => {
+    if (mode === 'output' && high) latch = shiftReg;
+  }));
+  // Output naming: QH received the FIRST shifted bit (bit 7 after 8 shifts),
+  // QA the last — matching shiftOut(..., MSBFIRST, value) semantics where
+  // bit 7 of `value` lands on QH.
+  const OUTPUT_BIT = { QA: 0, QB: 1, QC: 2, QD: 3, QE: 4, QF: 5, QG: 6, QH: 7 };
+  return {
+    observe: () => ({ latch }),
+    level: (pinName) => {
+      if (pinName === 'QH2') return (shiftReg >> 7) & 1;
+      if (!enabled()) return 0;
+      return (latch >> (OUTPUT_BIT[pinName] ?? 0)) & 1;
+    },
+    dispose: () => unwatchers.forEach((unwatch) => unwatch()),
+  };
+};
+
+// 4×4 matrix keypad crossbar. The stock Keypad library drives COLUMNS as
+// OUTPUT LOW one at a time and reads ROWS as INPUT_PULLUP, so on any column
+// write (or key change) we recompute every row input.
+const KEYPAD_LEGEND = [
+  ['1', '2', '3', 'A'],
+  ['4', '5', '6', 'B'],
+  ['7', '8', '9', 'C'],
+  ['*', '0', '#', 'D'],
+]; // must match KEYPAD_LEGEND in parts.jsx
+
+const createKeypad = (record, runner) => {
+  const pressed = new Set();
+  const columnLow = (colIndex) => {
+    const state = runner.pinState(record.pins[`C${colIndex + 1}`]);
+    return state.mode === 'output' && !state.high;
+  };
+  const recompute = () => {
+    for (let row = 0; row < 4; row += 1) {
+      const shorted = KEYPAD_LEGEND[row].some((key, col) => pressed.has(key) && columnLow(col));
+      runner.setDigitalInput(record.pins[`R${row + 1}`], !shorted);
+    }
+  };
+  const unwatchers = [1, 2, 3, 4].map((col) => pinWatch(runner, record.pins[`C${col}`], recompute));
+  recompute(); // rows idle high
+  return {
+    observe: () => ({ pressed: [...pressed] }),
+    level: () => 1,
+    onControl: (name, value) => {
+      if (!name.startsWith('key_')) return;
+      const key = name.slice(4);
+      if (value) pressed.add(key);
+      else pressed.delete(key);
+      recompute();
+    },
+    dispose: () => unwatchers.forEach((unwatch) => unwatch()),
+  };
+};
+
 const FACTORIES = {
   servo: createServo,
   ultrasonic_sensor: createUltrasonic,
   dht_sensor: createDht,
   rotary_encoder: createEncoder,
+  oled_display: createOled,
+  lcd_display: createLcd,
+  shift_register: createShiftRegister,
+  keypad: createKeypad,
 };
 
 export const createPeripheral = (record, runner, controlState) =>

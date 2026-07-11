@@ -389,6 +389,45 @@ describe('live simulation (Run mode)', () => {
     expect(pirChip()).toContain('3.30V'); // motion
   });
 
+  it('presses keypad keys through the artwork and shows LCD text', async () => {
+    // Uno with keypad on D6-D13 (cols C1-C4 on D6,D7,D12,D13; rows on D8-D11)
+    // and an LCD on A4/A5. Firmware: any program (the LCD text is driven via
+    // the I2C slave directly below).
+    const nodes = ['NC_U1_1', 'NC_U1_2', '0', ...Array.from({ length: 21 }, (_, i) => `NC_U1_${i + 4}`)];
+    const assign = (pin, net) => {
+      const index = pin.startsWith('D') ? 4 + Number(pin.slice(1)) : 18 + Number(pin.slice(1));
+      nodes[index] = net;
+    };
+    assign('D6', 'VC1'); assign('D7', 'VC2'); assign('D12', 'VC3'); assign('D13', 'VC4');
+    assign('D8', 'VR1'); assign('D9', 'VR2'); assign('D10', 'VR3'); assign('D11', 'VR4');
+    assign('A4', 'VSDA'); assign('A5', 'VSCL');
+    const circuit = {
+      title: 'Keypad + LCD',
+      nodes: ['VC1', 'VR1', 'VSDA', 'VSCL', '0'],
+      components: [
+        { ref: 'U1', kind: 'arduino_uno', value: '', nodes },
+        { ref: 'K1', kind: 'keypad', value: '', nodes: ['VR1', 'VR2', 'VR3', 'VR4', 'VC1', 'VC2', 'VC3', 'VC4'] },
+        { ref: 'L1', kind: 'lcd_display', value: '', nodes: ['0', 'NC_L1_2', 'VSDA', 'VSCL'] },
+      ],
+    };
+    const hex = ':06000000259A2D9AFFCFA6\n:00000001FF\n'; // D13-high program
+    mountFirmware(circuit, () => Promise.resolve({ ok: true, hex, errors: [] }));
+    await act(async () => {
+      container.querySelector('.realistic-run').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    flushFrames(4);
+    // Keypad artwork keys exist and respond to press-and-hold.
+    const keys = container.querySelectorAll('[data-keypad-key]');
+    expect(keys).toHaveLength(16);
+    const five = [...keys].find((el) => el.dataset.keypadKey === '5');
+    firePointer(five, 'pointerdown', { clientX: 5, clientY: 5 });
+    flushFrames(4);
+    expect([...container.querySelectorAll('[data-keypad-key]')].find((el) => el.dataset.keypadKey === '5').getAttribute('fill')).toBe('#12161a');
+    firePointer(container.querySelector('svg'), 'pointerup', { clientX: 5, clientY: 5 });
+    flushFrames(4);
+    expect([...container.querySelectorAll('[data-keypad-key]')].find((el) => el.dataset.keypadKey === '5').getAttribute('fill')).toBe('#2c3238');
+  });
+
   it('surfaces a friendly error for an unsimulatable circuit', () => {
     mountRunning({
       title: 'No ground',

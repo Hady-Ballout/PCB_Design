@@ -160,6 +160,7 @@ Use these node orders consistently:
 | `stepper_driver` | `[IN1, IN2, IN3, IN4, VCC, GND, OUTA, OUTB, OUTC, OUTD]` (exactly 10 nodes) |
 | `motor_driver` | `[VS, GND, ENA, IN1, IN2, ENB, IN3, IN4, OUT1, OUT2, OUT3, OUT4]` (exactly 12 nodes) |
 | `lcd_display` | `[GND, VCC, SDA, SCL]` (exactly 4 nodes) |
+| `oled_display` | `[VCC, GND, SCL, SDA]` (exactly 4 nodes; on Arduino wire SDA to A4 and SCL to A5) |
 | `rotary_encoder` | `[CLK, DT, SW, VCC, GND]` (exactly 5 nodes) |
 | `led_strip` | `[VCC, DIN, GND]` (exactly 3 nodes; VCC to the 5V supply, never a GPIO) |
 | `imu_sensor` | `[VCC, GND, SCL, SDA]` (exactly 4 nodes) |
@@ -226,6 +227,7 @@ Per-kind firmware libraries:
 | `stepper_motor` + `stepper_driver` | `Stepper.h`: `Stepper(2048, IN1, IN3, IN2, IN4)` — note the IN1-IN3-IN2-IN4 order | four gpiozero `OutputDevice` pins with a half-step sequence |
 | `motor_driver` | no library: `digitalWrite` IN1/IN2 + `analogWrite` ENA | gpiozero `Motor(forward=IN1, backward=IN2, enable=ENA)` |
 | `lcd_display` | `Wire.h` + `LiquidCrystal_I2C` at `0x27`: `lcd.init(); lcd.backlight(); lcd.print(...)` | `RPLCD`: `CharLCD(i2c_expander='PCF8574', address=0x27)` |
+| `oled_display` | `Wire.h` + `Adafruit_SSD1306` at `0x3C` (128x64): `display.begin(SSD1306_SWITCHCAPVCC, 0x3C)`, draw with `Adafruit_GFX`, then `display.display()` | `luma.oled` `ssd1306` at `0x3C` |
 | `rotary_encoder` | `digitalRead` on CLK/DT (poll or interrupt), `INPUT_PULLUP` on SW | gpiozero `RotaryEncoder(CLK, DT)` + `Button(SW)` |
 | `led_strip` | `Adafruit_NeoPixel(N, PIN, NEO_GRB + NEO_KHZ800)` | `rpi_ws281x` (DIN works best on GPIO18) |
 | `imu_sensor` | `Wire.h` + `Adafruit_MPU6050` (address `0x68`) | `smbus2` raw reads at `0x68` |

@@ -46,15 +46,42 @@ const SIMULATED_MODULE_KINDS = new Set([
 // (avrPeripherals.js). Simulated only when their protocol pins are wired
 // DIRECTLY to the firmware-carrying Uno's signal pins — a series resistor
 // between module and pin breaks the net-identity discovery.
-const AVR_PERIPHERAL_KINDS = new Set(['servo', 'ultrasonic_sensor', 'dht_sensor', 'rotary_encoder']);
+const AVR_PERIPHERAL_KINDS = new Set([
+  'servo', 'ultrasonic_sensor', 'dht_sensor', 'rotary_encoder',
+  'oled_display', 'lcd_display', 'shift_register', 'keypad',
+]);
 
-// Protocol pins per kind: which the MCU drives vs the module drives, and
-// which are required for the peripheral to attach.
+// Protocol pins per kind: which the MCU drives vs the module drives, which
+// are required to attach, and — for module-driven pins — the Thevenin
+// resistance of the display/drive branch (1 kΩ display presence by default;
+// the 595's outputs drive real load current so they get 50 Ω).
 const PERIPHERAL_PIN_SPECS = {
+  // `ownsInputs`: Uno pins whose digital input level the peripheral sets at
+  // cycle resolution — the engine must NOT overwrite them from net voltages
+  // in the lockstep feedback (the crossbar/protocol is the source of truth).
   servo: { required: ['SIG'], moduleDriven: [] },
-  ultrasonic_sensor: { required: ['TRIG', 'ECHO'], moduleDriven: ['ECHO'] },
-  dht_sensor: { required: ['DATA'], moduleDriven: ['DATA'] },
-  rotary_encoder: { required: ['CLK', 'DT'], optional: ['SW'], moduleDriven: ['CLK', 'DT', 'SW'] },
+  ultrasonic_sensor: { required: ['TRIG', 'ECHO'], moduleDriven: ['ECHO'], ownsInputs: ['ECHO'] },
+  dht_sensor: { required: ['DATA'], moduleDriven: ['DATA'], ownsInputs: ['DATA'] },
+  rotary_encoder: { required: ['CLK', 'DT'], optional: ['SW'], moduleDriven: ['CLK', 'DT', 'SW'], ownsInputs: ['CLK', 'DT', 'SW'] },
+  // I2C displays ride the hardware TWI pins only (SDA↔A4, SCL↔A5).
+  oled_display: { required: ['SCL', 'SDA'], moduleDriven: ['SDA', 'SCL'], i2c: true },
+  lcd_display: { required: ['SDA', 'SCL'], moduleDriven: ['SDA', 'SCL'], i2c: true },
+  shift_register: {
+    required: ['SER', 'SRCLK', 'RCLK'],
+    optional: ['OE', 'SRCLR'],
+    // Outputs drive real current (LEDs / 7-seg segments) behind ~50 Ω; they
+    // connect to arbitrary nets, not Uno pins (handled separately below).
+    moduleDriven: [],
+    outputs: ['QA', 'QB', 'QC', 'QD', 'QE', 'QF', 'QG', 'QH', 'QH2'],
+    driveOhms: 50,
+  },
+  keypad: {
+    required: ['R1', 'R2', 'R3', 'R4', 'C1', 'C2', 'C3', 'C4'],
+    // Rows live purely in the digital side-channel (the matrix stays
+    // electrically untouched — the crossbar owns the row input levels).
+    moduleDriven: [],
+    ownsInputs: ['R1', 'R2', 'R3', 'R4'],
+  },
 };
 
 // Module pin-name → fixedPins index (protocol pins only).
@@ -63,7 +90,17 @@ const PERIPHERAL_PIN_INDEX = {
   ultrasonic_sensor: { TRIG: 1, ECHO: 2 }, // [VCC, TRIG, ECHO, GND]
   dht_sensor: { DATA: 1 }, // [VCC, DATA, GND]
   rotary_encoder: { CLK: 0, DT: 1, SW: 2 }, // [CLK, DT, SW, VCC, GND]
+  oled_display: { SCL: 2, SDA: 3 }, // [VCC, GND, SCL, SDA]
+  lcd_display: { SDA: 2, SCL: 3 }, // [GND, VCC, SDA, SCL]
+  // DIP-16 physical order: [QB..QH, GND, QH2, SRCLR, SRCLK, RCLK, OE, SER, QA, VCC]
+  shift_register: {
+    SER: 13, SRCLK: 10, RCLK: 11, OE: 12, SRCLR: 9,
+    QA: 14, QB: 0, QC: 1, QD: 2, QE: 3, QF: 4, QG: 5, QH: 6, QH2: 8,
+  },
+  keypad: { R1: 0, R2: 1, R3: 2, R4: 3, C1: 4, C2: 5, C3: 6, C4: 7 },
 };
+
+const KEYPAD_KEYS = ['1', '2', '3', 'A', '4', '5', '6', 'B', '7', '8', '9', 'C', '*', '0', '#', 'D'];
 
 const regulatorOutputNode = (nodes = []) => nodes.find((node) => /^v?out/i.test(node)) || nodes.at(-1) || 'VOUT';
 
@@ -527,11 +564,17 @@ export const buildSimNetlist = (circuit, options = {}) => {
       if (unoPin) pins[name] = unoPin;
       else if (spec.required.includes(name)) wired = false;
     }
+    // I2C displays ride the hardware TWI pins only: SDA must land on A4 and
+    // SCL on A5 (Wire owns those; software-I2C wirings stay warned).
+    if (wired && spec.i2c && !(pins.SDA === 'A4' && pins.SCL === 'A5')) wired = false;
     if (!wired) {
       warnOnce('module_not_simulated', `${part.ref} (${kindLabel(part.kind)}) is a wiring-only module — not simulated`);
       continue;
     }
-    devices.push({ type: 'avr_peripheral', id: part.ref, owner: part.ref, kind: part.kind, pins });
+    devices.push({
+      type: 'avr_peripheral', id: part.ref, owner: part.ref, kind: part.kind, pins,
+      ownedPins: (spec.ownsInputs ?? []).map((name) => pins[name]).filter(Boolean),
+    });
     if (part.kind === 'ultrasonic_sensor') {
       controls.push({ ref: part.ref, kind: part.kind, type: 'slider', name: 'distanceCm', min: 2, max: 400, step: 1, value: 50, label: 'Distance (cm)' });
     } else if (part.kind === 'dht_sensor') {
@@ -540,6 +583,12 @@ export const buildSimNetlist = (circuit, options = {}) => {
     } else if (part.kind === 'rotary_encoder') {
       controls.push({ ref: part.ref, kind: part.kind, type: 'stepper', name: 'step', value: 0, label: 'Rotate' });
       if (pins.SW) controls.push({ ref: part.ref, kind: part.kind, type: 'button', name: 'sw', value: 0, label: 'Press' });
+    } else if (part.kind === 'keypad') {
+      // Unrendered by the stimulus panel — these exist so artwork clicks
+      // route through setControl/controlState into the crossbar.
+      for (const key of KEYPAD_KEYS) {
+        controls.push({ ref: part.ref, kind: part.kind, type: 'matrix-key', name: `key_${key}`, value: 0 });
+      }
     }
     // Display-only presence for module-driven pins: a weak (1 kΩ) Thevenin so
     // the legend/V-map track the digital level while the MCU's 40 Ω driver
@@ -549,6 +598,16 @@ export const buildSimNetlist = (circuit, options = {}) => {
       const node = part.nodes[indexByName[name]];
       const int = internalNode(`${part.ref}_${name}`);
       addResistor(`${part.ref}_${name}__rp`, part.ref, 'periph_pin_r', int, indexOf(node), 1000);
+      devices.push({ type: 'periph_pin', id: `${part.ref}_${name}`, owner: part.ref, pinName: name, int, branch: branchCount });
+      branchCount += 1;
+    }
+    // Real drive outputs (the 595's QA-QH/QH2): they power LEDs/segments on
+    // arbitrary nets — not Uno pins — behind a stiffer Thevenin.
+    for (const name of spec.outputs ?? []) {
+      const node = part.nodes?.[indexByName[name]];
+      if (node == null || isUnconnectedTerminal(node, part.ref, indexByName[name] + 1)) continue;
+      const int = internalNode(`${part.ref}_${name}`);
+      addResistor(`${part.ref}_${name}__rp`, part.ref, 'periph_pin_r', int, indexOf(node), spec.driveOhms ?? 50);
       devices.push({ type: 'periph_pin', id: `${part.ref}_${name}`, owner: part.ref, pinName: name, int, branch: branchCount });
       branchCount += 1;
     }

@@ -350,8 +350,31 @@ humidity sliders, checksummed) after the MCU's ≥0.9 ms start pulse; the encode
 quadrature detents from CW/CCW stimulus buttons plus a 50 ms switch press.
 Module-driven pins (ECHO, DATA, CLK/DT/SW) carry a **display-only 1 kΩ presence branch**
 so the legend/V-map track the digital levels while the MCU's 40 Ω driver still wins any
-shared-net moments. Still deferred: keypad matrix, shift-register/display framebuffers,
-SPI/I2C register modules, serial input.
+shared-net moments. Pins a peripheral **digitally owns** (keypad rows, protocol input
+lines) are excluded from the lockstep's electrical input feedback — the crossbar/protocol
+is their source of truth, not the floating net voltage.
+
+**Slice 2 — displays, shift register, keypad.** The runner carries an **I2C bus router**
+on avr8js's `AVRTWI` (ACK only registered slave addresses; the `Wire` library's
+`beginTransmission/endTransmission` maps onto the TWIEventHandler callbacks with
+synchronous completions). `displayModels.js` holds pure protocol parsers: **SSD1306**
+(0x3C, the exact Adafruit_SSD1306 subset — 0x00/0x40 control-byte framing tolerant of
+32-byte Wire chunks, column/page windows, on/off/invert, horizontal-addressing pointer
+walk into a 1024-byte framebuffer) and **PCF8574 + HD44780** (0x27, LiquidCrystal_I2C
+wiring P0=RS/P2=E/P3=backlight/P4-7=data, nibbles latched on the E falling edge with the
+4-bit-init one→two-nibble mode switch, clear/home/DDRAM-address/display-control, 2×16
+text). The React layer renders the OLED framebuffer as a canvas-generated `<image>` data
+URL (first canvas use in the codebase; jsdom falls back to static artwork) and the LCD as
+per-cell text glyphs. The **74HC595** shifts SER on SRCLK rising and latches on RCLK
+(MSBFIRST semantics: value bit 7 → QH); its outputs are **real 50 Ω drive branches** on
+arbitrary nets, so 595→7-seg circuits light through the ordinary segment-diode path. The
+**4×4 keypad** is a crossbar honoring the Keypad library's scan (columns driven output-low
+one at a time, rows INPUT_PULLUP): artwork keys are clickable in run mode
+(`data-keypad-key` press-and-hold), and row input levels are recomputed from pressed keys
+× driven columns. I2C displays attach only when wired to the hardware TWI pins (SDA↔A4,
+SCL↔A5). Compilation of display/keypad sketches needs the curated `arduino-cli lib
+install` set (docs/OPERATIONS.md; baked into the Dockerfile). Still deferred: SPI/I2C
+register sensors (RTC/IMU/BMP280/MCP3008/SD/RFID), serial input, NeoPixel.
 
 Solver notes: junction limiting (pnjlim) must veto NR convergence — with an LED off-seed,
 node voltages sit nearly still for ~10 iterations while the junction linearization climbs

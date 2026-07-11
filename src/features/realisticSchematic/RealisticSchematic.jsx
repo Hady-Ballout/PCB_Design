@@ -245,10 +245,21 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
     controls.find((control) => control.ref === ref && control.name === name)?.value ?? fallback;
 
   const startSimGesture = (event, part) => {
+    // Keypad artwork keys carry data attributes; a press holds the key until
+    // pointer release (the pushbutton pattern with a per-key control name).
+    const keypadKey = part.kind === 'keypad' && event.target.closest?.('[data-keypad-key]');
+    if (keypadKey) {
+      event.stopPropagation();
+      suppressClickRef.current = false;
+      simButtonRef.current = { ref: part.ref, name: `key_${keypadKey.dataset.keypadKey}`, pointerId: event.pointerId };
+      setControl(part.ref, simButtonRef.current.name, 1);
+      try { svgRef.current.setPointerCapture(event.pointerId); } catch { /* best-effort */ }
+      return;
+    }
     if (part.kind === 'pushbutton') {
       event.stopPropagation();
       suppressClickRef.current = false;
-      simButtonRef.current = { ref: part.ref, pointerId: event.pointerId };
+      simButtonRef.current = { ref: part.ref, name: 'pressed', pointerId: event.pointerId };
       setControl(part.ref, 'pressed', 1);
       try { svgRef.current.setPointerCapture(event.pointerId); } catch { /* best-effort */ }
       return;
@@ -366,7 +377,7 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
     try { svg?.releasePointerCapture?.(event.pointerId); } catch { /* best-effort */ }
     if (simButtonRef.current) {
       if (event.pointerId !== simButtonRef.current.pointerId) return;
-      setControl(simButtonRef.current.ref, 'pressed', 0);
+      setControl(simButtonRef.current.ref, simButtonRef.current.name ?? 'pressed', 0);
       simButtonRef.current = null;
       suppressClickRef.current = true;
       return;
@@ -657,7 +668,7 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
               const dragging = partDrag?.ref === part.ref;
               const clickToggle = running ? RUN_CLICK_TOGGLES[part.kind] : undefined;
               const simInteractive = running
-                && (part.kind === 'pushbutton' || part.kind === 'potentiometer' || Boolean(clickToggle));
+                && (part.kind === 'pushbutton' || part.kind === 'potentiometer' || part.kind === 'keypad' || Boolean(clickToggle));
               const wrapper = interactive(
                 { type: 'part', ref: part.ref },
                 `${part.ref} ${String(part.kind).replaceAll('_', ' ')} ${part.value ?? ''}`.trim(),

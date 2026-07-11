@@ -5,6 +5,7 @@ import {
   TEST_PROGRAM_SERVO_1500,
   TEST_PROGRAM_SERVO_1750,
   TEST_PROGRAM_TRIG_PULSE,
+  buildShiftOutProgram,
   createAvrRunner,
 } from './avrRunner.js';
 import { createPeripheral } from './avrPeripherals.js';
@@ -80,6 +81,78 @@ describe('DHT peripheral', () => {
     const afterPreamble = text.slice(preambleLow.index + preambleLow[0].length);
     const fallingEdges = (afterPreamble.match(/10/g) ?? []).length;
     expect(fallingEdges).toBeGreaterThanOrEqual(40);
+  });
+});
+
+describe('shift register peripheral', () => {
+  it('shifts a byte MSB-first and latches it to the outputs', () => {
+    const runner = createAvrRunner({ program: buildShiftOutProgram(0b10110110) });
+    const sr = createPeripheral(
+      { kind: 'shift_register', owner: 'SR1', pins: { SER: 'D2', SRCLK: 'D3', RCLK: 'D4' } },
+      runner,
+      new Map(),
+    );
+    runner.run(500); // whole unrolled program
+    // MSBFIRST: bit 7 of the value lands on QH, bit 0 on QA.
+    expect(sr.level('QH')).toBe(1);
+    expect(sr.level('QG')).toBe(0);
+    expect(sr.level('QF')).toBe(1);
+    expect(sr.level('QE')).toBe(1);
+    expect(sr.level('QD')).toBe(0);
+    expect(sr.level('QC')).toBe(1);
+    expect(sr.level('QB')).toBe(1);
+    expect(sr.level('QA')).toBe(0);
+    expect(sr.observe().latch).toBe(0b10110110);
+  });
+});
+
+describe('keypad peripheral', () => {
+  it('pulls a row low only for a pressed key in the driven column', () => {
+    // Program drives column C1 (D6/PD6) output-low, spins.
+    const program = Uint16Array.from([0x9a56, 0x985e, 0xcfff]); // SBI DDRD,6; CBI PORTD,6
+    const runner = createAvrRunner({ program });
+    const keypad = createPeripheral(
+      {
+        kind: 'keypad', owner: 'K1',
+        pins: { R1: 'D8', R2: 'D9', R3: 'D10', R4: 'D11', C1: 'D6', C2: 'D7', C3: 'D12', C4: 'D13' },
+      },
+      runner,
+      new Map(),
+    );
+    runner.run(50);
+    const rowBit = (bit) => (runner.cpu.data[0x23] >> bit) & 1; // PINB: D8=bit0...
+    expect(rowBit(0)).toBe(1); // R1 idle high
+    keypad.onControl('key_1', 1); // key '1' = row 1, col 1 — driven column
+    expect(rowBit(0)).toBe(0); // R1 pulled low
+    keypad.onControl('key_1', 0);
+    expect(rowBit(0)).toBe(1);
+    keypad.onControl('key_2', 1); // '2' = row 1, col 2 — column NOT driven
+    expect(rowBit(0)).toBe(1); // row stays high
+    expect(keypad.observe().pressed).toEqual(['2']);
+  });
+});
+
+describe('display peripherals', () => {
+  it('registers I2C slaves and exposes framebuffer/text observables', () => {
+    const runner = createAvrRunner({ program: TEST_PROGRAM_D13_HIGH });
+    const oled = createPeripheral({ kind: 'oled_display', owner: 'O1', pins: { SDA: 'A4', SCL: 'A5' } }, runner, new Map());
+    const lcd = createPeripheral({ kind: 'lcd_display', owner: 'L1', pins: { SDA: 'A4', SCL: 'A5' } }, runner, new Map());
+    const handler = runner.twi.eventHandler;
+    // Drive the OLED at 0x3C: display-on command.
+    handler.start(false);
+    handler.connectToSlave(0x3c, true);
+    handler.writeByte(0x00);
+    handler.writeByte(0xaf);
+    handler.stop();
+    expect(oled.observe().on).toBe(true);
+    expect(oled.observe().fb).toBeInstanceOf(Uint8Array);
+    // LCD at 0x27 sees PCF8574 bytes (backlight bit).
+    handler.start(false);
+    handler.connectToSlave(0x27, true);
+    handler.writeByte(0x08);
+    handler.stop();
+    expect(lcd.observe().backlight).toBe(true);
+    expect(lcd.observe().lines).toHaveLength(2);
   });
 });
 

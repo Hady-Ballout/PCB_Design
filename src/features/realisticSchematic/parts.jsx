@@ -1,6 +1,7 @@
 // Realistic SVG renderers for breadboard parts and jumper wires. Each renderer
 // receives the placement-model part and draws leads from its exact hole
 // positions up onto a photo-style body.
+import { useMemo } from 'react';
 import { FIXED_PIN_NAMES } from '../../core/componentKinds.js';
 import { HOLE_PITCH, MCU_PIN_SPACING, TRENCH_CENTER_Y, holeCenter } from './breadboardGeometry.js';
 import { MCU_PINS } from './breadboardModel.js';
@@ -648,17 +649,63 @@ function DhtBody({ part, points }) {
   );
 }
 
-// I2C OLED breakout: dark PCB with the near-black glass panel and a thin cyan
-// pixel row hinting at the lit display.
-function OledBody({ part, points }) {
+// Render a 128×64 SSD1306 framebuffer to a data URL for the live OLED glass.
+// First canvas use in the codebase; jsdom has no 2D context, so any failure
+// returns null and the static artwork stays.
+const fbToDataUrl = (fb, on, invert) => {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    const image = ctx.createImageData(128, 64);
+    for (let y = 0; y < 64; y += 1) {
+      for (let x = 0; x < 128; x += 1) {
+        let lit = (fb[(y >> 3) * 128 + x] >> (y & 7)) & 1;
+        if (invert) lit = lit ^ 1;
+        if (!on) lit = 0;
+        const offset = (y * 128 + x) * 4;
+        const value = lit ? 235 : 10;
+        image.data[offset] = value;
+        image.data[offset + 1] = value + (lit ? 15 : 2);
+        image.data[offset + 2] = value + (lit ? 20 : 6);
+        image.data[offset + 3] = 255;
+      }
+    }
+    ctx.putImageData(image, 0, 0);
+    return canvas.toDataURL();
+  } catch {
+    return null;
+  }
+};
+
+// I2C OLED breakout: dark PCB with the near-black glass panel. When firmware
+// drives it, the glass shows the live SSD1306 framebuffer.
+function OledBody({ part, points, sim }) {
   const { mid, cy, edgeY, span } = moduleFrame(part, points);
   const width = span + 22;
+  const dataUrl = useMemo(
+    () => (sim?.fb ? fbToDataUrl(sim.fb, sim.on, sim.invert) : null),
+    [sim?.fb, sim?.fbVersion, sim?.on, sim?.invert],
+  );
   return (
     <g>
       <rect x={mid - width / 2} y={cy - 15} width={width} height={30} rx={2} fill="url(#rsPartDip)" stroke="#000" strokeWidth="0.6" />
       <rect x={mid - width / 2 + 4} y={cy - 8} width={width - 8} height={19} rx={1.2} fill="#0a0c10" stroke="#1d232a" strokeWidth="0.5" />
+      {dataUrl ? (
+        <image
+          x={mid - width / 2 + 4}
+          y={cy - 8}
+          width={width - 8}
+          height={19}
+          href={dataUrl}
+          preserveAspectRatio="none"
+          style={{ imageRendering: 'pixelated' }}
+        />
+      ) : (
+        <rect x={mid - width / 2 + 6} y={cy - 6} width={width - 12} height={2.4} rx={0.8} fill="#59e3f2" opacity="0.85" />
+      )}
       <rect x={mid - width / 2 + 4} y={cy - 8} width={width - 8} height={19} rx={1.2} fill="url(#rsPartLens)" opacity="0.25" />
-      <rect x={mid - width / 2 + 6} y={cy - 6} width={width - 12} height={2.4} rx={0.8} fill="#59e3f2" opacity="0.85" />
       <Silk x={mid} y={cy - 10.5} text={[part.ref, part.value || 'SSD1306'].filter(Boolean).join(' · ')} size={3.6} fill="#c8d2da" />
       <ModulePins points={points} edgeY={edgeY} />
     </g>
@@ -1292,7 +1339,7 @@ const KEYPAD_LEGEND = [
   ['*', '0', '#', 'D'],
 ];
 
-function KeypadBody({ part }) {
+function KeypadBody({ part, sim }) {
   const slot = part.meta.slot;
   if (!slot) return null;
   const x0 = slot.x + 10;
@@ -1309,11 +1356,23 @@ function KeypadBody({ part }) {
         row.map((digit, colIndex) => {
           const bx = x0 + 10 + colIndex * cellW;
           const by = y0 + 9 + rowIndex * cellH;
+          const pressed = sim?.pressed?.includes?.(digit);
           return (
             <g key={digit}>
-              <rect x={bx + 1.5} y={by + 1.5} width={cellW - 5} height={cellH - 5} rx={2.5} fill="#2c3238" stroke="#12161a" strokeWidth="0.5" />
-              <line x1={bx + 3} y1={by + 3} x2={bx + cellW - 6} y2={by + 3} stroke="rgba(255,255,255,0.14)" strokeWidth="0.5" />
-              <text x={bx + cellW / 2 - 1.5} y={by + cellH / 2 + 1} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6, fontWeight: 700, fill: '#e8ecef' }}>
+              <rect
+                x={bx + 1.5}
+                y={by + 1.5}
+                width={cellW - 5}
+                height={cellH - 5}
+                rx={2.5}
+                fill={pressed ? '#12161a' : '#2c3238'}
+                stroke="#12161a"
+                strokeWidth="0.5"
+                data-keypad-key={digit}
+                pointerEvents="all"
+              />
+              {!pressed && <line x1={bx + 3} y1={by + 3} x2={bx + cellW - 6} y2={by + 3} stroke="rgba(255,255,255,0.14)" strokeWidth="0.5" pointerEvents="none" />}
+              <text x={bx + cellW / 2 - 1.5} y={by + cellH / 2 + 1} textAnchor="middle" pointerEvents="none" style={{ ...LABEL_STYLE, fontSize: 6, fontWeight: 700, fill: pressed ? '#9aa4ac' : '#e8ecef' }}>
                 {digit}
               </text>
             </g>
@@ -1358,7 +1417,8 @@ function JoystickBody({ part }) {
 
 // 16x2 character LCD on a PCF8574 I2C backpack: green PCB, black bezel, blue
 // glass with the 16x2 character-cell grid, 4-pin header on the top edge.
-function LcdDisplayBody({ part }) {
+// With live firmware, the cells show the actual HD44780 DDRAM text.
+function LcdDisplayBody({ part, sim }) {
   const slot = part.meta.slot;
   if (!slot) return null;
   const x0 = slot.x + 10;
@@ -1367,6 +1427,7 @@ function LcdDisplayBody({ part }) {
   const h = 84;
   const cellW = (w - 56) / 16;
   const cellH = (h - 48) / 2;
+  const live = Array.isArray(sim?.lines);
   return (
     <g>
       <rect x={x0} y={y0} width={w} height={h} rx={3} fill="url(#rsPartPi)" stroke="#0f4423" strokeWidth="0.7" />
@@ -1383,6 +1444,21 @@ function LcdDisplayBody({ part }) {
             width={cellW - 2.5} height={cellH - 4} rx={0.8} fill="#2c55c0"
           />
         )))}
+      {live && sim.displayOn && sim.lines.map((line, row) =>
+        Array.from(line).slice(0, 16).map((char, col) => (char === ' ' ? null : (
+          <text
+            key={`t${row}-${col}`}
+            x={x0 + 28 + col * cellW + (cellW - 2.5) / 2}
+            y={y0 + 24 + row * cellH + cellH * 0.68}
+            textAnchor="middle"
+            style={{ fontSize: cellH * 0.78, fontFamily: 'ui-monospace, Consolas, monospace', fill: '#eaf2ff', fontWeight: 600 }}
+          >
+            {char}
+          </text>
+        ))))}
+      {live && sim.backlight === false && (
+        <rect x={x0 + 24} y={y0 + 20} width={w - 48} height={h - 40} rx={1.5} fill="rgba(0,0,0,0.45)" />
+      )}
       <Silk x={x0 + w - 8} y={y0 + h - 5} text={part.value || 'LCD1602 I2C'} size={4} fill="#dff2e6" anchor="end" />
       <Silk x={x0 + 8} y={y0 + h - 5} text={part.ref} size={4.6} fill="#dff2e6" anchor="start" />
       <McuHeader part={part} />
@@ -2048,10 +2124,10 @@ export function RealisticPart({ part, sim }) {
   if (part.body === 'servo') return <ServoBody part={part} sim={sim} />;
   if (part.body === 'dc_motor') return <DcMotorBody part={part} sim={sim} />;
   if (part.body === 'relay_module') return <RelayModuleBody part={part} sim={sim} />;
-  if (part.body === 'lcd_display') return <LcdDisplayBody part={part} />;
+  if (part.body === 'lcd_display') return <LcdDisplayBody part={part} sim={sim} />;
   if (part.body === 'motor_driver') return <MotorDriverBody part={part} />;
   if (part.body === 'stepper_motor') return <StepperMotorBody part={part} />;
-  if (part.body === 'keypad') return <KeypadBody part={part} />;
+  if (part.body === 'keypad') return <KeypadBody part={part} sim={sim} />;
   if (part.body === 'joystick') return <JoystickBody part={part} />;
   if (part.body === 'stepper_driver' || part.body === 'led_strip' || part.body === 'rfid_reader' || part.body === 'current_sensor') return <OffboardModuleBody part={part} />;
   const points = part.holes.map((hole) => (hole ? holeCenter(hole) : null)).filter(Boolean);
