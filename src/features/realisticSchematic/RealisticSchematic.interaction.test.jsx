@@ -332,6 +332,21 @@ describe('live simulation (Run mode)', () => {
     expect(container.querySelector('.realistic-sim-status').textContent).toBe('live');
   });
 
+  it('offers the voltage-map overlay only while running and layers it under the highlight', () => {
+    mountRunning(dividerCircuit);
+    const vmap = container.querySelector('.realistic-vmap');
+    expect(vmap).not.toBeNull();
+    const overlays = () => container.querySelectorAll('.rs-world > g[pointer-events="none"]').length;
+    const before = overlays();
+    act(() => { vmap.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    flushFrames(2);
+    expect(vmap.classList.contains('active')).toBe(true);
+    expect(overlays()).toBe(before + 1);
+    // Stop hides the toggle entirely.
+    act(() => { container.querySelector('.realistic-run').dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(container.querySelector('.realistic-vmap')).toBeNull();
+  });
+
   it('appends live voltages to the net legend chips', () => {
     mountRunning(dividerCircuit);
     const chips = [...container.querySelectorAll('.realistic-legend-chip')];

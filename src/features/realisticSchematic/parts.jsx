@@ -297,22 +297,33 @@ const SchottkyBody = (props) => <DiodeBody {...props} bodyFill="url(#rsPartSchot
 
 // Glass cartridge fuse: translucent tube, brushed-metal end caps, and the
 // thin element wire visible through the glass.
-function FuseBody({ part, points }) {
+function FuseBody({ part, points, sim }) {
   const [a, b] = points;
   const dir = bodyDir(part.strip);
   const y = Math.min(a.y, b.y) + dir * 13;
   const mid = (a.x + b.x) / 2;
   const length = 28;
+  const blown = Boolean(sim?.blown);
   return (
     <g>
       <Lead from={a} to={{ x: mid - length / 2 + 2, y }} />
       <Lead from={b} to={{ x: mid + length / 2 - 2, y }} />
       <rect x={mid - length / 2} y={y - 5} width={length} height={10} rx={4.5} fill="rgba(210,220,230,0.5)" stroke="#8a929a" strokeWidth="0.5" />
-      <line x1={mid - length / 2 + 6} y1={y} x2={mid + length / 2 - 6} y2={y} stroke="#5a636b" strokeWidth="0.9" />
+      {blown ? (
+        <>
+          {/* Broken element: two stubs and a curled fragment, smoked glass. */}
+          <line x1={mid - length / 2 + 6} y1={y} x2={mid - 3.5} y2={y} stroke="#5a636b" strokeWidth="0.9" />
+          <line x1={mid + 3.5} y1={y} x2={mid + length / 2 - 6} y2={y} stroke="#5a636b" strokeWidth="0.9" />
+          <path d={`M ${mid - 3.5} ${y} q 1.5 -2.6 3 -1`} fill="none" stroke="#5a636b" strokeWidth="0.8" />
+          <rect x={mid - length / 2} y={y - 5} width={length} height={10} rx={4.5} fill="rgba(90,90,90,0.35)" />
+        </>
+      ) : (
+        <line x1={mid - length / 2 + 6} y1={y} x2={mid + length / 2 - 6} y2={y} stroke="#5a636b" strokeWidth="0.9" />
+      )}
       <rect x={mid - length / 2} y={y - 5} width={6} height={10} rx={2} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.5" />
       <rect x={mid + length / 2 - 6} y={y - 5} width={6} height={10} rx={2} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.5" />
       <ellipse cx={mid - 3} cy={y - 2.6} rx={5} ry={1.4} fill="rgba(255,255,255,0.5)" />
-      <RefLabel x={mid} y={y + dir * 12} text={`${part.ref}${part.value ? ` · ${part.value}` : ''}`} />
+      <RefLabel x={mid} y={y + dir * 12} text={`${part.ref}${part.value ? ` · ${part.value}` : ''}${blown ? ' · blown' : ''}`} />
     </g>
   );
 }
@@ -1167,7 +1178,7 @@ function DcMotorBody({ part, sim }) {
 // Single-channel relay breakout: green PCB carrying the blue relay cube, a
 // screw-terminal block on the COM/NO/NC side, and an indicator LED by the
 // input header.
-function RelayModuleBody({ part }) {
+function RelayModuleBody({ part, sim }) {
   const slot = part.meta.slot;
   if (!slot) return null;
   const x0 = slot.x + 10;
@@ -1176,13 +1187,16 @@ function RelayModuleBody({ part }) {
   const h = 66;
   const names = FIXED_PIN_NAMES[part.kind] ?? OFFBOARD_PIN_NAMES[part.kind] ?? [];
   const pinCount = part.pinNets?.length ?? names.length;
+  const energized = Boolean(sim?.energized);
   return (
     <g>
       <rect x={x0} y={y0} width={w} height={h} rx={3} fill="url(#rsPartPi)" stroke="#0f4423" strokeWidth="0.7" />
       <MountHole cx={x0 + 6} cy={y0 + h - 6} r={2.6} />
       <MountHole cx={x0 + w - 6} cy={y0 + h - 6} r={2.6} />
-      {/* input side: indicator LED + driver transistor */}
-      <SmdLed cx={x0 + 14} cy={y0 + 12} color="#e0453a" w={5} h={3} />
+      {/* input side: indicator LED (lit while the coil is energized) + driver */}
+      {energized && <circle cx={x0 + 14} cy={y0 + 12} r={6} fill="#ff5148" opacity={0.75} filter="url(#rsGlow)" />}
+      <SmdLed cx={x0 + 14} cy={y0 + 12} color={energized ? '#ff6b5e' : '#e0453a'} w={5} h={3} />
+      {energized && <rect x={x0 + 11.5} y={y0 + 10.5} width={5} height={3} rx={0.6} fill="#fff" opacity={0.55} />}
       <rect x={x0 + 8} y={y0 + 22} width={13} height={9} rx={1} fill="url(#rsPartDip)" stroke="#000" strokeWidth="0.4" />
       {/* the blue Songle cube */}
       <rect x={x0 + 54} y={y0 + 8} width={64} height={50} rx={2} fill="url(#rsBluePlastic)" stroke="#173a75" strokeWidth="0.7" />
@@ -2027,7 +2041,7 @@ export function RealisticPart({ part, sim }) {
   if (part.body === 'raspberry_pi') return <RaspberryPiBody part={part} />;
   if (part.body === 'servo') return <ServoBody part={part} />;
   if (part.body === 'dc_motor') return <DcMotorBody part={part} sim={sim} />;
-  if (part.body === 'relay_module') return <RelayModuleBody part={part} />;
+  if (part.body === 'relay_module') return <RelayModuleBody part={part} sim={sim} />;
   if (part.body === 'lcd_display') return <LcdDisplayBody part={part} />;
   if (part.body === 'motor_driver') return <MotorDriverBody part={part} />;
   if (part.body === 'stepper_motor') return <StepperMotorBody part={part} />;

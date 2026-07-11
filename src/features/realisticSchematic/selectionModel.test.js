@@ -135,3 +135,26 @@ describe('MCU highlighting', () => {
     expect(readoutFor(mcuModel, { type: 'part', ref: 'U1' })).toBe('U1 · arduino uno · Uno R3');
   });
 });
+
+describe('voltageOverlayFor', () => {
+  it('tints every carrier by its live net voltage, blue at 0V and red at vMax', async () => {
+    const { voltageOverlayFor, voltageColor } = await import('./selectionModel.js');
+    const netVoltages = new Map([['0', 0], ['VCC', 5], ['VOUT', 2.5]]);
+    const overlay = voltageOverlayFor(model, netVoltages);
+    expect(overlay.active).toBe(true);
+    // Same carriers highlightFor would light for those nets.
+    expect(overlay.railStrips.has('railTopPlus')).toBe(true);
+    expect(overlay.railStripColors.get('railTopPlus')).toBe(voltageColor(5, 5));
+    expect(overlay.groupKeys.size).toBeGreaterThan(0);
+    // VCC (vMax) is red, ground is blue.
+    expect(voltageColor(5, 5)).toBe('hsl(0, 85%, 52%)');
+    expect(voltageColor(0, 5)).toBe('hsl(220, 85%, 52%)');
+    expect(voltageColor(2.5, 5)).toBe('hsl(110, 85%, 52%)');
+  });
+
+  it('is inactive without voltages', async () => {
+    const { voltageOverlayFor } = await import('./selectionModel.js');
+    expect(voltageOverlayFor(model, null).active).toBe(false);
+    expect(voltageOverlayFor(model, new Map()).active).toBe(false);
+  });
+});

@@ -45,6 +45,8 @@ function Holes({ columns }) {
 
 // Translucent glow over the tie-group columns and rail rows carrying the
 // highlighted nets, tinted with each net's legend color (yellow fallback).
+// The run-mode voltage overlay passes explicit per-carrier colors
+// (groupKeyColors/railStripColors), which win over the legend lookup.
 // Rendered between the board and the parts; never intercepts pointer events.
 export function HighlightOverlay({ board, highlight, nets = [] }) {
   if (!highlight.active) return null;
@@ -68,7 +70,7 @@ export function HighlightOverlay({ board, highlight, nets = [] }) {
         width={12}
         height={(STRIP_ROWS[strip] - 1) * HOLE_PITCH + 14}
         rx={6}
-        fill={colorOf(highlight.groupKeyNets?.get(key))}
+        fill={highlight.groupKeyColors?.get(key) ?? colorOf(highlight.groupKeyNets?.get(key))}
         opacity={0.3}
       />,
     );
@@ -83,7 +85,7 @@ export function HighlightOverlay({ board, highlight, nets = [] }) {
         width={columnX(board.columns) - columnX(1) + 16}
         height={14}
         rx={6}
-        fill={colorOf(highlight.railStripNets?.get(strip))}
+        fill={highlight.railStripColors?.get(strip) ?? colorOf(highlight.railStripNets?.get(strip))}
         opacity={0.3}
       />,
     );

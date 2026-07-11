@@ -359,6 +359,93 @@ describe('createSimulation — active devices (M3)', () => {
   });
 });
 
+describe('createSimulation — polish devices (M4)', () => {
+  it('blows the fuse on DC overcurrent and stays intact below the rating', () => {
+    const overloaded = createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'F1', kind: 'fuse', value: '1A', nodes: ['VCC', 'VF'] },
+      { ref: 'R1', kind: 'resistor', value: '1', nodes: ['VF', '0'] },
+    ]));
+    expect(overloaded.solveDC()).toBe(true);
+    expect(overloaded.observables().get('F1').blown).toBe(true);
+    expect(Math.abs(overloaded.observables().get('R1').amps)).toBeLessThan(1e-3);
+
+    const healthy = createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'F1', kind: 'fuse', value: '1A', nodes: ['VCC', 'VF'] },
+      { ref: 'R1', kind: 'resistor', value: '10', nodes: ['VF', '0'] },
+    ]));
+    expect(healthy.solveDC()).toBe(true);
+    expect(healthy.observables().get('F1').blown).toBe(false);
+    expect(healthy.observables().get('R1').amps).toBeGreaterThan(0.45);
+  });
+
+  it('blows the fuse only after sustained transient overcurrent (~10 ms)', () => {
+    // The capacitor makes the circuit dynamic so time actually advances.
+    const engine = createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'F1', kind: 'fuse', value: '1A', nodes: ['VCC', 'VF'] },
+      { ref: 'R1', kind: 'resistor', value: '1', nodes: ['VF', '0'] },
+      { ref: 'C1', kind: 'capacitor', value: '100nF', nodes: ['VF', '0'] },
+    ]));
+    expect(engine.isDynamic).toBe(true);
+    // ~5 ms: over threshold but under the 10 ms window.
+    for (let i = 0; i < 5; i += 1) engine.advance(0.001, 50);
+    expect(engine.observables().get('F1').blown).toBe(false);
+    // ~15 ms total: window exceeded.
+    for (let i = 0; i < 10; i += 1) engine.advance(0.001, 50);
+    expect(engine.observables().get('F1').blown).toBe(true);
+  });
+
+  it('switches the relay contacts and loads the supply coil', () => {
+    const build = (driveVolts) => createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'V2', kind: 'voltage_source', value: `${driveVolts}V`, nodes: ['VIN', '0'] },
+      // [VCC, GND, IN, COM, NO, NC]
+      { ref: 'K1', kind: 'relay_module', value: '', nodes: ['VCC', '0', 'VIN', 'VCC', 'VNO', 'VNC'] },
+      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VNO', '0'] },
+      { ref: 'R2', kind: 'resistor', value: '1k', nodes: ['VNC', '0'] },
+    ]));
+    const energized = build(5);
+    expect(energized.solveDC()).toBe(true);
+    expect(volts(energized, 'VNO')).toBeGreaterThan(4.9);
+    expect(volts(energized, 'VNC')).toBeLessThan(0.1);
+    expect(energized.observables().get('K1').energized).toBe(true);
+    // Coil + contact load on the 5 V supply: > 50 mA delivered.
+    expect(energized.observables().get('V1').amps).toBeGreaterThan(0.05);
+
+    const idle = build(0);
+    expect(idle.solveDC()).toBe(true);
+    expect(volts(idle, 'VNO')).toBeLessThan(0.1);
+    expect(volts(idle, 'VNC')).toBeGreaterThan(4.9);
+    expect(idle.observables().get('K1').energized).toBe(false);
+  });
+
+  it('drives the current-sensor OUT at 2.5 V + 185 mV/A', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      // [IP+, IP-, VCC, OUT, GND]: shunt in series with a 1 Ω load → ~5 A.
+      { ref: 'CS1', kind: 'current_sensor', value: '', nodes: ['VCC', 'VLOAD', 'VCC', 'VOUT', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '1', nodes: ['VLOAD', '0'] },
+      { ref: 'RO', kind: 'resistor', value: '10k', nodes: ['VOUT', '0'] },
+    ]));
+    expect(engine.solveDC()).toBe(true);
+    expect(volts(engine, 'VOUT')).toBeGreaterThan(3.38);
+    expect(volts(engine, 'VOUT')).toBeLessThan(3.48);
+    expect(engine.observables().get('CS1').outVolts).toBeCloseTo(volts(engine, 'VOUT'), 2);
+  });
+
+  it('sags the solar panel under load through its 5 Ω internal resistance', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'PV1', kind: 'solar_panel', value: '6V', nodes: ['VPV', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '55', nodes: ['VPV', '0'] },
+    ]));
+    expect(engine.solveDC()).toBe(true);
+    expect(volts(engine, 'VPV')).toBeGreaterThan(5.5 * 0.99);
+    expect(volts(engine, 'VPV')).toBeLessThan(5.5 * 1.01);
+  });
+});
+
 describe('createSimulation — pre-flight and robustness', () => {
   it('rejects a circuit with no ground', () => {
     const engine = createSimulation(circuitOf([

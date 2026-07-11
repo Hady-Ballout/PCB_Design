@@ -297,9 +297,12 @@ page agree numerically. Where they intentionally differ:
 | opamp | LM358 subcircuit (VCVS ladder, **no rail clamp**) | behavioral tanh VCVS (gain 1e5, Ro=100Ω) **clamped to the supply rails** with LM358-ish headroom — a deliberate improvement |
 | comparator | LM393 subcircuit (push-pull VCVS) | **open-collector** switch with ±5 mV hysteresis — physically correct LM393 behavior, matches the topology rules' pull-up expectations |
 | 555 | TIMER555 subcircuit (hysteretic switches, fixed 5 V trip points) | behavioral SR latch reading real thresholds off the internal 5k/10k CTRL ladder (external CTRL parts shift the trip points); OUT drives VCC−1.7/0.1 V behind 10 Ω, DISCH 25 Ω/open |
-| optocoupler | PC817 subcircuit (on/off switch, no CTR) | same on/off semantics (SW VT=1.1 VH=0.15 on the LED junction); CTR-proportional output is a possible M4 refinement |
+| optocoupler | PC817 subcircuit (on/off switch, no CTR) | same on/off semantics (SW VT=1.1 VH=0.15 on the LED junction); CTR-proportional output remains a possible future refinement |
 | regulator | ideal DC source on OUT, IN ignored | same, **plus dropout**: output tracks min(Vnom, vIN − 1.5) when IN is wired; unpowered stays ideal with the `regulator_unpowered` warning |
-| relay_module | wiring-only comment | same (behavioral model deferred to M4) |
+| relay_module | wiring-only comment | **behavioral**: COM–NO closes / COM–NC opens when powered (>4 V) and IN > 2.5 V (2.2 V drop-out hysteresis), coil loads the supply 70 Ω energized / 10 kΩ idle; indicator LED lights on the board |
+| fuse | fixed resistor | same resistance **plus i²t blow**: sustained current above 2× `parseAmps(value, 1)` opens it (instantly at DC, after 10 ms in transient); broken-glass artwork, resets on Stop/Run ("replace the fuse") |
+| current_sensor | shunt only, no OUT drive | shunt **plus the ACS712 analog output**: OUT driven at 2.5 V + 185 mV/A of shunt current when VCC/OUT/GND are wired |
+| solar_panel | ideal DC source | ideal source behind **5 Ω** — panels sag under load (and survive a short at V/5Ω instead of a singular matrix) |
 | buzzer / motors | plain resistors | plain resistors **plus observables**: buzzer frequency detection (rising-1V-crossing timestamps → Web Audio tone in the UI), motor `speed01` from drive voltage vs rated (6 V dc / 3 V vibration) → spin/shake animation |
 | analysis | one-shot `.tran 0.1ms 20ms` + `.op` | backward-Euler from a zero state (power-on transient is visible), real-time-paced with a per-frame budget and a speed chip |
 

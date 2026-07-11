@@ -92,8 +92,15 @@ export const observablesFor = (netlist, probe, controlState = new Map()) => {
           const rated = device.kind === 'dc_motor' ? 6 : 3;
           entry.speed01 = clamp01(Math.abs(volts) / rated);
         }
+        if (device.kind === 'fuse') entry.blown = device.state?.blown ?? false;
         break;
       }
+      case 'sensor_out':
+        entry.outVolts = device.overrideVolts;
+        break;
+      case 'relay':
+        entry.energized = device.state?.energized ?? false;
+        break;
       case 'bjt':
         entry.amps = branchCurrents.get(device.id) ?? 0; // collector current
         break;

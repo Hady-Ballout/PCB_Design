@@ -5,6 +5,7 @@
 
 import { MCU_KINDS, WIRING_ONLY_KINDS, kindLabel } from '../componentKinds.js';
 import {
+  parseAmps,
   parseFarads,
   parseHenries,
   parseOhms,
@@ -98,7 +99,9 @@ export const buildSimNetlist = (circuit) => {
       warnOnce('mcu_not_simulated', `${ref} (${kindLabel(kind)}) is not simulated — its pins float`);
       continue;
     }
-    if (WIRING_ONLY_KINDS.has(kind)) {
+    // relay_module is wiringOnly in the registry but gets a behavioral model
+    // here (contacts + coil + indicator) — the only module that does.
+    if (WIRING_ONLY_KINDS.has(kind) && kind !== 'relay_module') {
       warnOnce('module_not_simulated', `${ref} (${kindLabel(kind)}) is a wiring-only module — not simulated`);
       continue;
     }
@@ -119,7 +122,13 @@ export const buildSimNetlist = (circuit) => {
         break;
       case 'fuse':
         // Ratings like "1A" don't parse as a resistance → 50 mΩ, like toSpice.
+        // The rating drives the i²t blow rule (event state); a resistance-style
+        // value falls back to a 1 A rating.
         addResistor(ref, ref, kind, indexOf(a), indexOf(b), parseOhms(value, 0.05));
+        Object.assign(devices.at(-1), {
+          ratingAmps: parseAmps(value, 1),
+          state: { blown: false, overSince: null },
+        });
         break;
       case 'capacitor':
         devices.push({ type: 'capacitor', id: ref, owner: ref, n1: indexOf(a), n2: indexOf(b), farads: parseFarads(value, 1e-6) });
@@ -131,9 +140,16 @@ export const buildSimNetlist = (circuit) => {
         devices.push({ type: 'inductor', id: ref, owner: ref, n1: indexOf(a), n2: indexOf(b), henries: parseHenries(value, 1e-3) });
         break;
       case 'voltage_source':
-      case 'solar_panel':
         addVsource(ref, ref, kind, indexOf(a), indexOf(b), parseSourceWaveform(`DC ${parseVolts(value, 5)}`));
         break;
+      case 'solar_panel': {
+        // Real small panels sag under load: ideal source behind ~5 Ω.
+        // (toSpice emits an ideal source — intentional sim divergence.)
+        const int = internalNode(ref);
+        addVsource(ref, ref, kind, int, indexOf(b), parseSourceWaveform(`DC ${parseVolts(value, 5)}`));
+        addResistor(`${ref}__rs`, ref, 'solar_rs', int, indexOf(a), 5);
+        break;
+      }
       case 'signal_source': {
         const waveform = parseSourceWaveform(value);
         if (waveform.warning) warnOnce('source_value', `${ref}: ${waveform.warning} — treating as 0V`);
@@ -192,11 +208,39 @@ export const buildSimNetlist = (circuit) => {
         });
         break;
       }
-      case 'current_sensor':
-        if (!isUnconnectedTerminal(a, ref, 1) && !isUnconnectedTerminal(b, ref, 2)) {
+      case 'current_sensor': {
+        const shuntConnected = !isUnconnectedTerminal(a, ref, 1) && !isUnconnectedTerminal(b, ref, 2);
+        if (shuntConnected) {
           addResistor(`${ref}_S`, ref, kind, indexOf(a), indexOf(b), 0.0012);
         }
+        // ACS712 analog output: 2.5 V + 185 mV/A, event-updated from the shunt
+        // current. Only driven when the module is actually powered and wired.
+        // (toSpice emits no OUT drive — intentional sim divergence.)
+        const [, , vccNet, outNet, gndNet] = nodes;
+        if (shuntConnected
+          && !isUnconnectedTerminal(vccNet, ref, 3)
+          && !isUnconnectedTerminal(outNet, ref, 4)
+          && !isUnconnectedTerminal(gndNet, ref, 5)) {
+          devices.push({
+            type: 'sensor_out', id: `${ref}_OUT`, owner: ref, kind,
+            out: indexOf(outNet), gnd: indexOf(gndNet), shuntId: `${ref}_S`,
+            branch: branchCount, overrideVolts: 2.5,
+          });
+          branchCount += 1;
+        }
         break;
+      }
+      case 'relay_module': {
+        // [VCC, GND, IN, COM, NO, NC]: energized closes COM–NO, idle rests on
+        // COM–NC; the coil loads the supply when energized.
+        devices.push({
+          type: 'relay', id: ref, owner: ref, kind,
+          vcc: indexOf(a), gnd: indexOf(b), in: indexOf(c),
+          com: indexOf(nodes[3]), no: indexOf(nodes[4]), nc: indexOf(nodes[5]),
+          state: { energized: false },
+        });
+        break;
+      }
       case 'pushbutton':
         addVariableResistor(ref, ref, kind, indexOf(a), indexOf(b), 'pushbutton', {});
         controls.push({ ref, kind, type: 'momentary', name: 'pressed', value: 0 });

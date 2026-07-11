@@ -9,7 +9,7 @@ import { downloadText } from '../../core/download.js';
 import { formatSI } from '../../core/sim/simObservables.js';
 import { circuitToBreadboard, netAtHole, reconcileOverrides, GROUND_NET } from './breadboardModel.js';
 import { describeBreadboard } from './breadboardDescription.js';
-import { highlightFor, readoutFor } from './selectionModel.js';
+import { highlightFor, readoutFor, voltageOverlayFor } from './selectionModel.js';
 import { HOLE_PITCH, clientToViewBox, holeAt, holeCenter, viewBoxToBoard } from './breadboardGeometry.js';
 import { Breadboard, HighlightOverlay } from './Breadboard.jsx';
 import { BatteryPack, JumperWire, PartDefs, PinLabels, RealisticPart } from './parts.jsx';
@@ -86,6 +86,7 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
   const [partDrag, setPartDrag] = useState(null); // { ref, dx, dy } ghost offset while moving a part
   const [libraryAt, setLibraryAt] = useState(null); // client {x,y} anchor for the component library, or null
   const [running, setRunning] = useState(false); // live-simulation mode
+  const [voltageOverlay, setVoltageOverlay] = useState(false); // tint carriers by live voltage
   const { simFrame, setControl, controls } = useSimulation(circuit, running);
 
   const effective = selection ?? hovered;
@@ -516,6 +517,16 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
         {simStatusText && (
           <span className={`realistic-sim-status ${simFrame.converged ? '' : 'warn'}`}>{simStatusText}</span>
         )}
+        {running && (
+          <button
+            type="button"
+            className={`realistic-vmap ${voltageOverlay ? 'active' : ''}`}
+            onClick={() => setVoltageOverlay((value) => !value)}
+            title="Tint tie groups and rails by their live voltage (blue 0V → red max)"
+          >
+            V map
+          </button>
+        )}
         <button type="button" onClick={() => zoomAround(centerAnchor(), 1 / 1.25)}>−</button>
         <button type="button" onClick={() => zoomAround(centerAnchor(), 1.25)}>+</button>
         <button type="button" onClick={() => setView(IDENTITY_VIEW)}>Fit</button>
@@ -588,6 +599,13 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
           <PartDefs />
           <g className="rs-world" transform={`translate(${view.tx} ${view.ty}) scale(${view.s})`} style={{ willChange: 'transform' }}>
             <Breadboard board={model.board} rails={model.rails} />
+            {running && voltageOverlay && simFrame && !simFrame.error && (
+              <HighlightOverlay
+                board={model.board}
+                highlight={voltageOverlayFor(model, simFrame.netVoltages)}
+                nets={model.nets}
+              />
+            )}
             <HighlightOverlay board={model.board} highlight={highlight} nets={model.nets} />
             {model.parts.map((part) => {
               const dragging = partDrag?.ref === part.ref;
@@ -628,7 +646,7 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
                   highlight.partRefs.has(battery.ref) || highlight.batteryRefs.has(battery.ref),
                 )}
               >
-                <title>{readoutFor(model, { type: 'part', ref: battery.ref })}</title>
+                <title>{readoutFor(model, { type: 'part', ref: battery.ref }, running ? simFrame : null)}</title>
                 <BatteryPack battery={battery} index={index} />
               </g>
             ))}
@@ -641,7 +659,7 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
                   highlight.jumperIds.has(jumper.id),
                 )}
               >
-                <title>{readoutFor(model, { type: 'net', net: jumper.net })}</title>
+                <title>{readoutFor(model, { type: 'net', net: jumper.net }, running ? simFrame : null)}</title>
                 <JumperWire jumper={jumper} />
               </g>
             ))}

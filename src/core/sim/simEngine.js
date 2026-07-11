@@ -107,8 +107,14 @@ export const createSimulation = (circuit) => {
     }
   }
   const eventDevices = devices.filter((device) => EVENT_TYPES.has(device.type)
+    || device.type === 'relay'
+    || device.type === 'sensor_out'
+    || device.kind === 'fuse'
     || (device.type === 'vsource' && device.kind === 'regulator' && device.inNode != null));
   const diodeById = new Map(devices.filter((device) => device.type === 'diode').map((device) => [device.id, device]));
+  for (const sensor of devices.filter((device) => device.type === 'sensor_out')) {
+    sensor.shunt = devices.find((device) => device.id === sensor.shuntId) ?? null;
+  }
   const buzzers = devices.filter((device) => device.kind === 'buzzer');
   for (const buzzer of buzzers) {
     buzzer.crossings = [];
@@ -165,10 +171,14 @@ export const createSimulation = (circuit) => {
 
     for (const device of devices) {
       switch (device.type) {
-        case 'resistor':
-          device.lastOhms = device.ohms;
-          stampConductance(device.n1, device.n2, 1 / device.ohms);
+        case 'resistor': {
+          // A blown fuse is an open circuit until the engine rebuilds
+          // (Stop/Run or a circuit edit — the "replace the fuse" gesture).
+          const ohms = device.state?.blown ? 1e9 : device.ohms;
+          device.lastOhms = ohms;
+          stampConductance(device.n1, device.n2, 1 / ohms);
           break;
+        }
         case 'vres': {
           const ohms = variableOhms(device, stateFor(device));
           device.lastOhms = ohms;
@@ -314,6 +324,27 @@ export const createSimulation = (circuit) => {
         case 'opto_out':
           stampConductance(device.c, device.e, 1 / (device.state.on ? 30 : 10e6));
           break;
+        case 'relay': {
+          const energized = device.state.energized;
+          stampConductance(device.com, device.no, 1 / (energized ? 0.05 : 10e6));
+          stampConductance(device.com, device.nc, 1 / (energized ? 10e6 : 0.05));
+          // Coil + module electronics load on the supply.
+          stampConductance(device.vcc, device.gnd, 1 / (energized ? 70 : 10e3));
+          break;
+        }
+        case 'sensor_out': {
+          const bi = nodeCount + device.branch;
+          if (device.out !== GROUND) {
+            A[device.out][bi] += 1;
+            A[bi][device.out] += 1;
+          }
+          if (device.gnd !== GROUND) {
+            A[device.gnd][bi] -= 1;
+            A[bi][device.gnd] -= 1;
+          }
+          rhs[bi] = device.overrideVolts;
+          break;
+        }
         case 'diode': {
           const rawVd = at(device.anode) - at(device.cathode);
           const vd = limitDiode(device.model, rawVd, device.vdOld);
@@ -400,10 +431,51 @@ export const createSimulation = (circuit) => {
   // update from the committed solution — between timesteps in transient, and
   // in a bounded settle loop for DC solves. Returns true when a state flipped.
   const atX = (node) => (node === GROUND ? 0 : x[node]);
-  const updateEvents = () => {
+  const updateEvents = (mode = 'transient') => {
     let changed = false;
     for (const device of eventDevices) {
-      if (device.type === 'comparator') {
+      if (device.kind === 'fuse') {
+        // i²t approximation: sustained current above 2× the rating opens the
+        // fuse — instantly at DC (a steady overload would blow within the
+        // window anyway), after 10 ms sustained in transient. One-way state.
+        if (device.state.blown) continue;
+        const amps = Math.abs((atX(device.n1) - atX(device.n2)) / device.lastOhms);
+        if (amps > 2 * device.ratingAmps) {
+          if (mode === 'dc') {
+            device.state.blown = true;
+            changed = true;
+          } else {
+            device.state.overSince ??= time;
+            if (time - device.state.overSince > 0.01) {
+              device.state.blown = true;
+              changed = true;
+            }
+          }
+        } else {
+          device.state.overSince = null;
+        }
+      } else if (device.type === 'relay') {
+        // Hysteresis (2.5 V on / 2.2 V off, supply 4 V / 3.5 V) stops chatter
+        // when the relay's own contact feeds back into IN.
+        const supply = atX(device.vcc) - atX(device.gnd);
+        const drive = atX(device.in) - atX(device.gnd);
+        const energized = device.state.energized
+          ? supply > 3.5 && drive > 2.2
+          : supply > 4 && drive > 2.5;
+        if (energized !== device.state.energized) {
+          device.state.energized = energized;
+          changed = true;
+        }
+      } else if (device.type === 'sensor_out') {
+        // ACS712: OUT = 2.5 V + 185 mV/A of shunt current.
+        const shunt = device.shunt;
+        const amps = shunt ? (atX(shunt.n1) - atX(shunt.n2)) / shunt.lastOhms : 0;
+        const next = 2.5 + 0.185 * amps;
+        if (Math.abs(device.overrideVolts - next) > 1e-3) {
+          device.overrideVolts = next;
+          changed = true;
+        }
+      } else if (device.type === 'comparator') {
         // ±5 mV hysteresis prevents chatter at the trip point.
         const vd = atX(device.inp) - atX(device.inn);
         const low = device.state.low ? !(vd > 0.005) : vd < -0.005;
@@ -446,7 +518,7 @@ export const createSimulation = (circuit) => {
     let ok = solveDCOnce();
     // Settle event states; a genuine bistable that never settles keeps its
     // last consistent latch state (still a valid answer).
-    for (let round = 0; round < 10 && updateEvents(); round += 1) {
+    for (let round = 0; round < 10 && updateEvents('dc'); round += 1) {
       ok = solveDCOnce();
     }
     return ok;

@@ -118,6 +118,53 @@ export function highlightFor(model, selection) {
 
 const netDisplayName = (net) => (net === GROUND_NET ? 'GND' : net);
 
+// Voltage → color for the run-mode voltage overlay: hue 220 (blue, 0 V) ramps
+// to 0 (red, vMax); negative voltages clamp to deep blue.
+export const voltageColor = (volts, vMax) => {
+  const t = Math.min(1, Math.max(0, volts / Math.max(vMax, 1e-9)));
+  return `hsl(${Math.round(220 - 220 * t)}, 85%, 52%)`;
+};
+
+// Carrier map for the live voltage overlay: every tie group and rail stripe
+// tinted by its net's simulated voltage. Same shape HighlightOverlay renders,
+// but with explicit per-carrier colors instead of net-legend lookups.
+export function voltageOverlayFor(model, netVoltages) {
+  const overlay = {
+    active: false,
+    partRefs: new Set(),
+    jumperIds: new Set(),
+    nets: new Set(),
+    railStrips: new Set(),
+    groupKeys: new Set(),
+    batteryRefs: new Set(),
+    groupKeyNets: new Map(),
+    railStripNets: new Map(),
+    groupKeyColors: new Map(),
+    railStripColors: new Map(),
+  };
+  if (!model || !netVoltages) return overlay;
+  let vMax = 1;
+  for (const [, volts] of netVoltages) vMax = Math.max(vMax, Math.abs(volts));
+  Object.entries(model.netGroups ?? {}).forEach(([net, cells]) => {
+    if (!netVoltages.has(net)) return;
+    const color = voltageColor(netVoltages.get(net), vMax);
+    cells.forEach(({ strip, column }) => {
+      const key = `${strip}:${column}`;
+      overlay.groupKeys.add(key);
+      overlay.groupKeyNets.set(key, net);
+      overlay.groupKeyColors.set(key, color);
+    });
+  });
+  Object.entries(model.rails ?? {}).forEach(([strip, net]) => {
+    if (net == null || !netVoltages.has(net)) return;
+    overlay.railStrips.add(strip);
+    overlay.railStripNets.set(strip, net);
+    overlay.railStripColors.set(strip, voltageColor(netVoltages.get(net), vMax));
+  });
+  overlay.active = overlay.groupKeys.size > 0 || overlay.railStrips.size > 0;
+  return overlay;
+}
+
 // Live measurements appended to the readout while the simulation runs.
 const liveSuffixFor = (selection, simFrame) => {
   if (!simFrame) return '';
