@@ -289,12 +289,26 @@ shunt gated on connected IP± pins), the same NC-leg skipping, and the same `.mo
 parameters (DGEN/DRED/DSCH/zener BV), so the live sim and the server-side Ngspice waveform
 page agree numerically. Where they intentionally differ:
 
-| Aspect | `toSpice()` / Ngspice | live sim (M1+M2) |
+| Aspect | `toSpice()` / Ngspice | live sim (M1–M3) |
 |---|---|---|
 | pushbutton / switch / pot / LDR / thermistor | fixed snapshot (open button, 50 % wiper, 10 k defaults) | **interactive**: control state (pressed, throw, wiper α, lux, °C) parameterizes the stamps live |
-| BJT / MOSFET / opamp / comparator / 555 / optocoupler | simulated (models + subcircuits) | **deferred to a later milestone** — pins float under gmin, per-part `kind_not_simulated` warning |
-| relay_module | wiring-only comment | same (behavioral model deferred) |
+| BJT | Q2N2222/Q2N3906 with VAF=100 | Ebers-Moll, same IS/BF, **no Early effect** (simpler Jacobian, negligible at breadboard scale) |
+| MOSFET | LEVEL=1, no λ | same level 1 plus **λ=0.01** (keeps the saturation Jacobian nonsingular). Both are the deck's weak KP=20µ device — a 5 V gate saturates at ~90 µA, so LEDs won't visibly light through it; this matches ngspice exactly and is not a sim bug |
+| opamp | LM358 subcircuit (VCVS ladder, **no rail clamp**) | behavioral tanh VCVS (gain 1e5, Ro=100Ω) **clamped to the supply rails** with LM358-ish headroom — a deliberate improvement |
+| comparator | LM393 subcircuit (push-pull VCVS) | **open-collector** switch with ±5 mV hysteresis — physically correct LM393 behavior, matches the topology rules' pull-up expectations |
+| 555 | TIMER555 subcircuit (hysteretic switches, fixed 5 V trip points) | behavioral SR latch reading real thresholds off the internal 5k/10k CTRL ladder (external CTRL parts shift the trip points); OUT drives VCC−1.7/0.1 V behind 10 Ω, DISCH 25 Ω/open |
+| optocoupler | PC817 subcircuit (on/off switch, no CTR) | same on/off semantics (SW VT=1.1 VH=0.15 on the LED junction); CTR-proportional output is a possible M4 refinement |
+| regulator | ideal DC source on OUT, IN ignored | same, **plus dropout**: output tracks min(Vnom, vIN − 1.5) when IN is wired; unpowered stays ideal with the `regulator_unpowered` warning |
+| relay_module | wiring-only comment | same (behavioral model deferred to M4) |
+| buzzer / motors | plain resistors | plain resistors **plus observables**: buzzer frequency detection (rising-1V-crossing timestamps → Web Audio tone in the UI), motor `speed01` from drive voltage vs rated (6 V dc / 3 V vibration) → spin/shake animation |
 | analysis | one-shot `.tran 0.1ms 20ms` + `.op` | backward-Euler from a zero state (power-on transient is visible), real-time-paced with a per-frame budget and a speed chip |
+
+Event-state devices (comparator, 555 latch, opto switch, regulator dropout) update
+**between** timesteps from the committed solution — hysteresis prevents chatter, and DC
+solves run a bounded settle loop (solve → update states → re-solve, ≤10 rounds). Circuits
+containing only event devices stay static (`isDynamic` false): they re-settle on every
+control edit, and anything a 555 does usefully involves its timing capacitor, which
+already makes the circuit dynamic.
 
 Solver notes: junction limiting (pnjlim) must veto NR convergence — with an LED off-seed,
 node voltages sit nearly still for ~10 iterations while the junction linearization climbs

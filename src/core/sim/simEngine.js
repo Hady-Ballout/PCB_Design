@@ -4,7 +4,7 @@
 
 import { clearMatrix, makeMatrix, solveDense } from './linalg.js';
 import { buildSimNetlist, GROUND } from './simNetlist.js';
-import { evalDiode, limitDiode, variableOhms } from './simDevices.js';
+import { evalBjt, evalDiode, evalMosfet, evalOpamp, junctionCriticalVoltage, limitDiode, limitJunction, THERMAL_VOLTAGE, variableOhms } from './simDevices.js';
 import { observablesFor } from './simObservables.js';
 
 const GMIN = 1e-12;
@@ -86,10 +86,33 @@ export const createSimulation = (circuit) => {
 
   const controlState = new Map(controls.map((control) => [control.ref, { [control.name]: control.value }]));
 
-  const diodes = devices.filter((device) => device.type === 'diode');
-  for (const diode of diodes) {
-    diode.vdOld = 0;
-    diode.lastI = 0;
+  const NR_TYPES = new Set(['diode', 'bjt', 'mosfet', 'opamp']);
+  const EVENT_TYPES = new Set(['comparator', 'timer_555', 'opto_out']);
+  const nrDevices = devices.filter((device) => NR_TYPES.has(device.type));
+  for (const device of nrDevices) {
+    if (device.type === 'diode') {
+      device.vdOld = 0;
+      device.lastI = 0;
+    } else if (device.type === 'bjt') {
+      device.vbeOld = 0;
+      device.vbcOld = 0;
+      device.lastIc = 0;
+      device.lastIb = 0;
+    } else if (device.type === 'mosfet') {
+      device.vgsOld = 0;
+      device.vdsOld = 0;
+      device.lastId = 0;
+    } else {
+      device.vdOld = 0; // opamp differential input
+    }
+  }
+  const eventDevices = devices.filter((device) => EVENT_TYPES.has(device.type)
+    || (device.type === 'vsource' && device.kind === 'regulator' && device.inNode != null));
+  const diodeById = new Map(devices.filter((device) => device.type === 'diode').map((device) => [device.id, device]));
+  const buzzers = devices.filter((device) => device.kind === 'buzzer');
+  for (const buzzer of buzzers) {
+    buzzer.crossings = [];
+    buzzer.lastV = 0;
   }
   const reactives = devices.filter((device) => device.type === 'capacitor' || device.type === 'inductor');
   for (const device of reactives) {
@@ -130,6 +153,13 @@ export const createSimulation = (circuit) => {
     const stampCurrent = (n1, n2, intoN1) => {
       if (n1 !== GROUND) rhs[n1] += intoN1;
       if (n2 !== GROUND) rhs[n2] -= intoN1;
+    };
+    // Voltage-controlled current source: g·(v(ctrlP) − v(ctrlM)) flows nOut→nIn.
+    const stampVCCS = (nOut, nIn, ctrlP, ctrlM, g) => {
+      if (nOut !== GROUND && ctrlP !== GROUND) A[nOut][ctrlP] += g;
+      if (nOut !== GROUND && ctrlM !== GROUND) A[nOut][ctrlM] -= g;
+      if (nIn !== GROUND && ctrlP !== GROUND) A[nIn][ctrlP] -= g;
+      if (nIn !== GROUND && ctrlM !== GROUND) A[nIn][ctrlM] += g;
     };
     const at = (node) => (node === GROUND ? 0 : seed[node]);
 
@@ -172,9 +202,118 @@ export const createSimulation = (circuit) => {
             A[device.nm][bi] -= 1;
             A[bi][device.nm] -= 1;
           }
-          rhs[bi] = device.waveform.evaluate(time) * sourceScale;
+          // overrideVolts is the regulator-dropout event state.
+          rhs[bi] = (device.overrideVolts ?? device.waveform.evaluate(time)) * sourceScale;
           break;
         }
+        case 'bjt': {
+          // Normalized NPN frame: PNP evaluates with negated junction voltages
+          // and flips only the companion current sources (conductance and
+          // VCCS stamps are polarity-invariant).
+          const p = device.polarity;
+          const vcrit = junctionCriticalVoltage(device.params.is, THERMAL_VOLTAGE);
+          const rawVbe = p * (at(device.b) - at(device.e));
+          const rawVbc = p * (at(device.b) - at(device.c));
+          const vbe = limitJunction(rawVbe, device.vbeOld, THERMAL_VOLTAGE, vcrit);
+          const vbc = limitJunction(rawVbc, device.vbcOld, THERMAL_VOLTAGE, vcrit);
+          if (Math.abs(vbe - rawVbe) > 1e-9 || Math.abs(vbc - rawVbc) > 1e-9) limitingActive = true;
+          device.vbeOld = vbe;
+          device.vbcOld = vbc;
+          const { iF, iR, ic, ib, gmf, gmr, gpi, gmu } = evalBjt(device.params, vbe, vbc);
+          device.lastIc = p * ic;
+          device.lastIb = p * ib;
+          // Base-emitter junction: IF/bf flows b→e.
+          const ibe = iF / device.params.bf;
+          stampConductance(device.b, device.e, gpi);
+          stampCurrent(device.b, device.e, -p * (ibe - gpi * vbe));
+          // Base-collector junction: IR/br flows b→c.
+          const ibc = iR / device.params.br;
+          stampConductance(device.b, device.c, gmu);
+          stampCurrent(device.b, device.c, -p * (ibc - gmu * vbc));
+          // Transport current IF − IR flows c→e, controlled by vbe and vbc.
+          const icc = iF - iR;
+          stampVCCS(device.c, device.e, device.b, device.e, gmf);
+          stampVCCS(device.c, device.e, device.b, device.c, -gmr);
+          stampCurrent(device.c, device.e, -p * (icc - gmf * vbe + gmr * vbc));
+          break;
+        }
+        case 'mosfet': {
+          const p = device.polarity;
+          // Symmetric device: operate on whichever terminal is the effective
+          // source (normalized vds >= 0).
+          let nd = device.d;
+          let ns = device.s;
+          if (p * (at(nd) - at(ns)) < 0) {
+            nd = device.s;
+            ns = device.d;
+          }
+          let vgs = p * (at(device.g) - at(ns));
+          let vds = p * (at(nd) - at(ns));
+          // No exponential to limit — just damp NR steps to stop region ping-pong.
+          const dVgs = vgs - device.vgsOld;
+          const dVds = vds - device.vdsOld;
+          if (Math.abs(dVgs) > 2) {
+            vgs = device.vgsOld + Math.sign(dVgs) * 2;
+            limitingActive = true;
+          }
+          if (Math.abs(dVds) > 4) {
+            vds = device.vdsOld + Math.sign(dVds) * 4;
+            limitingActive = true;
+          }
+          device.vgsOld = vgs;
+          device.vdsOld = vds;
+          const { id, gm, gds } = evalMosfet(device.params, vgs, vds);
+          device.lastId = p * (nd === device.d ? id : -id);
+          stampVCCS(nd, ns, device.g, ns, gm);
+          stampConductance(nd, ns, gds + GMIN);
+          stampCurrent(nd, ns, -p * (id - gm * vgs - gds * vds));
+          break;
+        }
+        case 'opamp': {
+          const bi = nodeCount + device.branch;
+          // Rails lag one iteration (near-constant, kept out of the Jacobian).
+          const vhi = at(device.vcp) - 1.3;
+          const vlo = at(device.vcm) + 0.1;
+          const vswing = Math.max((vhi - vlo) / 2, 0.05);
+          let vd = at(device.inp) - at(device.inn);
+          const dVd = vd - device.vdOld;
+          if (Math.abs(dVd) > vswing / 2) {
+            vd = device.vdOld + Math.sign(dVd) * (vswing / 2);
+            limitingActive = true;
+          }
+          device.vdOld = vd;
+          const { e, dEdVd } = evalOpamp(vd, vhi, vlo);
+          if (device.out !== GROUND) {
+            A[device.out][bi] += 1;
+            A[bi][device.out] += 1;
+          }
+          if (device.inp !== GROUND) A[bi][device.inp] -= dEdVd;
+          if (device.inn !== GROUND) A[bi][device.inn] += dEdVd;
+          rhs[bi] = e - dEdVd * vd;
+          break;
+        }
+        case 'comparator':
+          // Open-collector: 30 Ω to the V- pin when pulled low, 10 MΩ released.
+          stampConductance(device.out, device.vcm, 1 / (device.state.low ? 30 : 10e6));
+          break;
+        case 'timer_555': {
+          const bi = nodeCount + device.branch;
+          const level = device.state.q ? Math.max(at(device.vcc) - 1.7, 0) : 0.1;
+          if (device.out !== GROUND) {
+            A[device.out][bi] += 1;
+            A[bi][device.out] += 1;
+          }
+          if (device.gnd !== GROUND) {
+            A[device.gnd][bi] -= 1;
+            A[bi][device.gnd] -= 1;
+          }
+          rhs[bi] = level;
+          stampConductance(device.disch, device.gnd, 1 / (device.state.q ? 10e6 : 25));
+          break;
+        }
+        case 'opto_out':
+          stampConductance(device.c, device.e, 1 / (device.state.on ? 30 : 10e6));
+          break;
         case 'diode': {
           const rawVd = at(device.anode) - at(device.cathode);
           const vd = limitDiode(device.model, rawVd, device.vdOld);
@@ -198,7 +337,7 @@ export const createSimulation = (circuit) => {
   // vector or null; mutates diode linearization state.
   const newtonSolve = (options) => {
     let iterate = x;
-    const nonlinear = diodes.length > 0;
+    const nonlinear = nrDevices.length > 0;
     for (let iteration = 1; iteration <= MAX_NR_ITERATIONS; iteration += 1) {
       const solution = stampAndSolve(iterate, options);
       if (!solution) return null;
@@ -246,7 +385,7 @@ export const createSimulation = (circuit) => {
     }
   };
 
-  const solveDC = () => {
+  const solveDCOnce = () => {
     const solution = robustSolve({ transient: false });
     if (solution) {
       x = solution;
@@ -257,12 +396,80 @@ export const createSimulation = (circuit) => {
     return lastConverged;
   };
 
+  // Event devices (comparator, 555 latch, opto switch, regulator dropout)
+  // update from the committed solution — between timesteps in transient, and
+  // in a bounded settle loop for DC solves. Returns true when a state flipped.
+  const atX = (node) => (node === GROUND ? 0 : x[node]);
+  const updateEvents = () => {
+    let changed = false;
+    for (const device of eventDevices) {
+      if (device.type === 'comparator') {
+        // ±5 mV hysteresis prevents chatter at the trip point.
+        const vd = atX(device.inp) - atX(device.inn);
+        const low = device.state.low ? !(vd > 0.005) : vd < -0.005;
+        if (low !== device.state.low) {
+          device.state.low = low;
+          changed = true;
+        }
+      } else if (device.type === 'timer_555') {
+        const ctrl = atX(device.ctrl);
+        let q = device.state.q;
+        if (device.resetConnected && atX(device.reset) < 0.7) q = false;
+        else if (atX(device.trig) < ctrl / 2) q = true; // trigger dominates
+        else if (atX(device.thres) > ctrl) q = false;
+        if (q !== device.state.q) {
+          device.state.q = q;
+          changed = true;
+        }
+      } else if (device.type === 'opto_out') {
+        // PC817 SW hysteresis: VT=1.1 VH=0.15 on the LED junction voltage.
+        const led = diodeById.get(device.ledId);
+        const vd = led ? led.vdOld : 0;
+        const on = device.state.on ? vd > 1.025 : vd > 1.175;
+        if (on !== device.state.on) {
+          device.state.on = on;
+          changed = true;
+        }
+      } else {
+        // Regulator dropout: output tracks min(vnom, vIN − 1.5), never negative.
+        const next = Math.min(device.vnom, Math.max(0, atX(device.inNode) - 1.5));
+        if (Math.abs((device.overrideVolts ?? device.vnom) - next) > 1e-3) {
+          device.overrideVolts = next;
+          changed = true;
+        }
+      }
+    }
+    return changed;
+  };
+
+  const solveDC = () => {
+    let ok = solveDCOnce();
+    // Settle event states; a genuine bistable that never settles keeps its
+    // last consistent latch state (still a valid answer).
+    for (let round = 0; round < 10 && updateEvents(); round += 1) {
+      ok = solveDCOnce();
+    }
+    return ok;
+  };
+
   const stepOnce = () => {
     time += h;
     const solution = newtonSolve({ transient: true }) ?? robustSolve({ transient: true });
     if (solution) {
       x = solution;
       commitReactiveStates(solution);
+      // Buzzer frequency detection: rising crossings of 1 V, sim-timestamped.
+      for (const buzzer of buzzers) {
+        const v = atX(buzzer.n1) - atX(buzzer.n2);
+        if (buzzer.lastV <= 1 && v > 1) {
+          buzzer.crossings.push(time);
+          if (buzzer.crossings.length > 8) buzzer.crossings.shift();
+        } else if (buzzer.crossings.length > 0 && time - buzzer.crossings.at(-1) > 0.05) {
+          buzzer.crossings.length = 0; // tone stopped — drop the stale estimate
+        }
+        buzzer.lastV = v;
+      }
+      updateEvents(); // states take effect next step (≤ one h of lag)
       lastConverged = true;
     } else {
       lastConverged = false; // keep last good state, keep moving
@@ -315,6 +522,11 @@ export const createSimulation = (circuit) => {
         branchCurrents.set(device.id, (at(device.n1) - at(device.n2)) / device.lastOhms);
       } else if (device.type === 'inductor') branchCurrents.set(device.id, device.iState);
       else if (device.type === 'capacitor') branchCurrents.set(device.id, 0);
+      else if (device.type === 'bjt') branchCurrents.set(device.id, device.lastIc);
+      else if (device.type === 'mosfet') branchCurrents.set(device.id, device.lastId);
+      else if (device.type === 'opamp' || device.type === 'timer_555') {
+        branchCurrents.set(device.id, x[nodeCount + device.branch]);
+      }
     }
     return { netVoltages, branchCurrents };
   };

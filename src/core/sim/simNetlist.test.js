@@ -54,7 +54,7 @@ describe('buildSimNetlist', () => {
     expect(netlist.nodeIndex.has('__int_D1')).toBe(true);
   });
 
-  it('flags MCU boards and deferred kinds without dropping the rest', () => {
+  it('flags MCU boards without dropping the rest; active kinds simulate', () => {
     const netlist = buildSimNetlist(circuitOf(withSupply([
       { ref: 'U1', kind: 'esp32', value: '', nodes: Array.from({ length: 12 }, (_, i) => `NC_U1_${i + 1}`) },
       { ref: 'Q1', kind: 'bjt_npn', value: '', nodes: ['A', 'B', 'C'] },
@@ -62,7 +62,9 @@ describe('buildSimNetlist', () => {
     ])));
     expect(netlist.ok).toBe(true);
     expect(netlist.warnings.some((w) => w.code === 'mcu_not_simulated')).toBe(true);
-    expect(netlist.warnings.some((w) => w.code === 'kind_not_simulated' && w.message.startsWith('Q1'))).toBe(true);
+    // BJTs came off the deferred list in M3 — Q1 is a real device now.
+    expect(netlist.warnings.some((w) => w.code === 'kind_not_simulated')).toBe(false);
+    expect(netlist.devices.find((device) => device.owner === 'Q1')).toMatchObject({ type: 'bjt', polarity: 1 });
     expect(netlist.devices.some((device) => device.owner === 'R1')).toBe(true);
   });
 

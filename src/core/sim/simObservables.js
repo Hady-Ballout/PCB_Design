@@ -81,8 +81,40 @@ export const observablesFor = (netlist, probe, controlState = new Map()) => {
           entry.volts = volts;
           entry.ohms = device.lastOhms;
         }
+        if (device.kind === 'buzzer') {
+          const crossings = device.crossings ?? [];
+          entry.freqHz = crossings.length >= 3
+            ? (crossings.length - 1) / (crossings.at(-1) - crossings[0])
+            : null;
+        }
+        if (device.kind === 'dc_motor' || device.kind === 'vibration_motor') {
+          // Rated voltage by convention (the value field carries winding ohms).
+          const rated = device.kind === 'dc_motor' ? 6 : 3;
+          entry.speed01 = clamp01(Math.abs(volts) / rated);
+        }
         break;
       }
+      case 'bjt':
+        entry.amps = branchCurrents.get(device.id) ?? 0; // collector current
+        break;
+      case 'mosfet':
+        entry.amps = branchCurrents.get(device.id) ?? 0; // drain current
+        break;
+      case 'opamp':
+        entry.volts = voltageAt(device.out);
+        entry.amps = branchCurrents.get(device.id) ?? 0;
+        break;
+      case 'comparator':
+        entry.volts = voltageAt(device.out);
+        entry.low = device.state?.low ?? false;
+        break;
+      case 'timer_555':
+        entry.volts = voltageAt(device.out);
+        entry.outHigh = device.state?.q ?? false;
+        break;
+      case 'opto_out':
+        entry.on = device.state?.on ?? false;
+        break;
       case 'vsource': {
         const branchAmps = branchCurrents.get(device.id) ?? 0;
         entry.amps = -branchAmps; // positive = delivering current

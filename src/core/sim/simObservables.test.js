@@ -21,6 +21,21 @@ describe('ledBrightness', () => {
   });
 });
 
+describe('motor speed01 (via engine observables)', () => {
+  it('scales spin speed with drive voltage against the rated voltage', async () => {
+    const { createSimulation } = await import('./simEngine.js');
+    const engine = createSimulation({
+      title: 'motor', components: [
+        { ref: 'V1', kind: 'voltage_source', value: '3V', nodes: ['VCC', '0'] },
+        { ref: 'M1', kind: 'dc_motor', value: '10', nodes: ['VCC', '0'] },
+      ],
+    });
+    engine.solveDC();
+    // 3 V across a 6 V-rated motor → half speed.
+    expect(engine.observables().get('M1').speed01).toBeCloseTo(0.5, 3);
+  });
+});
+
 describe('formatSI', () => {
   it('formats with SI prefixes and sensible digits', () => {
     expect(formatSI(0.0025, 'A')).toBe('2.50mA');

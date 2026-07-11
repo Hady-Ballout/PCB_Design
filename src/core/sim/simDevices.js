@@ -91,3 +91,66 @@ export const limitDiode = (model, vnew, vold) => {
   }
   return limitJunction(vnew, vold, vte, vcrit);
 };
+
+// Ebers-Moll BJT (DC Gummel-Poon without Early effect — the toSpice models
+// carry VAF but omitting it costs little accuracy at breadboard scale and
+// keeps the Jacobian simpler). NPN voltage convention; PNP callers negate the
+// junction voltages in and the terminal currents out (device `polarity`).
+export const evalBjt = ({ is, bf, br }, vbe, vbc) => {
+  const expBe = Math.exp(Math.min(vbe / THERMAL_VOLTAGE, MAX_EXP_ARG));
+  const expBc = Math.exp(Math.min(vbc / THERMAL_VOLTAGE, MAX_EXP_ARG));
+  const forward = is * (expBe - 1);
+  const reverse = is * (expBc - 1);
+  const gmf = (is / THERMAL_VOLTAGE) * expBe + GMIN_DEVICE;
+  const gmr = (is / THERMAL_VOLTAGE) * expBc + GMIN_DEVICE;
+  return {
+    iF: forward,
+    iR: reverse,
+    ic: forward - reverse * (1 + 1 / br),
+    ib: forward / bf + reverse / br,
+    gmf,
+    gmr,
+    gpi: gmf / bf,
+    gmu: gmr / br,
+  };
+};
+
+// Level-1 MOSFET (Shichman-Hodges). Caller guarantees vds >= 0 (swap D/S for
+// the reverse region — the device is symmetric) and handles PMOS polarity.
+// lambda is a small deliberate channel-length modulation so the drain node's
+// Jacobian never goes singular in saturation (toSpice's models carry none).
+export const evalMosfet = ({ kp, vto, lambda }, vgs, vds) => {
+  const vov = vgs - vto;
+  if (vov <= 0) return { id: 0, gm: 0, gds: 0 };
+  const clm = 1 + lambda * vds;
+  if (vds < vov) {
+    const id = kp * (vov * vds - (vds * vds) / 2) * clm;
+    return {
+      id,
+      gm: kp * vds * clm,
+      gds: kp * (vov - vds) * clm + (lambda * id) / clm,
+    };
+  }
+  const idSat = (kp / 2) * vov * vov;
+  return {
+    id: idSat * clm,
+    gm: kp * vov * clm,
+    gds: lambda * idSat,
+  };
+};
+
+// Behavioral opamp output law: a VCVS with smooth tanh saturation between the
+// supply rails (LM358-ish headroom). vswing is floored so unpowered rails pin
+// the output near 0 V instead of dividing by zero.
+export const OPAMP_GAIN = 1e5;
+
+export const evalOpamp = (vd, vhi, vlo) => {
+  const vmid = (vhi + vlo) / 2;
+  const vswing = Math.max((vhi - vlo) / 2, 0.05);
+  const arg = (OPAMP_GAIN * vd) / vswing;
+  const t = Math.tanh(Math.max(-30, Math.min(30, arg)));
+  return {
+    e: vmid + vswing * t,
+    dEdVd: OPAMP_GAIN * (1 - t * t) + 1e-6, // floor keeps the branch row nonsingular deep in saturation
+  };
+};

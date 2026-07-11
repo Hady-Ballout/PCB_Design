@@ -319,19 +319,22 @@ function FuseBody({ part, points }) {
 
 // Pancake vibration motor: flat brushed-metal coin with the dark
 // eccentric-weight arc peeking under the top face.
-function VibrationMotorBody({ part, points }) {
+function VibrationMotorBody({ part, points, sim }) {
   const [a, b] = points;
   const dir = bodyDir(part.strip);
   const y = Math.min(a.y, b.y) + dir * 16;
   const mid = (a.x + b.x) / 2;
+  const shaking = (sim?.speed01 ?? 0) > 0.05;
   return (
     <g>
       <Lead from={a} to={{ x: mid - 8, y: y + 8 }} />
       <Lead from={b} to={{ x: mid + 8, y: y + 8 }} />
-      <circle cx={mid} cy={y} r={11} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.7" />
-      <path d={`M ${mid - 9.5} ${y + 3} A 10 10 0 0 0 ${mid + 6} ${y + 8.4}`} fill="none" stroke="#3a4147" strokeWidth="3" strokeLinecap="round" />
-      <circle cx={mid} cy={y} r={2.4} fill="#20262b" stroke="#000" strokeWidth="0.4" />
-      <ellipse cx={mid - 4} cy={y - 4.5} rx={4} ry={2.4} fill="rgba(255,255,255,0.55)" />
+      <g className={shaking ? 'rs-motor-shake' : undefined}>
+        <circle cx={mid} cy={y} r={11} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.7" />
+        <path d={`M ${mid - 9.5} ${y + 3} A 10 10 0 0 0 ${mid + 6} ${y + 8.4}`} fill="none" stroke="#3a4147" strokeWidth="3" strokeLinecap="round" />
+        <circle cx={mid} cy={y} r={2.4} fill="#20262b" stroke="#000" strokeWidth="0.4" />
+        <ellipse cx={mid - 4} cy={y - 4.5} rx={4} ry={2.4} fill="rgba(255,255,255,0.55)" />
+      </g>
       <RefLabel x={mid} y={y - 15} text={part.ref} />
     </g>
   );
@@ -1127,15 +1130,23 @@ function ServoBody({ part }) {
 
 // Brushed DC motor: silver can with a black end bell, two solder tabs, and the
 // gold shaft stub.
-function DcMotorBody({ part }) {
+function DcMotorBody({ part, sim }) {
   const slot = part.meta.slot;
   if (!slot) return null;
   const cx = slot.x + 88;
   const cy = slot.y + 74;
+  const speed = sim?.speed01 ?? 0;
+  const shaftX = cx - 45 - 12;
   return (
     <g>
-      {/* shaft */}
+      {/* shaft; in run mode a cross-mark spins at drive speed */}
       <rect x={cx - 45 - 15} y={cy - 2.5} width={16} height={5} rx={1.5} fill="url(#rsPartTab)" stroke="#7c848b" strokeWidth="0.4" />
+      {speed > 0.03 && (
+        <g className="rs-motor-spin" style={{ animationDuration: `${(1.4 - speed).toFixed(2)}s` }}>
+          <line x1={shaftX - 4} y1={cy} x2={shaftX + 4} y2={cy} stroke="#3a4147" strokeWidth="1.6" strokeLinecap="round" />
+          <line x1={shaftX} y1={cy - 4} x2={shaftX} y2={cy + 4} stroke="#3a4147" strokeWidth="1.6" strokeLinecap="round" />
+        </g>
+      )}
       {/* can */}
       <rect x={cx - 45} y={cy - 22} width={90} height={44} rx={21} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.6" />
       <line x1={cx - 38} y1={cy - 17} x2={cx + 30} y2={cy - 17} stroke="rgba(255,255,255,0.6)" strokeWidth="0.6" />
@@ -2015,7 +2026,7 @@ export function RealisticPart({ part, sim }) {
   if (part.body === 'arduino_uno') return <ArduinoUnoBody part={part} />;
   if (part.body === 'raspberry_pi') return <RaspberryPiBody part={part} />;
   if (part.body === 'servo') return <ServoBody part={part} />;
-  if (part.body === 'dc_motor') return <DcMotorBody part={part} />;
+  if (part.body === 'dc_motor') return <DcMotorBody part={part} sim={sim} />;
   if (part.body === 'relay_module') return <RelayModuleBody part={part} />;
   if (part.body === 'lcd_display') return <LcdDisplayBody part={part} />;
   if (part.body === 'motor_driver') return <MotorDriverBody part={part} />;

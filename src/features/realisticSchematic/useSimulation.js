@@ -5,6 +5,7 @@
 // transform in RealisticSchematic.jsx.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createSimulation } from '../../core/sim/simEngine.js';
+import { createSimAudio } from './simAudio.js';
 
 const FRAME_BUDGET_MS = 4;
 
@@ -13,8 +14,20 @@ export function useSimulation(circuit, running) {
   // Control values survive engine rebuilds (circuit edits while running): the
   // user's held button / thrown switch / wiper position carries over by ref.
   const controlMemoryRef = useRef(new Map());
+  const audioRef = useRef(null);
   const [simFrame, setSimFrame] = useState(null);
   const [controls, setControls] = useState([]);
+
+  // Audio lives for the whole Run session (keyed on `running` alone) so
+  // engine rebuilds from mid-run circuit edits don't click the tone off.
+  useEffect(() => {
+    if (!running) return undefined;
+    audioRef.current = createSimAudio();
+    return () => {
+      audioRef.current?.stop();
+      audioRef.current = null;
+    };
+  }, [running]);
 
   const snapshot = useCallback(() => {
     const engine = engineRef.current;
@@ -63,6 +76,10 @@ export function useSimulation(circuit, running) {
     }
     setControls(engine.controls);
 
+    const buzzerRefs = (circuit?.components ?? [])
+      .filter((component) => component.kind === 'buzzer')
+      .map((component) => component.ref);
+
     let raf = 0;
     let lastTick = 0;
     let frameParity = 0;
@@ -71,7 +88,11 @@ export function useSimulation(circuit, running) {
       lastTick = timestamp;
       engine.advance(wallDt, FRAME_BUDGET_MS);
       frameParity ^= 1;
-      if (frameParity === 0) setSimFrame(snapshot());
+      if (frameParity === 0) {
+        const frame = snapshot();
+        setSimFrame(frame);
+        audioRef.current?.update(frame.observables, buzzerRefs);
+      }
       raf = requestAnimationFrame(tick);
     };
     engine.advance(0.016, FRAME_BUDGET_MS); // initial solve so the first frame has data
