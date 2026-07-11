@@ -51,7 +51,7 @@
       <div id="schematic-root"></div>
     </section>
     <section>
-      <h2>KiCanvas schematic — ESP32 blink (module box + library symbols)</h2>
+      <h2>KiCanvas schematic — Arduino Uno blink (module box + library symbols)</h2>
       <div id="mcu-root"></div>
     </section>
     <section>
@@ -85,23 +85,25 @@
       notes: [],
     };
 
-    // ESP32 blink: exercises the synthesized MCU module box plus real
-    // Device:R / Device:LED / power:GND library symbols.
+    // Arduino Uno blink: exercises the synthesized MCU module box plus real
+    // Device:R / Device:LED / power:GND library symbols. Ground (pin 3) and
+    // D13 (pin 9) both sit on the module's left face, which escapes into the
+    // canvas margin — the router regression the layout engine now handles.
     const mcuCircuit = {
-      title: 'Harness: ESP32 LED Blink',
+      title: 'Harness: Arduino Uno LED Blink',
       type: 'mcu_blink',
-      supplyVoltage: 3.3,
+      supplyVoltage: 5,
       components: [
         {
           ref: 'U1',
-          kind: 'esp32',
+          kind: 'arduino_uno',
           value: '',
           nodes: [
-            'NC_U1_1', '0', 'NC_U1_3', 'NC_U1_4', 'GPIO2', 'NC_U1_6',
-            'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12',
+            'NC_U1_1', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6',
+            'NC_U1_7', 'NC_U1_8', 'D13', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12',
           ],
         },
-        { ref: 'RLED', kind: 'resistor', value: '330', nodes: ['GPIO2', 'LED_A'] },
+        { ref: 'RLED', kind: 'resistor', value: '330', nodes: ['D13', 'LED_A'] },
         { ref: 'D1', kind: 'led', value: 'red', nodes: ['LED_A', '0'] },
       ],
       notes: [],

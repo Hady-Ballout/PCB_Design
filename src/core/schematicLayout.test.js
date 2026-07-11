@@ -124,6 +124,22 @@ describe('schematic layout engine', () => {
     }
   });
 
+  it('routes an Arduino Uno LED blink whose ground pin escapes into the canvas margin', () => {
+    // U1 sits in the leftmost slot column, so its left-face pins (ground on
+    // pin 3, D13 on pin 9) escape to grid points inside the canvas margin.
+    // Regression: the router used to prune those points as out of bounds and
+    // fail all expansion attempts.
+    const blink = circuit('Arduino LED blink', [
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: ['NC_U1_1', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'D13', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'] },
+      { ref: 'RLED', kind: 'resistor', value: '330', nodes: ['D13', 'LED_A'] },
+      { ref: 'D1', kind: 'led', value: 'red', nodes: ['LED_A', '0'] },
+    ]);
+    const diagram = layoutCircuitDiagram(blink, { slots: true });
+
+    expect(validateDiagramLayout(diagram)).toEqual({ ok: true, violations: [] });
+    ['0', 'D13', 'LED_A'].forEach((node) => expectNodePhysicallyConnected(diagram, node));
+  });
+
   it('grows slot rows to hold more components than a single grid page', () => {
     const many = circuit('Many loads', [
       { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },

@@ -690,6 +690,14 @@ const routeSection = (start, end, diagram, wire, routedWires) => {
     .filter((item) => !wire.node || item.node !== wire.node)
     .flatMap((item) => pathSegments(item.points || [])
     .map((segment) => ({ ...segment, wireId: item.id })));
+  // A pin on the outer face of a part sitting at the canvas edge (e.g. a
+  // left-side MCU pin in the leftmost slot column) escapes to a grid point
+  // inside the canvas margin. Widen the routable band just enough to reach the
+  // two endpoints; all other exploration stays inside the margin.
+  const routeMinX = Math.min(CANVAS_MARGIN, startGrid.x, endGrid.x);
+  const routeMinY = Math.min(CANVAS_MARGIN, startGrid.y, endGrid.y);
+  const routeMaxX = Math.max(diagram.width - CANVAS_MARGIN, startGrid.x, endGrid.x);
+  const routeMaxY = Math.max(diagram.height - CANVAS_MARGIN, startGrid.y, endGrid.y);
   const open = [{ ...startGrid, direction: '', cost: 0, score: Math.abs(startGrid.x - endGrid.x) + Math.abs(startGrid.y - endGrid.y) }];
   const best = new Map();
   const states = new Map();
@@ -723,8 +731,8 @@ const routeSection = (start, end, diagram, wire, routedWires) => {
       { x: current.x, y: current.y - grid, direction: 'v' },
     ];
     for (const neighbor of neighbors) {
-      if (neighbor.x < CANVAS_MARGIN || neighbor.y < CANVAS_MARGIN
-        || neighbor.x > diagram.width - CANVAS_MARGIN || neighbor.y > diagram.height - CANVAS_MARGIN) continue;
+      if (neighbor.x < routeMinX || neighbor.y < routeMinY
+        || neighbor.x > routeMaxX || neighbor.y > routeMaxY) continue;
       const segment = { from: current, to: neighbor };
       if (hardBodies.some((rect) => segmentIntersectsRect(segment.from, segment.to, rect))) continue;
       if (obstacles.some((rect) => segmentIntersectsRect(segment.from, segment.to, rect))) continue;
