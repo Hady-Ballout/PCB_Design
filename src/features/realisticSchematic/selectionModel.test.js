@@ -83,8 +83,18 @@ describe('pinLabelsFor', () => {
     expect(pinLabelsFor({ kind: 'temp_sensor' })).toEqual(['VCC', 'OUT', 'GND']);
     expect(pinLabelsFor({ kind: 'regulator' })).toEqual(['IN', 'GND', 'OUT']);
     expect(pinLabelsFor({ kind: 'relay_module' })).toEqual(['VCC', 'GND', 'IN', 'COM', 'NO', 'NC']);
+    // …the tier-1 kinds ride the same fixedPins spread, no per-kind entries…
+    expect(pinLabelsFor({ kind: 'stepper_driver' })).toEqual(['IN1', 'IN2', 'IN3', 'IN4', 'VCC', 'GND', 'OUTA', 'OUTB', 'OUTC', 'OUTD']);
+    expect(pinLabelsFor({ kind: 'lcd_display' })).toEqual(['GND', 'VCC', 'SDA', 'SCL']);
+    expect(pinLabelsFor({ kind: 'rotary_encoder' })).toEqual(['CLK', 'DT', 'SW', 'VCC', 'GND']);
+    expect(pinLabelsFor({ kind: 'led_strip' })).toEqual(['VCC', 'DIN', 'GND']);
     // …the rest mirror the canonical orders in the SPICE exporter.
     expect(pinLabelsFor({ kind: 'zener' })).toEqual(['A', 'K']);
+    expect(pinLabelsFor({ kind: 'schottky' })).toEqual(['A', 'K']);
+    expect(pinLabelsFor({ kind: 'vibration_motor' })).toEqual(['+', '−']);
+    expect(pinLabelsFor({ kind: 'solar_panel' })).toEqual(['+', '−']);
+    expect(pinLabelsFor({ kind: 'bridge_rectifier' })).toEqual(['AC1', 'AC2', 'V+', 'V-']);
+    expect(pinLabelsFor({ kind: 'fuse', value: '1A' })).toBeNull();
     expect(pinLabelsFor({ kind: 'comparator' })).toEqual(['IN+', 'IN-', 'OUT', 'V+', 'V-']);
     expect(pinLabelsFor({ kind: 'potentiometer' })).toEqual(['A', 'W', 'B']);
     expect(pinLabelsFor({ kind: 'switch_spdt' })).toEqual(['A', 'COM', 'B']);
@@ -95,7 +105,7 @@ describe('pinLabelsFor', () => {
 
   it('labels microcontroller boards with their canonical header pins', () => {
     expect(pinLabelsFor({ kind: 'arduino_uno' })).toEqual(['5V', '3V3', 'GND', 'VIN', 'D0', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'D13', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5']);
-    expect(pinLabelsFor({ kind: 'raspberry_pi' })).toEqual(['5V', '3V3', 'GND', 'GPIO2', 'GPIO3', 'GPIO4', 'GPIO17', 'GPIO18', 'GPIO27', 'GPIO22']);
+    expect(pinLabelsFor({ kind: 'raspberry_pi' })).toEqual(['5V', '3V3', 'GND', 'GPIO2', 'GPIO3', 'GPIO4', 'GPIO17', 'GPIO18', 'GPIO27', 'GPIO22', 'GPIO8', 'GPIO9', 'GPIO10', 'GPIO11']);
     expect(pinLabelsFor({ kind: 'esp32' })).toEqual(['3V3', 'GND', 'VIN', 'EN', 'GPIO2', 'GPIO4', 'GPIO5', 'GPIO13', 'GPIO18', 'GPIO19', 'GPIO21', 'GPIO22']);
   });
 });

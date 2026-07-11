@@ -70,14 +70,15 @@ Component refs must be SPICE-compatible because the program will simulate them w
 - voltage_source and signal_source refs start with V, e.g. V1 or VSIG1
 - bjt refs start with Q, e.g. Q1
 - mosfet refs start with M, e.g. M1
-- opamp/subcircuit refs start with X, e.g. XU1
+- opamp/optocoupler/subcircuit refs start with X, e.g. XU1
 - opamp components must use value LM358 in JSON and LM358 as the SPICE subcircuit name; do not use GENERIC or OPAMP.
+- optocoupler components must use value PC817 in JSON and PC817 as the SPICE subcircuit name, with nodes in the fixed order [A, K, E, C] and one SPICE line "X<REF> A K E C PC817".
 - load refs should be modeled as resistors and start with R, e.g. RLOAD
 - regulator refs may use U in the JSON, but include enough surrounding passives/load nodes for simulation.
 - microcontroller board refs (arduino_uno, raspberry_pi, esp32) start with U, e.g. U1.
 Microcontroller boards use fixed positional pin lists. The nodes array must have exactly this length and order, with "NC_<REF>_<pinNumber>" for every unused pin:
 - arduino_uno (24 nodes): 5V, 3V3, GND, VIN, D0, D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11, D12, D13, A0, A1, A2, A3, A4, A5
-- raspberry_pi (10 nodes): 5V, 3V3, GND, GPIO2, GPIO3, GPIO4, GPIO17, GPIO18, GPIO27, GPIO22
+- raspberry_pi (14 nodes): 5V, 3V3, GND, GPIO2, GPIO3, GPIO4, GPIO17, GPIO18, GPIO27, GPIO22, GPIO8, GPIO9, GPIO10, GPIO11 (GPIO8-11 are SPI0: CE0, MISO, MOSI, SCLK)
 - esp32 (12 nodes): 3V3, GND, VIN, EN, GPIO2, GPIO4, GPIO5, GPIO13, GPIO18, GPIO19, GPIO21, GPIO22
 Use value for the board name, e.g. "Uno R3", "Pi 5", or "DevKit V1".
 Microcontroller boards are not simulated: never write a SPICE line for them; every other component must still appear in SPICE.
@@ -90,18 +91,30 @@ Compound parts take a fixed node count (${COMPOUND_NODE_HINTS}; seven_segment us
 - switch_spdt nodes [THROW1, COM, THROW2]: "<REF>_A COM THROW1 1m" plus "<REF>_B COM THROW2 10Meg".
 - rgb_led nodes [R_ANODE, G_ANODE, B_ANODE, CATHODE]: "<REF>_R R_ANODE CATHODE DRED", "<REF>_G G_ANODE CATHODE DGRN", "<REF>_B B_ANODE CATHODE DBLU". An rgb_led is never one two-node diode line.
 - seven_segment: one diode per used segment to COM, e.g. "<REF>_A <A node> <COM node> DRED".
-The remaining two-lead additions (zener as D with a breakdown value like 5.1, photoresistor/thermistor/buzzer/dc_motor/pushbutton as R, crystal as C) follow the standard ref-prefix rules above.
+- current_sensor nodes [IP+, IP-, VCC, OUT, GND]: wire IP+ and IP- in series with the load's supply path (the measured current flows through them); VCC -> 5V, OUT -> an analog pin, GND -> 0. In SPICE write only one derived line "<REF>_S <IP+ node> <IP- node> 0.0012"; never a bare <REF> line and never lines for VCC/OUT/GND.
+- bridge_rectifier (4 nodes) [AC1, AC2, V+, V-]: four derived diode lines "<REF>_A AC1 V+ DGEN", "<REF>_B AC2 V+ DGEN", "<REF>_C V- AC1 DGEN", "<REF>_D V- AC2 DGEN" using the exact JSON node names; drive AC1/AC2 from a signal_source SINE and take DC off V+/V- (add a smoothing capacitor). Never one bare <REF> line.
+The remaining two-lead additions (zener as D with a breakdown value like 5.1, schottky as D with the DSCH model, photoresistor/thermistor/buzzer/dc_motor/vibration_motor/fuse/pushbutton as R, crystal as C) follow the standard ref-prefix rules above.
+solar_panel is a DC source: refs start with V, SPICE is "V<REF> PLUS MINUS DC <volts>", and its positive node feeds the circuit like a battery.
 A GPIO/digital pin driving a load must share its net with at least one other component, e.g. a series resistor. Only add a separate voltage_source or signal_source for a pin's waveform when the user explicitly wants to simulate that pin's behavior.
-Never drive a buzzer, motor, relay coil, or speaker directly from a GPIO pin — always switch it with an NPN transistor or N-MOSFET: GPIO pin -> 1k base resistor -> base, emitter -> 0, load between the supply and the collector, plus a flyback diode across any motor or coil.
+Never drive a buzzer, motor, relay coil, or speaker directly from a GPIO pin — always switch it with an NPN transistor or N-MOSFET: GPIO pin -> 1k base resistor -> base, emitter -> 0, load between the supply and the collector, plus a flyback diode across any motor or coil (including vibration motors).
+hall_sensor: VCC -> 5V, GND -> 0, OUT -> a GPIO with a 10k pull-up resistor to VCC (the A3144 output is open-collector).
 Never build a resistor divider to "power" a load from a GPIO net: a resistor from a GPIO-driven load node to ground does not switch anything and just wastes current.
+A stepper_motor's coil pins A-D must never connect to GPIO nets; always add a stepper_driver: MCU GPIOs -> IN1-IN4, VCC -> 5V, GND -> 0, OUTA-OUTD -> the motor's A-D coil pins, and the motor's COM -> 5V.
+Drive a dc_motor from an MCU through a motor_driver (L298N): GPIOs -> IN1/IN2 (and ENA for speed control), the motor between OUT1 and OUT2, VS -> the motor supply, GND -> 0. A motor on driver OUT pins needs no extra transistor or flyback diode.
+led_strip: VCC -> the 5V supply net (never a GPIO pin), GND -> 0, DIN -> one GPIO pin.
+optocoupler: drive the input LED from a GPIO through a 220-1k series resistor into A, K -> 0; the output E/C switches the isolated side and must never share a net with A or K.
+SPI modules (sd_card, rfid_reader): on arduino_uno use D13=SCK, D12=MISO, D11=MOSI and any free digital pin for CS (rfid_reader's SDA pin is its SS); on esp32 use GPIO18=SCK, GPIO19=MISO and free listed GPIOs for MOSI/CS; on raspberry_pi use GPIO11=SCLK, GPIO9=MISO, GPIO10=MOSI, GPIO8=CE0. rfid_reader's 3V3 pin must connect to the 3.3V supply, never 5V.
+keypad: R1-R4 and C1-C4 each connect to their own GPIO pin; no other components are needed.
+raspberry_pi has no analog inputs: any analog-output sensor (joystick VRX/VRY, soil_moisture AOUT, gas_sensor AO, current_sensor OUT, photoresistor/thermistor dividers) on a raspberry_pi must go through an adc_module (MCP3008): VDD and VREF -> 3V3, AGND and DGND -> 0, CLK -> GPIO11, DOUT -> GPIO9, DIN -> GPIO10, CS -> GPIO8, sensor outputs into CH0-CH7.
 When circuit.components includes a microcontroller board (arduino_uno, raspberry_pi, or esp32), also return a top-level "code" field with complete ready-to-run firmware for that board:
 - arduino_uno: an Arduino C++ sketch with setup() and loop(). Use the digit from the pin name: D13 is pin 13, A0 is A0.
 - esp32: an Arduino-style C++ sketch with setup() and loop(). Use the GPIO number: GPIO2 is pin 2.
 - raspberry_pi: a Python 3 script using the gpiozero library. Use the GPIO number: GPIO17 is LED(17) or Button(17).
+Per-part firmware libraries (Arduino sketches / raspberry_pi Python): servo -> Servo.h / gpiozero Servo; dht_sensor -> the DHT sensor library / Adafruit_DHT; stepper_motor via stepper_driver -> Stepper.h with Stepper(2048, IN1, IN3, IN2, IN4) (note the IN1-IN3-IN2-IN4 order) / four gpiozero OutputDevice half-step outputs; motor_driver -> plain digitalWrite on IN1/IN2 plus analogWrite on ENA / gpiozero Motor(forward, backward, enable); lcd_display -> Wire.h + LiquidCrystal_I2C at address 0x27 (lcd.init(), lcd.backlight(), lcd.print()) / RPLCD CharLCD(i2c_expander='PCF8574', address=0x27); rotary_encoder -> digitalRead on CLK/DT with INPUT_PULLUP on SW / gpiozero RotaryEncoder plus Button; led_strip -> Adafruit_NeoPixel(N, PIN, NEO_GRB + NEO_KHZ800) / the rpi_ws281x library (prefer GPIO18); imu_sensor -> Wire.h + Adafruit_MPU6050 at address 0x68 / smbus2 reads at 0x68; ir_receiver -> IRremote (IrReceiver.begin, decode) / a simple pulse read; shift_register -> the built-in shiftOut(SER, SRCLK, MSBFIRST, value) then pulse RCLK / gpiozero bit-banging; keypad -> the Keypad.h library with the 4x4 keymap / a gpiozero row-column scan; joystick -> analogRead on VRX/VRY with INPUT_PULLUP on SW / adc_module channels; rtc_module -> RTClib (RTC_DS3231) / smbus2 at 0x68; sd_card -> SD.h with SD.begin(CS) / the Pi mounts storage natively; rfid_reader -> MFRC522 with SPI.h / the mfrc522 python package; soil_moisture and gas_sensor -> analogRead plus a threshold compare / adc_module channel reads; baro_sensor -> Adafruit_BMP280 at 0x76 / the bmp280 python library; adc_module -> SPI.h transfers on Arduino (the part IS the ADC) / gpiozero MCP3008(channel=N) on the Pi; current_sensor -> analogRead with midpoint math ((reading - 512) * 5.0 / 1024 / 0.185 amps); optocoupler -> plain digitalWrite on the input-side GPIO; sound_sensor -> analogRead on AO plus a digitalRead threshold on DO / adc_module channel; hall_sensor -> digitalRead with INPUT_PULLUP (open-collector output) / gpiozero Button.
 The firmware must implement the exact behavior the user asked for (blink, button, fade, sensor read) and must only use pins that circuit.components actually wires to other components. Keep it under 40 lines, beginner-friendly, with brief comments. The "code" value is plain source text in one JSON string with \\n newlines: no Markdown, no \`\`\` fences, no explanation. When the circuit has no microcontroller board, set "code" to an empty string.
 Use simple Ngspice-friendly values such as 1k, 100nF, 10uF, 5V, and SINE(0 1 1k).
-Use voltage_source for DC supplies and fixed DC input biases. Use signal_source only for waveform or time-varying sources such as SINE(...), PULSE(...), PWL(...), EXP(...), or AC.
-If SPICE uses "V... ... DC value", the matching JSON component kind must be voltage_source. If SPICE uses a waveform source, the matching JSON component kind must be signal_source.
+Use voltage_source for DC supplies and fixed DC input biases (or solar_panel when the user asks for solar power). Use signal_source only for waveform or time-varying sources such as SINE(...), PULSE(...), PWL(...), EXP(...), or AC.
+If SPICE uses "V... ... DC value", the matching JSON component kind must be voltage_source or solar_panel. If SPICE uses a waveform source, the matching JSON component kind must be signal_source.
 The SPICE netlist must use the exact same component refs, values, and node names as circuit.components.
 Every node except ground "0" must connect to at least two component pins and have a DC path to ground; never leave a node floating.
 Both op-amp inputs must be connected: wire the inverting input to the feedback/summing network, and the non-inverting input to a reference node — ground "0" for a dual-supply design, or a mid-rail bias-divider node for a single-supply design. Never put an op-amp input on a node that no other component uses.
@@ -342,6 +355,17 @@ const normalizeOpampModel = (value: unknown): string => {
   return OPAMP_MODEL_ALIASES.has(normalized) || normalized === OPAMP_MODEL ? OPAMP_MODEL : normalized;
 };
 
+// The optocoupler's SPICE image is an X line whose model name lands in the
+// electrical signature, so the JSON value must normalize to PC817 exactly
+// like the opamp's LM358 — otherwise "value: optocoupler" burns a retry.
+const OPTO_MODEL = 'PC817';
+const OPTO_MODEL_ALIASES = new Set(['', 'GENERIC', 'OPTO', 'OPTOCOUPLER', 'UNKNOWN']);
+
+const normalizeOptoModel = (value: unknown): string => {
+  const normalized = String(value || '').trim().toUpperCase();
+  return OPTO_MODEL_ALIASES.has(normalized) || normalized === OPTO_MODEL ? OPTO_MODEL : normalized;
+};
+
 const isSourceKind = (kind: string): boolean => kind === 'voltage_source' || kind === 'signal_source';
 
 const voltageValue = (value: string): string => {
@@ -378,17 +402,17 @@ export const normalizeCircuitForValidation = (circuit: Record<string, unknown>):
   ...circuit,
   components: ((circuit.components as SourceComponent[]) || []).map((component) => {
     const normalizedSource = normalizeSourceComponent(component);
-    return normalizedSource.kind === 'opamp'
-      ? { ...normalizedSource, value: OPAMP_MODEL }
-      : normalizedSource;
+    if (normalizedSource.kind === 'opamp') return { ...normalizedSource, value: OPAMP_MODEL };
+    if (normalizedSource.kind === 'optocoupler') return { ...normalizedSource, value: OPTO_MODEL };
+    return normalizedSource;
   }),
 });
 
-const normalizeSignatureValue = (component: { kind: string; value: string }): string => (
-  component.kind === 'opamp'
-    ? normalizeOpampModel(component.value)
-    : String(component.value || '').trim().toUpperCase()
-);
+const normalizeSignatureValue = (component: { kind: string; value: string }): string => {
+  if (component.kind === 'opamp') return normalizeOpampModel(component.value);
+  if (component.kind === 'optocoupler') return normalizeOptoModel(component.value);
+  return String(component.value || '').trim().toUpperCase();
+};
 
 interface SignatureEntry {
   ref: string;
@@ -414,6 +438,8 @@ const COMPOUND_DERIVED_SUFFIXES: Record<string, string[]> = {
   switch_spdt: ['A', 'B'],
   rgb_led: ['R', 'G', 'B'],
   seven_segment: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'DP'],
+  current_sensor: ['S'],
+  bridge_rectifier: ['A', 'B', 'C', 'D'],
 };
 
 const compoundSpiceHint = (component: SignatureEntry | undefined): string | null => {

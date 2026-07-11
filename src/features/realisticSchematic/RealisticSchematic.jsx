@@ -33,9 +33,10 @@ const DEFAULT_VALUE_BY_KIND = {
   resistor: '1k', load: '1k', photoresistor: '10k', thermistor: '10k', potentiometer: '10k',
   capacitor: '100nF', inductor: '10mH', crystal: '16MHz',
   diode: '1N4148', zener: '5.1V', led: 'red',
+  schottky: '1N5819', fuse: '1A', bridge_rectifier: 'DB107', vibration_motor: '3V',
   bjt_npn: '2N2222', bjt_pnp: '2N2907',
   opamp: 'LM358', comparator: 'LM358',
-  voltage_source: '5V', signal_source: 'SINE(0 1 1k)', regulator: '5V',
+  voltage_source: '5V', signal_source: 'SINE(0 1 1k)', regulator: '5V', solar_panel: '6V',
   arduino_uno: 'Uno R3', raspberry_pi: 'Pi 5', esp32: 'DevKit V1',
 };
 

@@ -53,23 +53,56 @@ code can go stale until the next AI generation (known limitation). The
 Allowed `kind` values are the single source of truth in `src/core/componentKinds.js`
 (`ALLOWED_KINDS`). The AI schema `enum` and the "Allowed component kinds" / fixed-pin
 guidance in the system prompt (`server/ai/ollamaProvider.ts`) are **generated from it**, so
-adding a kind to the registry automatically offers it to the model. The current 37 kinds:
+adding a kind to the registry automatically offers it to the model. The current 64 kinds:
 
 - **Core (14):** `resistor`, `capacitor`, `inductor`, `diode`, `led`, `bjt_npn`, `bjt_pnp`,
   `mosfet_n`, `mosfet_p`, `opamp`, `regulator`, `voltage_source`, `signal_source`, `load`.
-- **Extended (20):** `zener`, `photoresistor`, `thermistor`, `buzzer`, `crystal`,
+- **Extended (47):** `zener`, `photoresistor`, `thermistor`, `buzzer`, `crystal`,
   `temp_sensor`, `comparator`, `pushbutton`, `potentiometer`, `switch_spdt`, `rgb_led`,
   `seven_segment`, `timer_555`, `ultrasonic_sensor`, `dht_sensor`, `oled_display`,
-  `pir_sensor`, `servo`, `dc_motor`, `relay_module`.
+  `pir_sensor`, `servo`, `dc_motor`, `relay_module`, `stepper_motor`, `stepper_driver`,
+  `motor_driver`, `lcd_display`, `rotary_encoder`, `led_strip`, `imu_sensor`,
+  `ir_receiver`, `shift_register`, `optocoupler`, `current_sensor`, `keypad`, `joystick`,
+  `rtc_module`, `sd_card`, `rfid_reader`, `soil_moisture`, `gas_sensor`, `baro_sensor`,
+  `adc_module`, `schottky`, `bridge_rectifier`, `fuse`, `vibration_motor`,
+  `sound_sensor`, `hall_sensor`, `solar_panel`. Several of these are simulated rather
+  than wiring-only: `optocoupler` emits one X line against the built-in `PC817`
+  subcircuit, `current_sensor` a single derived `<REF>_S` milliohm shunt line,
+  `bridge_rectifier` four derived `<REF>_A..D` diode lines (compound pattern),
+  `schottky` a D line with the `DSCH` model, `fuse`/`vibration_motor` resistive R lines,
+  and `solar_panel` a plain `V... DC` line (full source treatment — see below).
 - **Microcontroller boards (3):** `arduino_uno`, `raspberry_pi`, `esp32`.
 
 Microcontroller boards (`arduino_uno`, `raspberry_pi`, `esp32`) use fixed positional pin
-lists (24/10/12 pins — see `MCU_PINS` in
+lists (24/14/12 pins — see `MCU_PINS` in
 `src/features/realisticSchematic/breadboardModel.js` and `MCU_PIN_COUNTS` in
 `src/core/componentKinds.js`); unused pins carry `NC_<REF>_<pinNumber>` placeholder nets.
 Sensor/module parts (`temp_sensor`, `ultrasonic_sensor`, `dht_sensor`, `oled_display`,
-`pir_sensor`, `servo`, `relay_module`) are likewise **wiring-only** and use fixed pin lists
-(`FIXED_PIN_NAMES` in `src/core/componentKinds.js`), exported to SPICE only as a comment.
+`pir_sensor`, `servo`, `relay_module`, the tier-1 additions `stepper_motor`,
+`stepper_driver`, `motor_driver`, `lcd_display`, `rotary_encoder`, `led_strip`,
+`imu_sensor`, `ir_receiver`, `shift_register`, plus the tier-2 additions `keypad`,
+`joystick`, `rtc_module`, `sd_card`, `rfid_reader`, `soil_moisture`, `gas_sensor`,
+`baro_sensor`, `adc_module`, plus the tier-3 `sound_sensor` and `hall_sensor`) are
+likewise **wiring-only** and use fixed pin lists (`FIXED_PIN_NAMES` in
+`src/core/componentKinds.js`), exported to SPICE only as a comment.
+
+`solar_panel` gets the full **source treatment**: it joins `isSourceKind` (net ordering,
+canvas orientation), populates `supplyNets` in the topology graph, and renders off-board
+as a photovoltaic pack feeding a power rail via the same `batteries` path as
+`voltage_source` (the battery entry carries `kind` so `BatteryPack` dispatches to
+`SolarPanelPack`). The SPICE parser's V-line branch preserves richer 2-lead source kinds
+on reparse (`keepsSourceKind` in `circuitSync.js`) so a solar panel survives round-trips
+instead of degrading to `voltage_source`; the D-line branch likewise recognizes `DSCH`
+for schottky.
+
+The Raspberry Pi's pin list was extended from 10 to 14 pins (GPIO8-11, its SPI0
+CE0/MISO/MOSI/SCLK) — MCU pins are only ever **appended** so saved circuits stay
+index-compatible. `padMcuNodes(circuit)` in `componentKinds.js` migrates older circuits
+by padding short MCU nodes arrays with `NC_<ref>_<n>` placeholders; it runs in
+`chatStore.js`'s `normalizeChat`/`normalizeMessage` on load (which also re-serializes
+`editableCircuitJson` — otherwise App's JSON-sync effect would revert the migration —
+and resets the affected chat's diagram `layoutVersion` for re-layout) and in
+`circuitSync.js`'s `parseCircuitJson` for pasted JSON.
 They use `U` refs, are **wiring-only** — exported to SPICE as a comment (`* U1
 arduino_uno ...`), never as an element line — and `parseSpiceNetlist` carries them over
 from the base circuit during SPICE sync so editing the deck does not drop them.
@@ -80,12 +113,19 @@ On the realistic-schematic breadboard, per-kind placement is table-driven
 and `timer_555` (canonical pins = NE555 DIP 1-8) straddle the trench as DIP-8s like the
 opamp, `pushbutton` straddles with both pins on the bottom strip (top legs decorative),
 `seven_segment` straddles as a 5161AS DIP-10 (second COM leg decorative),
-`temp_sensor` gets a TO-92 can, and `servo`/`dc_motor`/`relay_module` sit in compact
-off-board slots below the board (variable-height slot stack shared with the MCU boards;
-MCU boards always claim the first slots). Kind-specific artwork dispatches via
+`shift_register` and `adc_module` straddle as DIP-16s and `optocoupler` as a DIP-4
+(canonical pins = DIP order, identity leg layouts), `temp_sensor` and `ir_receiver` get
+TO-92 cans, `rotary_encoder`/`imu_sensor`/`rtc_module`/`sd_card`/`soil_moisture`/
+`gas_sensor`/`baro_sensor` stay inline as breadboard-pluggable modules, and
+`servo`/`dc_motor`/`relay_module`/`lcd_display`/`motor_driver`/`stepper_motor`/
+`stepper_driver`/`led_strip`/`keypad`/`joystick`/`rfid_reader`/`current_sensor` sit in
+compact off-board slots below the board (variable-height slot stack shared with the MCU
+boards; MCU boards always claim the first slots). Kind-specific artwork dispatches via
 `KIND_RENDERERS` in `parts.jsx` (zener/photoresistor/thermistor/buzzer/crystal/
-potentiometer/switch_spdt/rgb_led/ultrasonic_sensor/dht_sensor/oled_display/pir_sensor)
-plus dedicated straddle and slot bodies;
+potentiometer/switch_spdt/rgb_led/ultrasonic_sensor/dht_sensor/oled_display/pir_sensor/
+rotary_encoder/imu_sensor) plus dedicated straddle and slot bodies (custom LCD/L298N/
+28BYJ-48/keypad/joystick artwork; `OffboardModuleBody` is the generic slot PCB for the
+rest);
 selection pin labels come from the registry's `FIXED_PIN_NAMES` plus manual canonical
 orders in `selectionModel.js`.
 
@@ -124,7 +164,9 @@ non-`D` ref still exports as `D_<ref>`).
    net-continuity checks cannot see: GPIO driving a heavy load with no transistor stage,
    the divider-powered-load pattern, LEDs without series resistors, reversed polarity,
    floating bases/gates, missing flyback diodes, missing pull-ups, GPIO current budgets,
-   floating op-amp inputs. Error-severity violations become a corrective message
+   floating op-amp inputs, stepper coils without a ULN2003 driver
+   (`stepper_missing_driver`), and WS2812 strips powered from a GPIO
+   (`led_strip_power_from_gpio`). Error-severity violations become a corrective message
    (`composeTopologyCorrection`) fed back to the model.
 5. Up to `MAX_GENERATION_ATTEMPTS` (3) attempts run in `parseWithCorrectionRetry`:
    structural failures (bad JSON/schema/SPICE) retry with the parser error; topology
@@ -166,6 +208,25 @@ transistor anywhere. Every net checks out; the GPIO cannot switch the load.
   `divider_powered_load`) silences the generic one (`gpio_direct_load`) for the same refs.
 - Rules are deliberately conservative (skip ambiguous topologies): a false positive burns
   a retry and erodes trust. The test suite pins a zero-error known-good corpus.
+- Driver-module breakouts (`motor_driver` OUT1-OUT4, `stepper_driver` OUTA-OUTD; the
+  `DRIVER_MODULE_OUTPUT_PINS` table) count as switching elements in `hasDriverOutputOn`,
+  so a load on their outputs never trips `gpio_direct_load`; `missing_flyback_diode`
+  additionally skips motors on driver-module outputs (the boards integrate protection
+  diodes, and an H-bridge output pair can't take a simple parallel diode).
+- Tier-3 conduction/rule notes: `schottky` joined `DIODE_KINDS` (crossDiodes conduction,
+  valid flyback part, included in `led_polarity` — zener stays excluded);
+  `vibration_motor` joined `HEAVY_LOAD_KINDS` and the new `MOTOR_KINDS` set gates
+  `missing_flyback_diode` (deliberately narrower than HEAVY_LOAD_KINDS so buzzers never
+  demand a flyback diode); `fuse` conducts unconditionally in `crossings()` (even under
+  `crossResistors: false`) so it never masks a missing series resistor;
+  `bridge_rectifier` conducts across all pins under `crossDiodes` like `rgb_led`.
+- The optocoupler's output pins live in a separate `ISOLATOR_OUTPUT_PINS` table:
+  `hasDriverOutputOn` consults it (suppressing `gpio_direct_load` on the isolated side)
+  but the flyback skip does **not** — a motor on a bare opto output still gets flagged.
+  In `crossings()` the opto conducts A↔K like a diode and E↔C like a driver channel,
+  never across the isolation barrier, and `led_no_series_resistor` covers its input LED;
+  the `current_sensor` conducts only IP+↔IP- (its shunt path), so series-loop rules see
+  through it.
 - `applySafeAutoFixes(circuit, violations)` applies additive-only repairs (100k gate
   pull-down, 1N4007 flyback diode) in the degraded path and marks them `autoFixed`;
   anything that would rearrange existing parts stays a surfaced violation.

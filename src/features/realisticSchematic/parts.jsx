@@ -287,6 +287,73 @@ function DiodeBody({ part, points, bodyFill = 'url(#rsPartDiode)', bodyStroke = 
 // tint of a real BZX-style body. Breakdown voltage rides in `part.value`.
 const ZenerBody = (props) => <DiodeBody {...props} bodyFill="url(#rsPartZener)" bodyStroke="#122036" />;
 
+// Schottky: same axial package with the bronze tint of a 1N58xx body.
+const SchottkyBody = (props) => <DiodeBody {...props} bodyFill="url(#rsPartSchottky)" bodyStroke="#2a2018" />;
+
+// Glass cartridge fuse: translucent tube, brushed-metal end caps, and the
+// thin element wire visible through the glass.
+function FuseBody({ part, points }) {
+  const [a, b] = points;
+  const dir = bodyDir(part.strip);
+  const y = Math.min(a.y, b.y) + dir * 13;
+  const mid = (a.x + b.x) / 2;
+  const length = 28;
+  return (
+    <g>
+      <Lead from={a} to={{ x: mid - length / 2 + 2, y }} />
+      <Lead from={b} to={{ x: mid + length / 2 - 2, y }} />
+      <rect x={mid - length / 2} y={y - 5} width={length} height={10} rx={4.5} fill="rgba(210,220,230,0.5)" stroke="#8a929a" strokeWidth="0.5" />
+      <line x1={mid - length / 2 + 6} y1={y} x2={mid + length / 2 - 6} y2={y} stroke="#5a636b" strokeWidth="0.9" />
+      <rect x={mid - length / 2} y={y - 5} width={6} height={10} rx={2} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.5" />
+      <rect x={mid + length / 2 - 6} y={y - 5} width={6} height={10} rx={2} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.5" />
+      <ellipse cx={mid - 3} cy={y - 2.6} rx={5} ry={1.4} fill="rgba(255,255,255,0.5)" />
+      <RefLabel x={mid} y={y + dir * 12} text={`${part.ref}${part.value ? ` · ${part.value}` : ''}`} />
+    </g>
+  );
+}
+
+// Pancake vibration motor: flat brushed-metal coin with the dark
+// eccentric-weight arc peeking under the top face.
+function VibrationMotorBody({ part, points }) {
+  const [a, b] = points;
+  const dir = bodyDir(part.strip);
+  const y = Math.min(a.y, b.y) + dir * 16;
+  const mid = (a.x + b.x) / 2;
+  return (
+    <g>
+      <Lead from={a} to={{ x: mid - 8, y: y + 8 }} />
+      <Lead from={b} to={{ x: mid + 8, y: y + 8 }} />
+      <circle cx={mid} cy={y} r={11} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.7" />
+      <path d={`M ${mid - 9.5} ${y + 3} A 10 10 0 0 0 ${mid + 6} ${y + 8.4}`} fill="none" stroke="#3a4147" strokeWidth="3" strokeLinecap="round" />
+      <circle cx={mid} cy={y} r={2.4} fill="#20262b" stroke="#000" strokeWidth="0.4" />
+      <ellipse cx={mid - 4} cy={y - 4.5} rx={4} ry={2.4} fill="rgba(255,255,255,0.55)" />
+      <RefLabel x={mid} y={y - 15} text={part.ref} />
+    </g>
+  );
+}
+
+// Bridge rectifier: square black module with the ~ ~ + − corner markings of a
+// DB107-style package. Canonical pins [AC1, AC2, V+, V-].
+function BridgeRectifierBody({ part, points }) {
+  const { mid, cy, edgeY } = moduleFrame(part, points);
+  const marks = ['~', '~', '+', '−'];
+  return (
+    <g>
+      <rect x={mid - 16} y={cy - 15} width={32} height={30} rx={2.5} fill="url(#rsPartDiode)" stroke="#000" strokeWidth="0.6" />
+      <rect x={mid - 14.4} y={cy - 13.4} width={28.8} height={26.8} rx={2} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="0.5" />
+      <circle cx={mid} cy={cy - 1} r={3.2} fill="none" stroke="#3a4147" strokeWidth="0.8" />
+      {points.map((point, index) => (
+        <text key={index} x={point.x} y={cy + 11.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 5.4, fontWeight: 700, fill: '#e8ecef' }}>
+          {marks[index] ?? ''}
+        </text>
+      ))}
+      <Silk x={mid} y={cy - 8} text={part.value || 'DB107'} size={3.8} fill="#c6ccd2" />
+      <ModulePins points={points} edgeY={edgeY} />
+      <RefLabel x={mid} y={cy - 19} text={part.ref} />
+    </g>
+  );
+}
+
 // Photoresistor (LDR): pale ceramic disc with the characteristic dark-red
 // serpentine track combed across the face. Nonpolar.
 function LdrBody({ part, points }) {
@@ -573,6 +640,51 @@ function PirBody({ part, points }) {
   );
 }
 
+// KY-040 rotary encoder breakout: dark PCB with the knurled metal shaft and
+// the D-slot knob face.
+function RotaryEncoderBody({ part, points }) {
+  const { mid, cy, edgeY } = moduleFrame(part, points);
+  return (
+    <g>
+      <rect x={mid - 20} y={cy - 15} width={40} height={30} rx={2} fill="url(#rsPartDip)" stroke="#000" strokeWidth="0.6" />
+      <circle cx={mid} cy={cy - 1} r={11} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.6" />
+      {Array.from({ length: 12 }, (_, index) => {
+        const angle = (index / 12) * Math.PI * 2;
+        return (
+          <line
+            key={index}
+            x1={mid + Math.cos(angle) * 9.2} y1={cy - 1 + Math.sin(angle) * 9.2}
+            x2={mid + Math.cos(angle) * 11} y2={cy - 1 + Math.sin(angle) * 11}
+            stroke="#6b737b" strokeWidth="0.8"
+          />
+        );
+      })}
+      <circle cx={mid} cy={cy - 1} r={5.4} fill="#20262b" stroke="#000" strokeWidth="0.4" />
+      <line x1={mid - 3.4} y1={cy + 1.8} x2={mid + 3.4} y2={cy + 1.8} stroke="#4d565e" strokeWidth="1.1" />
+      <Silk x={mid} y={cy + 13.5} text={[part.ref, part.value || 'KY-040'].filter(Boolean).join(' · ')} size={3.6} fill="#c8d2da" />
+      <ModulePins points={points} edgeY={edgeY} />
+    </g>
+  );
+}
+
+// GY-521 IMU breakout: purple PCB carrying the black MPU-6050 die.
+function ImuBody({ part, points }) {
+  const { mid, cy, edgeY, span } = moduleFrame(part, points);
+  const width = span + 22;
+  return (
+    <g>
+      <rect x={mid - width / 2} y={cy - 15} width={width} height={30} rx={2} fill="#4a2f7d" stroke="#2c1a4e" strokeWidth="0.6" />
+      <rect x={mid - width / 2 + 1.6} y={cy - 13.4} width={width - 3.2} height={26.8} rx={1.6} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="0.5" />
+      <MountHole cx={mid - width / 2 + 5} cy={cy + 9} r={2.4} />
+      <MountHole cx={mid + width / 2 - 5} cy={cy + 9} r={2.4} />
+      <rect x={mid - 7} y={cy - 9} width={14} height={14} rx={1} fill="url(#rsPartDip)" stroke="#000" strokeWidth="0.5" />
+      <circle cx={mid - 4.6} cy={cy - 6.6} r={0.9} fill="#3a4147" />
+      <Silk x={mid} y={cy + 12.8} text={[part.ref, part.value || 'MPU-6050'].filter(Boolean).join(' · ')} size={3.6} fill="#d9d2ec" />
+      <ModulePins points={points} edgeY={edgeY} />
+    </g>
+  );
+}
+
 // Fallback labeled module for loads, signal sources, and unknown kinds.
 function ModuleBody({ part, points }) {
   const dir = bodyDir(part.strip);
@@ -636,7 +748,7 @@ function To220Body({ part, points }) {
 }
 
 // Part-number silk when a DIP part carries no explicit value.
-const DIP_DEFAULT_SILK = { comparator: 'LM393', timer_555: 'NE555' };
+const DIP_DEFAULT_SILK = { comparator: 'LM393', timer_555: 'NE555', shift_register: '74HC595', optocoupler: 'PC817', adc_module: 'MCP3008' };
 
 function DipBody({ part }) {
   const left = holeCenter({ strip: 'top', column: part.meta.columnStart, row: 4 });
@@ -837,6 +949,12 @@ const PERIPHERAL_PAD_LAYOUTS = {
   relay_module: (slot, i) => (i < 3
     ? { x: slot.x + 26 + i * 12, y: slot.y + 40 } // VCC/GND/IN input header on the PCB edge
     : { x: slot.x + 162, y: slot.y + 58 + (i - 3) * 15 }), // COM/NO/NC screw terminals
+  motor_driver: (slot, i) => (i < 8
+    ? { x: slot.x + 40 + i * 16, y: slot.y + 40 } // VS/GND/ENA/IN1/IN2/ENB/IN3/IN4 header on the PCB edge
+    : i < 10
+      ? { x: slot.x + 18, y: slot.y + 62 + (i - 8) * 16 } // OUT1/OUT2 left screw block
+      : { x: slot.x + 218, y: slot.y + 62 + (i - 10) * 16 }), // OUT3/OUT4 right screw block
+  stepper_motor: (slot, i) => ({ x: slot.x + 150 + i * 11, y: slot.y + 58 }), // 5-pin JST lead connector
 };
 
 export const mcuPadPoint = (slot, index, kind) => {
@@ -1050,6 +1168,258 @@ function RelayModuleBody({ part }) {
           <text key={`sc${index}`} x={x0 + w - 34} y={pad.y + 1.6} textAnchor="middle" style={{ ...LABEL_STYLE, ...DARK_HALO, fontSize: 4, fill: '#f0f0ea' }}>
             {names[index] ?? index + 1}
           </text>
+        );
+      })}
+      <McuPinWires part={part} />
+    </g>
+  );
+}
+
+// Default silk for off-board breakouts drawn by the shared OffboardModuleBody.
+const OFFBOARD_SILK = {
+  stepper_driver: ['ULN2003', 'Stepper driver'],
+  led_strip: ['WS2812', 'NeoPixel strip'],
+  rfid_reader: ['RC522', 'RFID reader'],
+  current_sensor: ['ACS712', 'Current sensor'],
+};
+
+// Generic off-board breakout: a PCB sized to its header strip with silk
+// labels. Base look for slot peripherals without bespoke artwork yet.
+// pinNets is absent in library thumbnails (slotThumb), so fall back to the
+// pad-name list for the pin count.
+function OffboardModuleBody({ part }) {
+  const slot = part.meta.slot;
+  if (!slot) return null;
+  const names = FIXED_PIN_NAMES[part.kind] ?? OFFBOARD_PIN_NAMES[part.kind] ?? [];
+  const pinCount = part.pinNets?.length ?? names.length;
+  const lastPad = mcuPadPoint(slot, Math.max(pinCount - 1, 0), part.kind);
+  const x0 = slot.x + 10;
+  const w = Math.max(lastPad.x + 24 - x0, 120);
+  const y0 = slot.y + 24;
+  const h = 80;
+  const [title, subtitle] = OFFBOARD_SILK[part.kind] ?? [part.value || '', ''];
+  return (
+    <g>
+      <rect x={x0} y={y0} width={w} height={h} rx={3} fill="url(#rsPcbBlue)" stroke="#123a63" strokeWidth="0.7" />
+      <MountHole cx={x0 + 6} cy={y0 + h - 6} r={2.6} />
+      <MountHole cx={x0 + w - 6} cy={y0 + h - 6} r={2.6} />
+      <Silk x={x0 + w / 2} y={y0 + h / 2 + 2} text={part.value || title} size={7} weight={700} fill="#dbe7f2" />
+      {subtitle && <Silk x={x0 + w / 2} y={y0 + h / 2 + 12} text={subtitle} size={4} fill="#a9c3dc" />}
+      <Silk x={x0 + 8} y={y0 + h - 5} text={part.ref} size={4.6} fill="#dbe7f2" anchor="start" />
+      <McuHeader part={part} />
+      <McuPinWires part={part} />
+    </g>
+  );
+}
+
+// 4x4 membrane keypad: matte-black pad with the standard 1-9/*0#/A-D legend,
+// 8-pin ribbon header (R1-R4, C1-C4) on the top edge.
+const KEYPAD_LEGEND = [
+  ['1', '2', '3', 'A'],
+  ['4', '5', '6', 'B'],
+  ['7', '8', '9', 'C'],
+  ['*', '0', '#', 'D'],
+];
+
+function KeypadBody({ part }) {
+  const slot = part.meta.slot;
+  if (!slot) return null;
+  const x0 = slot.x + 10;
+  const y0 = slot.y + 26;
+  const w = 168;
+  const h = 82;
+  const cellW = (w - 20) / 4;
+  const cellH = (h - 18) / 4;
+  return (
+    <g>
+      <rect x={x0} y={y0} width={w} height={h} rx={4} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.7" />
+      <rect x={x0 + 2} y={y0 + 2} width={w - 4} height={h - 4} rx={3} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="0.6" />
+      {KEYPAD_LEGEND.map((row, rowIndex) =>
+        row.map((digit, colIndex) => {
+          const bx = x0 + 10 + colIndex * cellW;
+          const by = y0 + 9 + rowIndex * cellH;
+          return (
+            <g key={digit}>
+              <rect x={bx + 1.5} y={by + 1.5} width={cellW - 5} height={cellH - 5} rx={2.5} fill="#2c3238" stroke="#12161a" strokeWidth="0.5" />
+              <line x1={bx + 3} y1={by + 3} x2={bx + cellW - 6} y2={by + 3} stroke="rgba(255,255,255,0.14)" strokeWidth="0.5" />
+              <text x={bx + cellW / 2 - 1.5} y={by + cellH / 2 + 1} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6, fontWeight: 700, fill: '#e8ecef' }}>
+                {digit}
+              </text>
+            </g>
+          );
+        }))}
+      <Silk x={x0 + w - 6} y={y0 + h - 5} text={part.ref} size={4.6} fill="#c8d2da" anchor="end" />
+      <McuHeader part={part} />
+      <McuPinWires part={part} />
+    </g>
+  );
+}
+
+// KY-023 thumb-stick module: red PCB with the black stick tower and cap.
+function JoystickBody({ part }) {
+  const slot = part.meta.slot;
+  if (!slot) return null;
+  const x0 = slot.x + 10;
+  const y0 = slot.y + 30;
+  const w = 132;
+  const h = 78;
+  const cx = x0 + w / 2;
+  const cy = y0 + h / 2 + 4;
+  return (
+    <g>
+      <rect x={x0} y={y0} width={w} height={h} rx={3} fill="#b3363c" stroke="#6e1c22" strokeWidth="0.7" />
+      <rect x={x0 + 1.6} y={y0 + 1.6} width={w - 3.2} height={h - 3.2} rx={2.4} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="0.5" />
+      {[[6, 6], [w - 6, 6], [6, h - 6], [w - 6, h - 6]].map(([dx, dy]) => (
+        <MountHole key={`${dx}-${dy}`} cx={x0 + dx} cy={y0 + dy} r={2.6} />
+      ))}
+      {/* gimbal base + stick cap */}
+      <rect x={cx - 22} y={cy - 22} width={44} height={44} rx={4} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.6" />
+      <circle cx={cx} cy={cy} r={17} fill="#20262b" stroke="#000" strokeWidth="0.5" />
+      <circle cx={cx} cy={cy} r={12.5} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.6" />
+      <ellipse cx={cx - 4} cy={cy - 5} rx={4.5} ry={3} fill="rgba(255,255,255,0.16)" />
+      <Silk x={x0 + 8} y={y0 + h - 5} text={part.ref} size={4.6} fill="#f3dede" anchor="start" />
+      <Silk x={x0 + w - 6} y={y0 + h - 5} text={part.value || 'KY-023'} size={4} fill="#f3dede" anchor="end" />
+      <McuHeader part={part} />
+      <McuPinWires part={part} />
+    </g>
+  );
+}
+
+// 16x2 character LCD on a PCF8574 I2C backpack: green PCB, black bezel, blue
+// glass with the 16x2 character-cell grid, 4-pin header on the top edge.
+function LcdDisplayBody({ part }) {
+  const slot = part.meta.slot;
+  if (!slot) return null;
+  const x0 = slot.x + 10;
+  const y0 = slot.y + 24;
+  const w = 264;
+  const h = 84;
+  const cellW = (w - 56) / 16;
+  const cellH = (h - 48) / 2;
+  return (
+    <g>
+      <rect x={x0} y={y0} width={w} height={h} rx={3} fill="url(#rsPartPi)" stroke="#0f4423" strokeWidth="0.7" />
+      {[[6, 6], [w - 6, 6], [6, h - 6], [w - 6, h - 6]].map(([dx, dy]) => (
+        <MountHole key={`${dx}-${dy}`} cx={x0 + dx} cy={y0 + dy} r={2.8} />
+      ))}
+      <rect x={x0 + 16} y={y0 + 14} width={w - 32} height={h - 28} rx={2} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.6" />
+      <rect x={x0 + 24} y={y0 + 20} width={w - 48} height={h - 40} rx={1.5} fill="#1d3f96" />
+      {Array.from({ length: 2 }, (_, row) =>
+        Array.from({ length: 16 }, (_, col) => (
+          <rect
+            key={`${row}-${col}`}
+            x={x0 + 28 + col * cellW} y={y0 + 24 + row * cellH}
+            width={cellW - 2.5} height={cellH - 4} rx={0.8} fill="#2c55c0"
+          />
+        )))}
+      <Silk x={x0 + w - 8} y={y0 + h - 5} text={part.value || 'LCD1602 I2C'} size={4} fill="#dff2e6" anchor="end" />
+      <Silk x={x0 + 8} y={y0 + h - 5} text={part.ref} size={4.6} fill="#dff2e6" anchor="start" />
+      <McuHeader part={part} />
+      <McuPinWires part={part} />
+    </g>
+  );
+}
+
+// L298N dual H-bridge: red PCB with the finned heatsink, control header on
+// the top edge, and OUT1/OUT2 + OUT3/OUT4 screw blocks on the sides.
+function MotorDriverBody({ part }) {
+  const slot = part.meta.slot;
+  if (!slot) return null;
+  const x0 = slot.x + 10;
+  const y0 = slot.y + 40;
+  const w = 216;
+  const h = 68;
+  const names = FIXED_PIN_NAMES[part.kind] ?? [];
+  const pinCount = part.pinNets?.length ?? names.length;
+  return (
+    <g>
+      <rect x={x0} y={y0} width={w} height={h} rx={3} fill="#b3363c" stroke="#6e1c22" strokeWidth="0.7" />
+      <rect x={x0 + 1.6} y={y0 + 1.6} width={w - 3.2} height={h - 3.2} rx={2.4} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="0.5" />
+      <MountHole cx={x0 + 6} cy={y0 + h - 6} r={2.6} />
+      <MountHole cx={x0 + w - 6} cy={y0 + h - 6} r={2.6} />
+      {/* finned aluminum heatsink */}
+      <rect x={x0 + 128} y={y0 + 12} width={56} height={48} rx={1.5} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.6" />
+      {Array.from({ length: 6 }, (_, index) => (
+        <line key={index} x1={x0 + 133 + index * 9} y1={y0 + 14} x2={x0 + 133 + index * 9} y2={y0 + 58} stroke="#3a4147" strokeWidth="2" />
+      ))}
+      {/* screw blocks left (OUT1/OUT2) and right (OUT3/OUT4) */}
+      {[[0, 8], [w - 24, 10]].map(([blockX, firstIndex]) => (
+        <g key={blockX}>
+          <rect x={x0 + blockX} y={y0 + 14} width={24} height={40} rx={2} fill="#1f6ea0" stroke="#0f3d5c" strokeWidth="0.6" />
+          {[0, 1].map((k) => {
+            const index = firstIndex + k;
+            if (index >= pinCount) return null;
+            const pad = mcuPadPoint(slot, index, part.kind);
+            return (
+              <g key={index}>
+                <circle cx={pad.x} cy={pad.y} r={4.6} fill="url(#rsBrushedShield)" stroke="#5f6870" strokeWidth="0.5" />
+                <line x1={pad.x - 3} y1={pad.y} x2={pad.x + 3} y2={pad.y} stroke="#565e66" strokeWidth="1" />
+                <text x={pad.x + (blockX === 0 ? 9 : -9)} y={pad.y + 1.6} textAnchor={blockX === 0 ? 'start' : 'end'} style={{ ...LABEL_STYLE, ...DARK_HALO, fontSize: 4, fill: '#f0f0ea' }}>
+                  {names[index] ?? index + 1}
+                </text>
+              </g>
+            );
+          })}
+        </g>
+      ))}
+      <Silk x={x0 + 64} y={y0 + h - 8} text={part.value || 'L298N'} size={6} weight={700} fill="#f3dede" />
+      <Silk x={x0 + 8} y={y0 + 10} text={part.ref} size={4.6} fill="#f3dede" anchor="start" />
+      {/* control header (VS/GND/ENA/IN1/IN2/ENB/IN3/IN4) on the PCB top edge */}
+      <rect x={x0 + 22} y={y0 - 5} width={128} height={10} rx={1.5} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.4" />
+      {Array.from({ length: Math.min(8, pinCount) }, (_, index) => {
+        const pad = mcuPadPoint(slot, index, part.kind);
+        return (
+          <g key={`ctl${index}`}>
+            <GoldPad x={pad.x} y={pad.y} s={4.4} />
+            <text x={pad.x} y={pad.y - 7} textAnchor="middle" style={{ ...LABEL_STYLE, ...DARK_HALO, fontSize: 4.2, fill: '#f0f0ea' }}>
+              {names[index] ?? index + 1}
+            </text>
+          </g>
+        );
+      })}
+      <McuPinWires part={part} />
+    </g>
+  );
+}
+
+// 28BYJ-48 stepper: blue can with mounting ears, the offset shaft boss, and
+// the 5-wire lead into a white JST connector whose pads face the board.
+function StepperMotorBody({ part }) {
+  const slot = part.meta.slot;
+  if (!slot) return null;
+  const cx = slot.x + 78;
+  const cy = slot.y + 74;
+  const r = 30;
+  const names = FIXED_PIN_NAMES[part.kind] ?? [];
+  const pinCount = part.pinNets?.length ?? names.length;
+  const firstPad = mcuPadPoint(slot, 0, part.kind);
+  return (
+    <g>
+      {/* mounting ears */}
+      <rect x={cx - r - 14} y={cy - 5} width={16} height={10} rx={3} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.5" />
+      <rect x={cx + r - 2} y={cy - 5} width={16} height={10} rx={3} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.5" />
+      <MountHole cx={cx - r - 7} cy={cy} r={2.6} />
+      <MountHole cx={cx + r + 7} cy={cy} r={2.6} />
+      {/* blue can with the offset shaft boss */}
+      <circle cx={cx} cy={cy} r={r} fill="url(#rsBluePlastic)" stroke="#173a75" strokeWidth="0.8" />
+      <circle cx={cx} cy={cy} r={r - 2.4} fill="none" stroke="rgba(255,255,255,0.14)" strokeWidth="0.7" />
+      <circle cx={cx} cy={cy - 11} r={6} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.5" />
+      <circle cx={cx} cy={cy - 11} r={2.6} fill="#e9edf0" stroke="#7c848b" strokeWidth="0.5" />
+      <line x1={cx - 2.6} y1={cy - 13.2} x2={cx + 2.6} y2={cy - 13.2} stroke="#8a929a" strokeWidth="1" />
+      <Silk x={cx} y={cy + 8} text={part.value || '28BYJ-48'} size={4.6} weight={700} fill="#eaf1f4" />
+      <Silk x={cx} y={cy + 15} text={part.ref} size={4.2} fill="#cdd8ea" />
+      {/* wire harness into the JST lead connector */}
+      <path d={`M ${cx + r - 6} ${cy + 10} C ${cx + r + 22} ${cy + 16}, ${firstPad.x - 26} ${firstPad.y + 16}, ${firstPad.x - 10} ${firstPad.y + 4}`} stroke="#3a4147" strokeWidth="6" fill="none" strokeLinecap="round" />
+      <rect x={firstPad.x - 6} y={firstPad.y - 6} width={(Math.max(pinCount, 1) - 1) * 11 + 12} height={12} rx={2} fill="#f0f0ea" stroke="#c9c9bd" strokeWidth="0.5" />
+      {Array.from({ length: pinCount }, (_, index) => {
+        const pad = mcuPadPoint(slot, index, part.kind);
+        return (
+          <g key={index}>
+            <GoldPad x={pad.x} y={pad.y} s={4.4} />
+            <text x={pad.x} y={pad.y + 13} textAnchor="middle" style={{ ...LABEL_STYLE, ...DARK_HALO, fontSize: 4.6, fill: '#f0f0ea' }}>
+              {names[index] ?? index + 1}
+            </text>
+          </g>
         );
       })}
       <McuPinWires part={part} />
@@ -1279,7 +1649,60 @@ function RaspberryPiBody({ part }) {
 
 // --- battery + jumpers ----------------------------------------------------
 
+// Photovoltaic panel variant of the battery pack: identical slot geometry and
+// terminal coordinates (so the rail wires and thumbnail viewBox are shared),
+// but the body is a framed cell grid instead of a 9V can.
+function SolarPanelPack({ battery, index }) {
+  const x = 16;
+  const y = 30 + index * 92;
+  const width = 62;
+  const height = 78;
+  const plus = battery.plusHole ? holeCenter(battery.plusHole) : null;
+  const minus = battery.minusHole ? holeCenter(battery.minusHole) : null;
+  const terminalY = y + 6;
+  const cellW = (width - 14) / 2;
+  const cellH = (height - 34) / 3;
+  return (
+    <g>
+      {plus && (
+        <path
+          d={`M ${x + width - 14} ${terminalY} C ${x + width + 30} ${terminalY - 18}, ${plus.x - 40} ${plus.y - 14}, ${plus.x} ${plus.y}`}
+          stroke="#c0392b" strokeWidth="2.6" strokeLinecap="round" fill="none"
+        />
+      )}
+      {minus && (
+        <path
+          d={`M ${x + 14} ${terminalY} C ${x + 50} ${terminalY - 6}, ${minus.x - 46} ${minus.y - 8}, ${minus.x} ${minus.y}`}
+          stroke="#1f1f1f" strokeWidth="2.6" strokeLinecap="round" fill="none"
+        />
+      )}
+      {/* aluminum frame + panel face */}
+      <rect x={x} y={y} width={width} height={height} rx={3} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.8" />
+      <rect x={x + 3} y={y + 12} width={width - 6} height={height - 16} rx={1.5} fill="url(#rsPartSolar)" stroke="#0a1425" strokeWidth="0.6" />
+      {Array.from({ length: 3 }, (_, row) =>
+        Array.from({ length: 2 }, (_, col) => (
+          <rect
+            key={`${row}-${col}`}
+            x={x + 6 + col * (cellW + 2)} y={y + 15 + row * (cellH + 2)}
+            width={cellW} height={cellH} rx={1} fill="#274a86" stroke="#3f66a8" strokeWidth="0.5"
+          />
+        )))}
+      <line x1={x + 6 + cellW + 1} y1={y + 14} x2={x + 6 + cellW + 1} y2={y + height - 6} stroke="#c9d2da" strokeWidth="0.8" />
+      <text x={x + width / 2} y={y + height - 9} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 7, fill: '#dbe7f2' }} fontWeight="600">
+        {battery.value || '?V'}
+      </text>
+      <text x={x + width / 2} y={y + height - 2.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 5, fill: '#a9c3dc' }}>{battery.ref}</text>
+      <circle cx={x + 17} cy={terminalY} r={5} fill="url(#rsBrushedShield)" stroke="#565e66" strokeWidth="0.7" />
+      <circle cx={x + 17} cy={terminalY} r={2.6} fill="#22262a" />
+      <circle cx={x + width - 17} cy={terminalY} r={3.4} fill="url(#rsBrushedShield)" stroke="#565e66" strokeWidth="0.7" />
+      <text x={x + width - 17} y={terminalY + 12} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 8, fontWeight: 700, fill: '#20262b' }}>+</text>
+      <text x={x + 17} y={terminalY + 12} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 8, fontWeight: 700, fill: '#20262b' }}>−</text>
+    </g>
+  );
+}
+
 export function BatteryPack({ battery, index }) {
+  if (battery.kind === 'solar_panel') return <SolarPanelPack battery={battery} index={index} />;
   const x = 16;
   const y = 30 + index * 92;
   const width = 62;
@@ -1424,6 +1847,11 @@ export function PartDefs() {
         <stop offset="0.5" stopColor="#27406e" />
         <stop offset="1" stopColor="#182a4c" />
       </linearGradient>
+      <linearGradient id="rsPartSchottky" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stopColor="#6b5a3e" />
+        <stop offset="0.5" stopColor="#3a3020" />
+        <stop offset="1" stopColor="#1e1810" />
+      </linearGradient>
       <radialGradient id="rsPartLdr" cx="0.35" cy="0.35" r="0.95">
         <stop offset="0" stopColor="#f0dcb8" />
         <stop offset="1" stopColor="#d9ae74" />
@@ -1470,6 +1898,10 @@ export function PartDefs() {
         <stop offset="0.12" stopColor="#22292f" />
         <stop offset="1" stopColor="#161b1f" />
       </linearGradient>
+      <linearGradient id="rsPartSolar" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stopColor="#16305e" />
+        <stop offset="1" stopColor="#0c1c38" />
+      </linearGradient>
       <linearGradient id="rsPartUno" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0" stopColor="#00a2a6" />
         <stop offset="0.5" stopColor="#008184" />
@@ -1514,6 +1946,10 @@ const KIND_RENDERERS = {
   diode: DiodeBody,
   inductor: InductorBody,
   zener: ZenerBody,
+  schottky: SchottkyBody,
+  fuse: FuseBody,
+  vibration_motor: VibrationMotorBody,
+  bridge_rectifier: BridgeRectifierBody,
   photoresistor: LdrBody,
   thermistor: ThermistorBody,
   buzzer: BuzzerBody,
@@ -1525,6 +1961,8 @@ const KIND_RENDERERS = {
   dht_sensor: DhtBody,
   oled_display: OledBody,
   pir_sensor: PirBody,
+  rotary_encoder: RotaryEncoderBody,
+  imu_sensor: ImuBody,
 };
 
 export function RealisticPart({ part }) {
@@ -1534,6 +1972,12 @@ export function RealisticPart({ part }) {
   if (part.body === 'servo') return <ServoBody part={part} />;
   if (part.body === 'dc_motor') return <DcMotorBody part={part} />;
   if (part.body === 'relay_module') return <RelayModuleBody part={part} />;
+  if (part.body === 'lcd_display') return <LcdDisplayBody part={part} />;
+  if (part.body === 'motor_driver') return <MotorDriverBody part={part} />;
+  if (part.body === 'stepper_motor') return <StepperMotorBody part={part} />;
+  if (part.body === 'keypad') return <KeypadBody part={part} />;
+  if (part.body === 'joystick') return <JoystickBody part={part} />;
+  if (part.body === 'stepper_driver' || part.body === 'led_strip' || part.body === 'rfid_reader' || part.body === 'current_sensor') return <OffboardModuleBody part={part} />;
   const points = part.holes.map((hole) => (hole ? holeCenter(hole) : null)).filter(Boolean);
   if (points.length === 0) return null;
   if (part.body === 'esp32') return <Esp32Body part={part} />;
@@ -1583,6 +2027,8 @@ const batteryThumb = (value) => ({
 const TWO_LEAD_VIEWBOX = '168 50 64 40';
 const MODULE3_VIEWBOX = '157 42 72 46';
 const MODULE4_VIEWBOX = '160 40 80 50';
+const MODULE5_VIEWBOX = '155 36 96 56';
+const MODULE6_VIEWBOX = '150 32 106 62';
 
 const THUMBNAIL_SPECS = {
   resistor: { part: thumbPart('resistor', 'twoLead', [3, 6], '1k'), viewBox: TWO_LEAD_VIEWBOX },
@@ -1631,6 +2077,47 @@ const THUMBNAIL_SPECS = {
   relay_module: slotThumb('relay_module', 120, '4 34 188 78'),
   arduino_uno: slotThumb('arduino_uno', 292, '0 0 380 290'),
   raspberry_pi: slotThumb('raspberry_pi', 292, '0 0 420 285'),
+  // DIP-16 needs a wider window than dipThumb's fixed 4-column package.
+  shift_register: {
+    part: { kind: 'shift_register', body: 'dip', strip: 'top', ref: '', value: '', holes: DUMMY_THUMB_HOLES, pinNets: [], meta: { columnStart: 3, columnEnd: 10 } },
+    viewBox: '170 132 116 56',
+  },
+  ir_receiver: { part: thumbPart('ir_receiver', 'to92', [3, 4, 5]), viewBox: '163 52 60 38' },
+  rotary_encoder: { part: thumbPart('rotary_encoder', 'module', [3, 4, 5, 6, 7]), viewBox: MODULE5_VIEWBOX },
+  imu_sensor: { part: thumbPart('imu_sensor', 'module', [3, 4, 5, 6]), viewBox: MODULE4_VIEWBOX },
+  lcd_display: slotThumb('lcd_display', 120, '0 6 290 112'),
+  motor_driver: slotThumb('motor_driver', 120, '0 26 240 90'),
+  stepper_motor: slotThumb('stepper_motor', 120, '28 38 186 76'),
+  stepper_driver: slotThumb('stepper_driver', 120, '0 8 250 106'),
+  led_strip: slotThumb('led_strip', 120, '0 8 144 106'),
+  // DIP-4 needs a narrower window than dipThumb's fixed 4-column package.
+  optocoupler: {
+    part: { kind: 'optocoupler', body: 'dip', strip: 'top', ref: '', value: '', holes: DUMMY_THUMB_HOLES, pinNets: [], meta: { columnStart: 3, columnEnd: 4 } },
+    viewBox: '170 132 46 56',
+  },
+  adc_module: {
+    part: { kind: 'adc_module', body: 'dip', strip: 'top', ref: '', value: '', holes: DUMMY_THUMB_HOLES, pinNets: [], meta: { columnStart: 3, columnEnd: 10 } },
+    viewBox: '170 132 116 56',
+  },
+  keypad: slotThumb('keypad', 120, '0 12 200 100'),
+  joystick: slotThumb('joystick', 120, '0 12 160 100'),
+  rfid_reader: slotThumb('rfid_reader', 120, '0 8 210 106'),
+  current_sensor: slotThumb('current_sensor', 120, '0 8 150 106'),
+  rtc_module: { part: thumbPart('rtc_module', 'module', [3, 4, 5, 6]), viewBox: MODULE4_VIEWBOX },
+  schottky: { part: thumbPart('schottky', 'twoLead', [3, 6], '1N5819'), viewBox: TWO_LEAD_VIEWBOX },
+  fuse: { part: thumbPart('fuse', 'twoLead', [3, 6], '1A'), viewBox: TWO_LEAD_VIEWBOX },
+  vibration_motor: { part: thumbPart('vibration_motor', 'twoLead', [3, 6]), viewBox: TWO_LEAD_VIEWBOX },
+  bridge_rectifier: { part: thumbPart('bridge_rectifier', 'module', [3, 4, 5, 6], 'DB107'), viewBox: MODULE4_VIEWBOX },
+  sound_sensor: { part: thumbPart('sound_sensor', 'module', [3, 4, 5, 6]), viewBox: MODULE4_VIEWBOX },
+  hall_sensor: { part: thumbPart('hall_sensor', 'to92', [3, 4, 5]), viewBox: '163 52 60 38' },
+  solar_panel: {
+    render: () => <BatteryPack battery={{ ref: '', value: '6V', kind: 'solar_panel' }} index={0} />,
+    viewBox: '12 26 70 86',
+  },
+  sd_card: { part: thumbPart('sd_card', 'module', [3, 4, 5, 6, 7, 8]), viewBox: MODULE6_VIEWBOX },
+  soil_moisture: { part: thumbPart('soil_moisture', 'module', [3, 4, 5]), viewBox: MODULE3_VIEWBOX },
+  gas_sensor: { part: thumbPart('gas_sensor', 'module', [3, 4, 5, 6]), viewBox: MODULE4_VIEWBOX },
+  baro_sensor: { part: thumbPart('baro_sensor', 'module', [3, 4, 5, 6]), viewBox: MODULE4_VIEWBOX },
 };
 
 export function PartThumbnail({ kind }) {

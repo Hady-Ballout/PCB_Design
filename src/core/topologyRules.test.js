@@ -156,6 +156,266 @@ describe('i2c_missing_pullups', () => {
     ]));
     expect(idsOf(result)).not.toContain('i2c_missing_pullups');
   });
+
+  // The rule keys off SDA/SCL in fixedPins, so the new I2C kinds are covered
+  // with no rule change.
+  it('auto-covers the I2C LCD backpack and the MPU6050 IMU', () => {
+    for (const [kind, ref] of [['lcd_display', 'U2'], ['imu_sensor', 'U3'], ['rtc_module', 'U4'], ['baro_sensor', 'U5']]) {
+      const pinMap = kind === 'lcd_display' || kind === 'rtc_module'
+        ? { GND: '0', VCC: '3V3', SDA: 'SDA', SCL: 'SCL' }
+        : { VCC: '3V3', GND: '0', SCL: 'SCL', SDA: 'SDA' };
+      const result = checkCircuitTopology(circuitOf([
+        mcuPart('esp32', 'U1', { '3V3': '3V3', GND: '0', GPIO21: 'SDA', GPIO22: 'SCL' }),
+        mcuPart(kind, ref, pinMap),
+      ]));
+      const hit = result.violations.find((entry) => entry.id === 'i2c_missing_pullups');
+      expect(hit, kind).toBeDefined();
+      expect(hit.refs).toContain(ref);
+    }
+  });
+});
+
+describe('stepper_missing_driver', () => {
+  it('flags coil pins wired directly to GPIOs', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('arduino_uno', 'U1', { '5V': 'VCC5', GND: '0', D8: 'CA', D9: 'CB', D10: 'CC', D11: 'CD' }),
+      mcuPart('stepper_motor', 'M1', { A: 'CA', B: 'CB', C: 'CC', D: 'CD', COM: 'VCC5' }),
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'stepper_missing_driver');
+    expect(hit).toBeDefined();
+    expect(hit.severity).toBe('error');
+    expect(hit.refs).toContain('M1');
+    expect(hit.fix).toContain('stepper_driver');
+  });
+
+  it('flags a stepper with no driver board on its coils', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      mcuPart('stepper_motor', 'M1', { A: 'VCC', B: 'N1', C: 'N2', D: 'N3', COM: 'VCC' }),
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'stepper_missing_driver');
+    expect(hit).toBeDefined();
+    expect(hit.message).toContain('no driver board');
+  });
+
+  it('accepts coils driven through a ULN2003 stepper driver', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('arduino_uno', 'U1', { '5V': 'VCC5', GND: '0', D8: 'SIN1', D9: 'SIN2', D10: 'SIN3', D11: 'SIN4' }),
+      mcuPart('stepper_driver', 'U2', { IN1: 'SIN1', IN2: 'SIN2', IN3: 'SIN3', IN4: 'SIN4', VCC: 'VCC5', GND: '0', OUTA: 'COILA', OUTB: 'COILB', OUTC: 'COILC', OUTD: 'COILD' }),
+      mcuPart('stepper_motor', 'M1', { A: 'COILA', B: 'COILB', C: 'COILC', D: 'COILD', COM: 'VCC5' }),
+    ]));
+    expect(idsOf(result)).not.toContain('stepper_missing_driver');
+  });
+
+  it('stays silent for a freshly dropped part with all coils unconnected', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'M1', kind: 'stepper_motor', value: '28BYJ-48', nodes: ['NC_M1_1', 'NC_M1_2', 'NC_M1_3', 'NC_M1_4', 'NC_M1_5'] },
+    ]));
+    expect(idsOf(result)).not.toContain('stepper_missing_driver');
+  });
+});
+
+describe('led_strip_power_from_gpio', () => {
+  it('flags a strip powered from a GPIO pin', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('esp32', 'U1', { '3V3': 'V33', GND: '0', GPIO2: 'PWR', GPIO4: 'DATA' }),
+      mcuPart('led_strip', 'LS1', { VCC: 'PWR', DIN: 'DATA', GND: '0' }),
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'led_strip_power_from_gpio');
+    expect(hit).toBeDefined();
+    expect(hit.severity).toBe('error');
+    expect(hit.refs).toContain('LS1');
+    expect(hit.message).toContain('GPIO2');
+  });
+
+  it('accepts VCC on the 5V supply with DIN on a GPIO', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('arduino_uno', 'U1', { '5V': 'VCC5', GND: '0', D6: 'DATA' }),
+      mcuPart('led_strip', 'LS1', { VCC: 'VCC5', DIN: 'DATA', GND: '0' }),
+    ]));
+    expect(idsOf(result)).not.toContain('led_strip_power_from_gpio');
+  });
+});
+
+describe('dc motor via H-bridge driver module (regression pins)', () => {
+  const motorViaL298n = circuitOf([
+    mcuPart('esp32', 'U1', { '3V3': 'V33', GND: '0', GPIO4: 'MIN1', GPIO5: 'MIN2', GPIO13: 'MEN' }),
+    { ref: 'V1', kind: 'voltage_source', value: '6V', nodes: ['VMOT', '0'] },
+    mcuPart('motor_driver', 'U2', { VS: 'VMOT', GND: '0', ENA: 'MEN', IN1: 'MIN1', IN2: 'MIN2', OUT1: 'MA', OUT2: 'MB' }),
+    { ref: 'RM1', kind: 'dc_motor', value: '6V', nodes: ['MA', 'MB'] },
+  ]);
+
+  it('produces zero violations for a motor across the driver outputs', () => {
+    const result = checkCircuitTopology(motorViaL298n);
+    expect(errorsOf(result)).toEqual([]);
+    expect(idsOf(result)).not.toContain('gpio_direct_load');
+    expect(idsOf(result)).not.toContain('missing_flyback_diode');
+  });
+
+  it('still flags a bare motor wired straight to a GPIO', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('esp32', 'U1', { '3V3': 'V33', GND: '0', GPIO4: 'MOT' }),
+      { ref: 'RM1', kind: 'dc_motor', value: '6V', nodes: ['MOT', '0'] },
+    ]));
+    expect(idsOf(result)).toContain('gpio_direct_load');
+  });
+});
+
+describe('optocoupler conduction and rules', () => {
+  it('flags an opto input LED with no series resistor', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('esp32', 'U1', { '3V3': 'V33', GND: '0', GPIO4: 'CTRL' }),
+      mcuPart('optocoupler', 'XU1', { A: 'CTRL', K: '0', E: 'NC_XU1_3', C: 'NC_XU1_4' }),
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'led_no_series_resistor');
+    expect(hit).toBeDefined();
+    expect(hit.refs).toContain('XU1');
+  });
+
+  it('accepts an isolated load switched by the opto output', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('esp32', 'U1', { '3V3': 'V33', GND: '0', GPIO4: 'CTRL' }),
+      { ref: 'R1', kind: 'resistor', value: '330', nodes: ['CTRL', 'ANO'] },
+      mcuPart('optocoupler', 'XU1', { A: 'ANO', K: '0', E: '0', C: 'BZLOW' }),
+      { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['V12', '0'] },
+      { ref: 'RBZ1', kind: 'buzzer', value: '12V active', nodes: ['V12', 'BZLOW'] },
+    ]));
+    expect(errorsOf(result)).toEqual([]);
+    expect(idsOf(result)).not.toContain('gpio_direct_load');
+  });
+
+  it('still requires a flyback diode for a motor on the opto output', () => {
+    // ISOLATOR_OUTPUT_PINS suppresses gpio_direct_load but must NOT suppress
+    // missing_flyback_diode — a bare opto has no protection diode.
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('esp32', 'U1', { '3V3': 'V33', GND: '0', GPIO4: 'CTRL' }),
+      { ref: 'R1', kind: 'resistor', value: '330', nodes: ['CTRL', 'ANO'] },
+      mcuPart('optocoupler', 'XU1', { A: 'ANO', K: '0', E: '0', C: 'MLOW' }),
+      { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['V12', '0'] },
+      { ref: 'RM1', kind: 'dc_motor', value: '12V', nodes: ['V12', 'MLOW'] },
+    ]));
+    expect(idsOf(result)).toContain('missing_flyback_diode');
+    expect(idsOf(result)).not.toContain('gpio_direct_load');
+  });
+});
+
+describe('current_sensor conduction', () => {
+  it('reach() crosses the IP shunt so a sensed transistor-driven motor stays clean', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('esp32', 'U1', { '3V3': 'V33', GND: '0', GPIO4: 'CTRL' }),
+      { ref: 'RB1', kind: 'resistor', value: '1k', nodes: ['CTRL', 'BASE'] },
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      mcuPart('current_sensor', 'RCS1', { 'IP+': 'VCC', 'IP-': 'MTOP', VCC: 'V33', OUT: 'NC_RCS1_4', GND: '0' }),
+      { ref: 'RM1', kind: 'dc_motor', value: '6V', nodes: ['MTOP', 'MLOW'] },
+      { ref: 'DFB1', kind: 'diode', value: '1N4007', nodes: ['MLOW', 'MTOP'] },
+      { ref: 'Q1', kind: 'bjt_npn', value: '2N2222', nodes: ['MLOW', 'BASE', '0'] },
+    ]));
+    expect(errorsOf(result)).toEqual([]);
+  });
+});
+
+describe('raspberry_pi SPI pin extension', () => {
+  it('treats the appended GPIO8-11 pins as GPIO nets', () => {
+    // An LED wired straight to GPIO10 must trip led_no_series_resistor —
+    // proof the new pins register as gpioNets.
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('raspberry_pi', 'U1', { '5V': 'VCC5', GND: '0', GPIO10: 'LEDA' }),
+      { ref: 'DLED1', kind: 'led', value: 'red', nodes: ['LEDA', '0'] },
+    ]));
+    expect(idsOf(result)).toContain('led_no_series_resistor');
+  });
+
+  it('flags a legacy 10-node raspberry_pi with fixed_pin_node_count', () => {
+    const result = checkCircuitTopology(circuitOf([
+      {
+        ref: 'U1',
+        kind: 'raspberry_pi',
+        value: 'Pi 4',
+        nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10'],
+      },
+      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VCC5', '0'] },
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'fixed_pin_node_count');
+    expect(hit).toBeDefined();
+    expect(hit.message).toContain('14');
+  });
+});
+
+describe('tier-3 discrete kinds', () => {
+  it('flags a reversed schottky like a plain diode', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '330', nodes: ['VCC', 'DK'] },
+      { ref: 'DS1', kind: 'schottky', value: '1N5819', nodes: ['0', 'DK'] },
+    ]));
+    expect(idsOf(result)).toContain('led_polarity');
+  });
+
+  it('accepts a schottky as the flyback diode across a switched motor', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('esp32', 'U1', { '3V3': 'V33', GND: '0', GPIO4: 'CTRL' }),
+      { ref: 'RB1', kind: 'resistor', value: '1k', nodes: ['CTRL', 'BASE'] },
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'RM1', kind: 'dc_motor', value: '6V', nodes: ['VCC', 'MLOW'] },
+      { ref: 'DS1', kind: 'schottky', value: '1N5819', nodes: ['MLOW', 'VCC'] },
+      { ref: 'Q1', kind: 'bjt_npn', value: '2N2222', nodes: ['MLOW', 'BASE', '0'] },
+    ]));
+    expect(idsOf(result)).not.toContain('missing_flyback_diode');
+    expect(errorsOf(result)).toEqual([]);
+  });
+
+  it('demands a flyback diode for a switched vibration motor, labeled by kind', () => {
+    const bug = circuitOf([
+      mcuPart('esp32', 'U1', { '3V3': 'V33', GND: '0', GPIO4: 'CTRL' }),
+      { ref: 'RB1', kind: 'resistor', value: '1k', nodes: ['CTRL', 'BASE'] },
+      { ref: 'V1', kind: 'voltage_source', value: '3V', nodes: ['VCC', '0'] },
+      { ref: 'RVM1', kind: 'vibration_motor', value: '3V', nodes: ['VCC', 'MLOW'] },
+      { ref: 'Q1', kind: 'bjt_npn', value: '2N2222', nodes: ['MLOW', 'BASE', '0'] },
+    ]);
+    const result = checkCircuitTopology(bug);
+    const hit = result.violations.find((entry) => entry.id === 'missing_flyback_diode');
+    expect(hit).toBeDefined();
+    expect(hit.message).toContain('Vibration motor');
+    // The additive auto-fix generalizes: it inserts a 1N4007 across the motor.
+    const fixed = applySafeAutoFixes(bug, result.violations);
+    expect(fixed.applied).toBe(true);
+    expect(fixed.circuit.components.some((part) => part.kind === 'diode' && part.value === '1N4007')).toBe(true);
+  });
+
+  it('still exempts a transistor-switched buzzer from the flyback rule', () => {
+    const result = checkCircuitTopology(esp32BuzzerFixed);
+    expect(idsOf(result)).not.toContain('missing_flyback_diode');
+  });
+
+  it('flags a vibration motor wired straight to a GPIO', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('esp32', 'U1', { '3V3': 'V33', GND: '0', GPIO4: 'VM' }),
+      { ref: 'RVM1', kind: 'vibration_motor', value: '3V', nodes: ['VM', '0'] },
+    ]));
+    expect(idsOf(result)).toContain('gpio_direct_load');
+  });
+
+  it('sees through a fuse when hunting for missing series resistors', () => {
+    // Fuse conducts even under crossResistors:false — an LED loop protected
+    // only by a fuse still lacks a current-limiting resistor.
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'F1', kind: 'fuse', value: '1A', nodes: ['VCC', 'FOUT'] },
+      { ref: 'DLED1', kind: 'led', value: 'red', nodes: ['FOUT', '0'] },
+    ]));
+    expect(idsOf(result)).toContain('led_no_series_resistor');
+  });
+
+  it('registers a solar panel positive node as a supply net', () => {
+    // A reversed LED between the panel + and ground is only detectable if
+    // the panel's plus net registered in supplyNets.
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'VSOL1', kind: 'solar_panel', value: '6V', nodes: ['SUN', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '330', nodes: ['SUN', 'DK'] },
+      { ref: 'DLED1', kind: 'led', value: 'red', nodes: ['0', 'DK'] },
+    ]));
+    expect(idsOf(result)).toContain('led_polarity');
+  });
 });
 
 describe('pushbutton_no_pull', () => {
@@ -493,6 +753,32 @@ describe('known-good corpus produces zero errors', () => {
       { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['TOUT', '0'] },
     ]),
     buzzerDriverFixed: esp32BuzzerFixed,
+    stepperViaUln2003: circuitOf([
+      mcuPart('arduino_uno', 'U1', { '5V': 'VCC5', GND: '0', D8: 'SIN1', D9: 'SIN2', D10: 'SIN3', D11: 'SIN4' }),
+      mcuPart('stepper_driver', 'U2', { IN1: 'SIN1', IN2: 'SIN2', IN3: 'SIN3', IN4: 'SIN4', VCC: 'VCC5', GND: '0', OUTA: 'COILA', OUTB: 'COILB', OUTC: 'COILC', OUTD: 'COILD' }),
+      mcuPart('stepper_motor', 'M1', { A: 'COILA', B: 'COILB', C: 'COILC', D: 'COILD', COM: 'VCC5' }),
+    ]),
+    motorViaL298n: circuitOf([
+      mcuPart('esp32', 'U1', { '3V3': 'V33', GND: '0', GPIO4: 'MIN1', GPIO5: 'MIN2', GPIO13: 'MEN' }),
+      { ref: 'V1', kind: 'voltage_source', value: '6V', nodes: ['VMOT', '0'] },
+      mcuPart('motor_driver', 'U2', { VS: 'VMOT', GND: '0', ENA: 'MEN', IN1: 'MIN1', IN2: 'MIN2', OUT1: 'MA', OUT2: 'MB' }),
+      { ref: 'RM1', kind: 'dc_motor', value: '6V', nodes: ['MA', 'MB'] },
+    ]),
+    lcdWithPullups: circuitOf([
+      mcuPart('arduino_uno', 'U1', { '5V': 'VCC5', GND: '0', A4: 'SDA', A5: 'SCL' }),
+      mcuPart('lcd_display', 'U2', { GND: '0', VCC: 'VCC5', SDA: 'SDA', SCL: 'SCL' }),
+      { ref: 'R1', kind: 'resistor', value: '4.7k', nodes: ['SDA', 'VCC5'] },
+      { ref: 'R2', kind: 'resistor', value: '4.7k', nodes: ['SCL', 'VCC5'] },
+    ]),
+    neopixelStrip: circuitOf([
+      mcuPart('arduino_uno', 'U1', { '5V': 'VCC5', GND: '0', D6: 'DATA' }),
+      mcuPart('led_strip', 'LS1', { VCC: 'VCC5', DIN: 'DATA', GND: '0' }),
+    ]),
+    encoderAndIr: circuitOf([
+      mcuPart('esp32', 'U1', { '3V3': 'V33', GND: '0', GPIO4: 'CLK', GPIO5: 'DT', GPIO13: 'SW', GPIO18: 'IROUT' }),
+      mcuPart('rotary_encoder', 'ENC1', { CLK: 'CLK', DT: 'DT', SW: 'SW', VCC: 'V33', GND: '0' }),
+      mcuPart('ir_receiver', 'IR1', { OUT: 'IROUT', GND: '0', VCC: 'V33' }),
+    ]),
   };
 
   for (const [name, circuit] of Object.entries(corpus)) {

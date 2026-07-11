@@ -224,3 +224,64 @@ describe('chat store', () => {
     expect(loaded.editedDiagram.junctions).toEqual([]);
   });
 });
+
+describe('MCU pin-list migration', () => {
+  it('pads a saved 10-node raspberry_pi chat to 14 pins everywhere on load', () => {
+    const storage = memoryStorage();
+    const legacyNodes = ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'LED', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10'];
+    const circuit = {
+      title: 'Old Pi blink',
+      type: 'mcu_led',
+      supplyVoltage: 3.3,
+      components: [
+        { ref: 'U1', kind: 'raspberry_pi', value: 'Pi 4', footprint: '', nodes: legacyNodes },
+        { ref: 'R1', kind: 'resistor', value: '330', footprint: '', nodes: ['LED', '0'] },
+      ],
+      notes: [],
+    };
+    const chat = {
+      ...createChat({ id: 'pi-chat', now: 10 }),
+      messages: [
+        { id: 'm1', role: 'user', content: 'blink', createdAt: 10 },
+        { id: 'm2', role: 'assistant', content: 'done', createdAt: 11, circuit },
+      ],
+      result: { circuit, diagram: { layoutVersion: LAYOUT_VERSION, components: [], wires: [] }, spice: '', kicadNetlist: '' },
+      editableCircuitJson: JSON.stringify(circuit, null, 2),
+    };
+    storage.setItem(CHAT_STORAGE_KEY, JSON.stringify({ chats: [chat], activeChatId: chat.id }));
+
+    const loaded = loadChatStore(storage).chats[0];
+    const pi = loaded.result.circuit.components.find((part) => part.ref === 'U1');
+    expect(pi.nodes).toHaveLength(14);
+    expect(pi.nodes.slice(10)).toEqual(['NC_U1_11', 'NC_U1_12', 'NC_U1_13', 'NC_U1_14']);
+    // The JSON editor text was re-serialized (otherwise App's JSON-sync effect
+    // would revert the padded circuit right after load).
+    expect(JSON.parse(loaded.editableCircuitJson).components[0].nodes).toHaveLength(14);
+    // History circuits replayed to the server were padded too.
+    expect(loaded.messages[1].circuit.components[0].nodes).toHaveLength(14);
+    // The stored diagram was flagged for re-layout with the padded circuit.
+    expect(loaded.result.diagram.layoutVersion).toBe(0);
+  });
+
+  it('leaves up-to-date chats byte-identical (no migration churn)', () => {
+    const storage = memoryStorage();
+    const circuit = {
+      title: 'Fresh',
+      type: 'debug',
+      supplyVoltage: 5,
+      components: [{ ref: 'R1', kind: 'resistor', value: '1k', footprint: '', nodes: ['A', '0'] }],
+      notes: [],
+    };
+    const stored = JSON.stringify(circuit, null, 2);
+    const chat = {
+      ...createChat({ id: 'fresh-chat', now: 10 }),
+      result: { circuit, diagram: null, spice: '', kicadNetlist: '' },
+      editableCircuitJson: stored,
+    };
+    storage.setItem(CHAT_STORAGE_KEY, JSON.stringify({ chats: [chat], activeChatId: chat.id }));
+
+    const loaded = loadChatStore(storage).chats[0];
+    expect(loaded.result.circuit).toEqual(circuit);
+    expect(loaded.editableCircuitJson).toBe(stored);
+  });
+});

@@ -24,8 +24,24 @@ import {
 
 const RESISTIVE_KINDS = new Set(['resistor', 'load', 'photoresistor', 'thermistor', 'potentiometer']);
 const DRIVER_KINDS = new Set(['bjt_npn', 'bjt_pnp', 'mosfet_n', 'mosfet_p']);
-const HEAVY_LOAD_KINDS = new Set(['buzzer', 'dc_motor']);
-const DIODE_KINDS = new Set(['diode', 'led', 'zener']);
+const HEAVY_LOAD_KINDS = new Set(['buzzer', 'dc_motor', 'vibration_motor']);
+// Inductive motor loads that need a flyback diode when transistor-switched.
+// Deliberately narrower than HEAVY_LOAD_KINDS: a buzzer never demands one.
+const MOTOR_KINDS = new Set(['dc_motor', 'vibration_motor']);
+// Driver-module breakouts whose named output pins switch a load the way a
+// transistor channel does — a load on one of these nets is driven, not
+// GPIO-powered.
+const DRIVER_MODULE_OUTPUT_PINS = {
+  motor_driver: new Set(['OUT1', 'OUT2', 'OUT3', 'OUT4']),
+  stepper_driver: new Set(['OUTA', 'OUTB', 'OUTC', 'OUTD']),
+};
+// Isolator outputs switch a load like a transistor channel but have NO
+// integrated flyback protection — consulted by hasDriverOutputOn only, never
+// by the missing_flyback_diode skip.
+const ISOLATOR_OUTPUT_PINS = {
+  optocoupler: new Set(['E', 'C']),
+};
+const DIODE_KINDS = new Set(['diode', 'led', 'zener', 'schottky']);
 const GPIO_PIN_PATTERN = /^(D\d+|A\d+|GPIO\d+)$/;
 const MCU_LOGIC_VOLTS = { arduino_uno: 5, raspberry_pi: 3.3, esp32: 3.3 };
 
@@ -40,6 +56,9 @@ const ROLE_PINS = {
   diode: ['anode', 'cathode'],
   led: ['anode', 'cathode'],
   zener: ['anode', 'cathode'],
+  schottky: ['anode', 'cathode'],
+  vibration_motor: ['+', '−'],
+  solar_panel: ['+', '−'],
   rgb_led: ['red', 'green', 'blue', 'common'],
   potentiometer: ['end A', 'wiper', 'end B'],
   switch_spdt: ['common', 'throw A', 'throw B'],
@@ -76,9 +95,27 @@ const crossings = (part, fromIndex, { crossResistors = true, crossDiodes = false
   const kind = part.kind;
   const others = part.nodes.map((_, index) => index).filter((index) => index !== fromIndex);
   if (RESISTIVE_KINDS.has(kind)) return crossResistors ? others : [];
-  if (kind === 'pushbutton' || kind === 'switch_spdt' || kind === 'inductor') return others;
+  // A fuse is ~0Ω: it conducts even under crossResistors:false so it never
+  // blocks series-loop detection (led_no_series_resistor and friends).
+  if (kind === 'pushbutton' || kind === 'switch_spdt' || kind === 'inductor' || kind === 'fuse') return others;
   if (HEAVY_LOAD_KINDS.has(kind)) return others;
-  if (DIODE_KINDS.has(kind) || kind === 'rgb_led') return crossDiodes ? others : [];
+  if (DIODE_KINDS.has(kind) || kind === 'rgb_led' || kind === 'bridge_rectifier') return crossDiodes ? others : [];
+  if (kind === 'optocoupler') {
+    // Input LED (A<->K, pins 0/1) conducts like a diode; the output
+    // phototransistor (E<->C, pins 2/3) like a driver channel. Never across
+    // the isolation barrier.
+    if (fromIndex === 0) return crossDiodes ? [1] : [];
+    if (fromIndex === 1) return crossDiodes ? [0] : [];
+    if (crossDrivers) return fromIndex === 2 ? [3] : [2];
+    return [];
+  }
+  if (kind === 'current_sensor') {
+    // Only the IP+ <-> IP- shunt path (pins 0/1) conducts; VCC/OUT/GND are
+    // signal pins on the module header.
+    if (fromIndex === 0) return [1];
+    if (fromIndex === 1) return [0];
+    return [];
+  }
   if (DRIVER_KINDS.has(kind) && crossDrivers) {
     // Channel conduction only: collector<->emitter / drain<->source.
     if (fromIndex === 0) return [2];
@@ -114,7 +151,7 @@ export const buildCircuitGraph = (circuit) => {
       }
     });
 
-    if ((part.kind === 'voltage_source' || part.kind === 'signal_source') && part.nodes[0] && String(part.nodes[0]) !== '0') {
+    if ((part.kind === 'voltage_source' || part.kind === 'signal_source' || part.kind === 'solar_panel') && part.nodes[0] && String(part.nodes[0]) !== '0') {
       supplyNets.add(String(part.nodes[0]));
     }
     if (part.kind === 'regulator') {
@@ -167,6 +204,19 @@ const hasDriverOutputOn = (graph, nets) => {
     for (const pin of pinsOn(graph, net)) {
       if (DRIVER_KINDS.has(pin.kind) && (pin.pinIndex === 0 || pin.pinIndex === 2)) return true;
       if (pin.kind === 'relay_module' && pin.pinIndex >= 3) return true;
+      if (DRIVER_MODULE_OUTPUT_PINS[pin.kind]?.has(pin.pinName)) return true;
+      if (ISOLATOR_OUTPUT_PINS[pin.kind]?.has(pin.pinName)) return true;
+    }
+  }
+  return false;
+};
+
+// Driver-module outputs only (no transistors/relays). Loads on these nets are
+// switched by a board that integrates its own protection diodes.
+const hasDriverModuleOutputOn = (graph, nets) => {
+  for (const net of nets) {
+    for (const pin of pinsOn(graph, net)) {
+      if (DRIVER_MODULE_OUTPUT_PINS[pin.kind]?.has(pin.pinName)) return true;
     }
   }
   return false;
@@ -262,6 +312,72 @@ const TOPOLOGY_RULES = [
     },
   },
   {
+    // A 28BYJ-48's coils draw well over 100 mA each and the motor can't run
+    // without its ULN2003 board: every connected coil pin must land on a
+    // driver-module output, never on a GPIO net.
+    id: 'stepper_missing_driver',
+    severity: 'error',
+    check: (graph, circuit) => {
+      const found = [];
+      for (const part of circuit.components) {
+        if (part.kind !== 'stepper_motor') continue;
+        const coilPins = (part.nodes ?? []).slice(0, 4)
+          .map((node, index) => ({ net: String(node), name: pinName(part, index) }))
+          .filter(({ net }, index) => net && !isUnconnectedTerminal(net, part.ref, index + 1));
+        if (coilPins.length === 0) continue; // fresh library part, all coils NC
+        const stepperFix = `Add a stepper_driver (ULN2003), nodes [IN1, IN2, IN3, IN4, VCC, GND, OUTA, OUTB, OUTC, OUTD]: MCU GPIOs -> IN1-IN4, VCC -> 5V, GND -> 0, OUTA-OUTD -> ${part.ref}'s A-D coil pins, ${part.ref} COM -> 5V.`;
+        const onGpio = coilPins.find(({ net }) => graph.gpioNets.has(net));
+        if (onGpio) {
+          found.push(violation(
+            'stepper_missing_driver', 'error',
+            [part.ref, (graph.gpioNets.get(onGpio.net) || [])[0]?.ref].filter(Boolean),
+            [onGpio.net],
+            `${gpioLabel(graph, onGpio.net)} is wired directly to coil pin ${onGpio.name} of ${part.ref} (28BYJ-48) — a GPIO cannot drive stepper coils; each coil draws well over 100 mA.`,
+            stepperFix,
+          ));
+          continue;
+        }
+        const driven = coilPins.some(({ net }) =>
+          pinsOn(graph, net).some((pin) => DRIVER_MODULE_OUTPUT_PINS[pin.kind]?.has(pin.pinName)));
+        if (!driven) {
+          found.push(violation(
+            'stepper_missing_driver', 'error',
+            [part.ref],
+            coilPins.map(({ net }) => net),
+            `${part.ref} (28BYJ-48 stepper) has no driver board connected to its coil pins — the coils must be switched by a ULN2003 driver, not wired directly.`,
+            stepperFix,
+          ));
+        }
+      }
+      return found;
+    },
+  },
+  {
+    // WS2812 pixels draw up to 60 mA each, so the strip's VCC must come from
+    // the 5V supply. DIN on a GPIO is the correct data wiring and stays
+    // silent; only the power pin is checked (a per-pin check where the
+    // island heuristic in gpio_direct_load would flag the data pin too).
+    id: 'led_strip_power_from_gpio',
+    severity: 'error',
+    check: (graph, circuit) => {
+      const found = [];
+      for (const part of circuit.components) {
+        if (part.kind !== 'led_strip') continue;
+        const vccNet = String(part.nodes?.[0] ?? '');
+        if (!vccNet || isUnconnectedTerminal(vccNet, part.ref, 1)) continue;
+        if (!graph.gpioNets.has(vccNet)) continue;
+        found.push(violation(
+          'led_strip_power_from_gpio', 'error',
+          [part.ref, (graph.gpioNets.get(vccNet) || [])[0]?.ref].filter(Boolean),
+          [vccNet],
+          `${part.ref} (WS2812 strip) takes its power from ${gpioLabel(graph, vccNet)} — each pixel draws up to 60 mA; the strip must be powered from the 5V supply.`,
+          `Wire ${part.ref}'s VCC to the 5V supply net and GND to 0; only DIN connects to a GPIO pin.`,
+        ));
+      }
+      return found;
+    },
+  },
+  {
     // LED conducting from a source to ground with no resistor anywhere in the
     // loop. Traversal crosses switches, other diodes, and driver channels but
     // stops at resistors (their presence protects the loop).
@@ -273,7 +389,10 @@ const TOPOLOGY_RULES = [
       for (const part of circuit.components) {
         const legs = part.kind === 'led' ? [[0, 1]]
           : part.kind === 'rgb_led' ? [[0, 3], [1, 3], [2, 3]]
-            : [];
+            // The optocoupler's input LED (A pin 1, K pin 2) needs a series
+            // resistor exactly like a discrete LED.
+            : part.kind === 'optocoupler' ? [[0, 1]]
+              : [];
         for (const [anodeIndex, cathodeIndex] of legs) {
           const anodeNet = String(part.nodes[anodeIndex]);
           const cathodeNet = String(part.nodes[cathodeIndex]);
@@ -305,7 +424,9 @@ const TOPOLOGY_RULES = [
     check: (graph, circuit) => {
       const found = [];
       for (const part of circuit.components) {
-        if (part.kind !== 'led' && part.kind !== 'diode') continue;
+        // Zener stays excluded (normally reverse-biased); a schottky is a
+        // normal forward rectifier and gets the same polarity check.
+        if (part.kind !== 'led' && part.kind !== 'diode' && part.kind !== 'schottky') continue;
         const [anodeNet, cathodeNet] = part.nodes.map(String);
         const anodeSide = graph.reach(anodeNet, { skipRefs: [part.ref] });
         const cathodeSide = graph.reach(cathodeNet, { skipRefs: [part.ref] });
@@ -444,8 +565,11 @@ const TOPOLOGY_RULES = [
     check: (graph, circuit) => {
       const found = [];
       for (const part of circuit.components) {
-        if (part.kind !== 'dc_motor') continue;
+        if (!MOTOR_KINDS.has(part.kind)) continue;
         const motorNets = new Set(part.nodes.map(String));
+        // H-bridge/driver boards integrate their own protection diodes, and a
+        // motor across two bridge outputs can't take a simple parallel diode.
+        if (hasDriverModuleOutputOn(graph, motorNets)) continue;
         const switched = hasDriverOutputOn(graph, motorNets);
         if (!switched) continue;
         const hasFlyback = circuit.components.some((other) =>
@@ -455,7 +579,7 @@ const TOPOLOGY_RULES = [
         if (!hasFlyback) {
           found.push(violation(
             'missing_flyback_diode', 'error', [part.ref], [...motorNets],
-            `${part.ref} (DC motor) is switched by a transistor but has no flyback diode across it — the inductive kick at switch-off will destroy the transistor.`,
+            `${part.ref} (${kindLabel(part.kind)}) is switched by a transistor but has no flyback diode across it — the inductive kick at switch-off will destroy the transistor.`,
             `Add a diode (1N4007) across ${part.ref}, cathode to the supply side: nodes ["${part.nodes[1]}", "${part.nodes[0]}"] reversed relative to current flow.`,
           ));
         }

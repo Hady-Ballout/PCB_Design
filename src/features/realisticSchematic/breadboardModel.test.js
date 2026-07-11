@@ -534,9 +534,11 @@ describe('circuitToBreadboard', () => {
 
   it('exposes the canonical MCU pin lists', () => {
     expect(MCU_PINS.arduino_uno).toHaveLength(24);
-    expect(MCU_PINS.raspberry_pi).toHaveLength(10);
+    expect(MCU_PINS.raspberry_pi).toHaveLength(14);
     expect(MCU_PINS.esp32).toHaveLength(12);
     expect(MCU_PINS.arduino_uno[17]).toBe('D13');
+    // GPIO8-11 (SPI0) were appended in the tier-2 pin extension.
+    expect(MCU_PINS.raspberry_pi.slice(10)).toEqual(['GPIO8', 'GPIO9', 'GPIO10', 'GPIO11']);
   });
 });
 
@@ -757,6 +759,348 @@ describe('board integrity', () => {
     };
     const model = circuitToBreadboard(buzzerBug);
     assertBoardMatchesNetlist(buzzerBug, model);
+    expect(model.integrity.ok).toBe(true);
+  });
+});
+
+// --- Tier-1 kinds: DIP-16 straddle, TO-92 inline, off-board modules ---------
+
+// 74HC595 in DIP order [QB..QH, GND, QH2, SRCLR, SRCLK, RCLK, OE, SER, QA, VCC];
+// unused outputs float on their own single-pin nets like the 7-segment fixture.
+const shiftRegCircuit = {
+  title: 'Shift register LED',
+  nodes: ['VCC', 'QA', 'LEDK', '0'],
+  components: [
+    { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+    { ref: 'XU1', kind: 'shift_register', value: '74HC595', nodes: ['QB', 'QC', 'QD', 'QE', 'QF', 'QG', 'QH', '0', 'QH2', 'VCC', 'SRCLK', 'RCLK', '0', 'SER', 'QA', 'VCC'] },
+    { ref: 'R1', kind: 'resistor', value: '330', nodes: ['QA', 'LEDK'] },
+    { ref: 'DLED1', kind: 'led', value: 'red', nodes: ['LEDK', '0'] },
+  ],
+};
+
+const irReceiverCircuit = {
+  title: 'IR receiver',
+  nodes: ['VCC', 'IROUT', '0'],
+  components: [
+    { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+    { ref: 'U1', kind: 'ir_receiver', value: 'TSOP38238', nodes: ['IROUT', '0', 'VCC'] },
+    { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['IROUT', 'VCC'] },
+  ],
+};
+
+// Uno + three off-board peripherals: the crowding fixture from the plan.
+const stepperSystemCircuit = {
+  title: 'Stepper + LCD',
+  nodes: ['VCC5', 'SIN1', 'SIN2', 'SIN3', 'SIN4', 'COILA', 'COILB', 'COILC', 'COILD', 'SDA', 'SCL', '0'],
+  components: [
+    {
+      ref: 'U1',
+      kind: 'arduino_uno',
+      value: 'Uno R3',
+      // D8-D11 at indices 12-15, A4/A5 (I2C) at 22/23.
+      nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12', 'SIN1', 'SIN2', 'SIN3', 'SIN4', 'NC_U1_17', 'NC_U1_18', 'NC_U1_19', 'NC_U1_20', 'NC_U1_21', 'NC_U1_22', 'SDA', 'SCL'],
+    },
+    { ref: 'U2', kind: 'stepper_driver', value: 'ULN2003', nodes: ['SIN1', 'SIN2', 'SIN3', 'SIN4', 'VCC5', '0', 'COILA', 'COILB', 'COILC', 'COILD'] },
+    { ref: 'M1', kind: 'stepper_motor', value: '28BYJ-48', nodes: ['COILA', 'COILB', 'COILC', 'COILD', 'VCC5'] },
+    { ref: 'U3', kind: 'lcd_display', value: 'LCD1602', nodes: ['0', 'VCC5', 'SDA', 'SCL'] },
+  ],
+};
+
+describe('tier-1 component placement', () => {
+  it('straddles the 74HC595 across the trench as a DIP-16', () => {
+    const model = circuitToBreadboard(shiftRegCircuit);
+    const dip = model.parts.find((part) => part.ref === 'XU1');
+    expect(dip.body).toBe('dip');
+    expect(dip.meta.columnEnd - dip.meta.columnStart).toBe(7);
+    const strips = dip.holes.map((hole) => hole?.strip);
+    // DIP order: pins 1-8 (indices 0-7) on the bottom row, 16-9 on the top.
+    [0, 1, 2, 3, 4, 5, 6, 7].forEach((pin) => expect(strips[pin]).toBe('bottom'));
+    [8, 9, 10, 11, 12, 13, 14, 15].forEach((pin) => expect(strips[pin]).toBe('top'));
+    assertBoardMatchesNetlist(shiftRegCircuit, model);
+    expect(model.integrity.ok).toBe(true);
+  });
+
+  it('flags a shift register with the wrong node count as unreliable', () => {
+    const broken = {
+      ...shiftRegCircuit,
+      components: shiftRegCircuit.components.map((part) =>
+        (part.ref === 'XU1' ? { ...part, nodes: part.nodes.slice(0, 15) } : part)),
+    };
+    const model = circuitToBreadboard(broken);
+    expect(model.integrity.ok).toBe(false);
+    expect(model.integrity.issues.some((issue) =>
+      issue.severity === 'error' && issue.message.includes('XU1') && issue.message.includes('unreliable'))).toBe(true);
+  });
+
+  it('pins an anchored 74HC595 at its column like the other straddle kinds', () => {
+    const model = circuitToBreadboard(shiftRegCircuit, { parts: { XU1: { strip: 'top', column: 15 } } });
+    const dip = model.parts.find((part) => part.ref === 'XU1');
+    expect(dip.body).toBe('dip');
+    expect(dip.meta.columnStart).toBe(15);
+    assertBoardMatchesNetlist(shiftRegCircuit, model);
+  });
+
+  it('keeps the IR receiver inline in a TO-92 can', () => {
+    const model = circuitToBreadboard(irReceiverCircuit);
+    const receiver = model.parts.find((part) => part.ref === 'U1');
+    expect(receiver.body).toBe('to92');
+    expect(receiver.meta.slotIndex ?? null).toBeNull();
+    assertBoardMatchesNetlist(irReceiverCircuit, model);
+  });
+
+  it('places encoder and IMU modules inline on the strip', () => {
+    const circuit = {
+      title: 'Encoder + IMU',
+      nodes: ['VCC', 'CLK', 'DT', 'SW', 'SDA', 'SCL', '0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'ENC1', kind: 'rotary_encoder', value: 'KY-040', nodes: ['CLK', 'DT', 'SW', 'VCC', '0'] },
+        { ref: 'U2', kind: 'imu_sensor', value: 'MPU6050', nodes: ['VCC', '0', 'SCL', 'SDA'] },
+        { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['CLK', 'VCC'] },
+        { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['DT', 'VCC'] },
+        { ref: 'R3', kind: 'resistor', value: '10k', nodes: ['SW', 'VCC'] },
+        { ref: 'R4', kind: 'resistor', value: '4.7k', nodes: ['SDA', 'VCC'] },
+        { ref: 'R5', kind: 'resistor', value: '4.7k', nodes: ['SCL', 'VCC'] },
+      ],
+    };
+    const model = circuitToBreadboard(circuit);
+    expect(model.parts.find((part) => part.ref === 'ENC1').body).toBe('module');
+    expect(model.parts.find((part) => part.ref === 'U2').body).toBe('module');
+    assertBoardMatchesNetlist(circuit, model);
+  });
+
+  it('stacks the MCU slot before three off-board peripherals and stays intact', () => {
+    const model = circuitToBreadboard(stepperSystemCircuit);
+    const uno = model.parts.find((part) => part.ref === 'U1');
+    const offboard = ['U2', 'M1', 'U3'].map((ref) => model.parts.find((part) => part.ref === ref));
+    expect(uno.meta.slotIndex).toBe(0);
+    offboard.forEach((part) => {
+      expect(part.body).toBe(part.kind);
+      expect(part.meta.slotIndex).toBeGreaterThan(0);
+      expect(part.meta.slot).toMatchObject({ height: PERIPHERAL_SLOT_HEIGHT });
+    });
+    expect(model.board.height).toBe(boardSize(model.board.columns, [MCU_SLOT_HEIGHT, PERIPHERAL_SLOT_HEIGHT, PERIPHERAL_SLOT_HEIGHT, PERIPHERAL_SLOT_HEIGHT]).height);
+    assertBoardMatchesNetlist(stepperSystemCircuit, model);
+    expect(model.integrity.ok).toBe(true);
+  });
+
+  it('sends the motor driver and LED strip off-board', () => {
+    const circuit = {
+      title: 'Driver + strip',
+      nodes: ['VCC5', 'MIN1', 'MIN2', 'MA', 'MB', 'DATA', '0'],
+      components: [
+        {
+          ref: 'U1',
+          kind: 'arduino_uno',
+          value: 'Uno R3',
+          nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'DATA', 'NC_U1_12', 'MIN1', 'MIN2', 'NC_U1_15', 'NC_U1_16', 'NC_U1_17', 'NC_U1_18', 'NC_U1_19', 'NC_U1_20', 'NC_U1_21', 'NC_U1_22', 'NC_U1_23', 'NC_U1_24'],
+        },
+        { ref: 'U2', kind: 'motor_driver', value: 'L298N', nodes: ['VCC5', '0', 'NC_U2_3', 'MIN1', 'MIN2', 'NC_U2_6', 'NC_U2_7', 'NC_U2_8', 'MA', 'MB', 'NC_U2_11', 'NC_U2_12'] },
+        { ref: 'RM1', kind: 'dc_motor', value: '6V', nodes: ['MA', 'MB'] },
+        { ref: 'LS1', kind: 'led_strip', value: 'WS2812', nodes: ['VCC5', 'DATA', '0'] },
+      ],
+    };
+    const model = circuitToBreadboard(circuit);
+    ['U2', 'LS1'].forEach((ref) => {
+      const part = model.parts.find((candidate) => candidate.ref === ref);
+      expect(part.body).toBe(part.kind);
+      expect(part.meta.slot).toMatchObject({ height: PERIPHERAL_SLOT_HEIGHT });
+    });
+    assertBoardMatchesNetlist(circuit, model);
+    expect(model.integrity.ok).toBe(true);
+  });
+});
+
+// --- Tier-2 kinds: DIP-4/DIP-16 straddles, off-board and inline modules -----
+
+describe('tier-2 component placement', () => {
+  const optoCircuit = {
+    title: 'Opto isolation',
+    nodes: ['CTRL', 'ANO', 'V12', 'BZLOW', '0'],
+    components: [
+      { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['V12', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '330', nodes: ['CTRL', 'ANO'] },
+      { ref: 'XU1', kind: 'optocoupler', value: 'PC817', nodes: ['ANO', '0', '0', 'BZLOW'] },
+      { ref: 'RBZ1', kind: 'buzzer', value: '100', nodes: ['V12', 'BZLOW'] },
+      { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['CTRL', '0'] },
+    ],
+  };
+
+  it('straddles the PC817 across the trench as a DIP-4', () => {
+    const model = circuitToBreadboard(optoCircuit);
+    const dip = model.parts.find((part) => part.ref === 'XU1');
+    expect(dip.body).toBe('dip');
+    expect(dip.meta.columnEnd - dip.meta.columnStart).toBe(1);
+    const strips = dip.holes.map((hole) => hole?.strip);
+    // DIP order [A, K, E, C]: pins 1-2 on the bottom row, 4-3 on the top.
+    expect(strips[0]).toBe('bottom');
+    expect(strips[1]).toBe('bottom');
+    expect(strips[2]).toBe('top');
+    expect(strips[3]).toBe('top');
+    assertBoardMatchesNetlist(optoCircuit, model);
+    expect(model.integrity.ok).toBe(true);
+  });
+
+  it('straddles the MCP3008 as a DIP-16 like the shift register', () => {
+    const circuit = {
+      title: 'ADC breakout',
+      nodes: ['VCC3', 'AIN', 'CSN', 'DINN', 'DOUTN', 'CLKN', '0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '3.3V', nodes: ['VCC3', '0'] },
+        { ref: 'U2', kind: 'adc_module', value: 'MCP3008', nodes: ['AIN', 'NC_U2_2', 'NC_U2_3', 'NC_U2_4', 'NC_U2_5', 'NC_U2_6', 'NC_U2_7', 'NC_U2_8', '0', 'CSN', 'DINN', 'DOUTN', 'CLKN', '0', 'VCC3', 'VCC3'] },
+        { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['AIN', 'VCC3'] },
+        { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['CSN', 'VCC3'] },
+        { ref: 'R3', kind: 'resistor', value: '10k', nodes: ['DINN', 'VCC3'] },
+        { ref: 'R4', kind: 'resistor', value: '10k', nodes: ['DOUTN', 'VCC3'] },
+        { ref: 'R5', kind: 'resistor', value: '10k', nodes: ['CLKN', 'VCC3'] },
+      ],
+    };
+    const model = circuitToBreadboard(circuit);
+    const dip = model.parts.find((part) => part.ref === 'U2');
+    expect(dip.body).toBe('dip');
+    expect(dip.meta.columnEnd - dip.meta.columnStart).toBe(7);
+    assertBoardMatchesNetlist(circuit, model);
+    expect(model.integrity.ok).toBe(true);
+  });
+
+  it('flags a wrong-node-count optocoupler as unreliable', () => {
+    const broken = {
+      ...optoCircuit,
+      components: optoCircuit.components.map((part) =>
+        (part.ref === 'XU1' ? { ...part, nodes: part.nodes.slice(0, 3) } : part)),
+    };
+    const model = circuitToBreadboard(broken);
+    expect(model.integrity.ok).toBe(false);
+    expect(model.integrity.issues.some((issue) =>
+      issue.severity === 'error' && issue.message.includes('XU1') && issue.message.includes('unreliable'))).toBe(true);
+  });
+
+  it('sends keypad, joystick, RFID reader, and current sensor off-board', () => {
+    const circuit = {
+      title: 'Peripheral pack',
+      nodes: ['VCC', 'K1', 'JX', 'RR', 'M1', 'M2', '0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'U1', kind: 'keypad', value: '4x4', nodes: ['K1', 'NC_U1_2', 'NC_U1_3', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8'] },
+        { ref: 'U2', kind: 'joystick', value: 'KY-023', nodes: ['0', 'VCC', 'JX', 'NC_U2_4', 'NC_U2_5'] },
+        { ref: 'U3', kind: 'rfid_reader', value: 'RC522', nodes: ['VCC', 'NC_U3_2', '0', 'NC_U3_4', 'NC_U3_5', 'NC_U3_6', 'NC_U3_7', 'RR'] },
+        { ref: 'RCS1', kind: 'current_sensor', value: 'ACS712', nodes: ['M1', 'M2', 'VCC', 'NC_RCS1_4', '0'] },
+        { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['K1', 'VCC'] },
+        { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['JX', '0'] },
+        { ref: 'R3', kind: 'resistor', value: '10k', nodes: ['RR', 'VCC'] },
+        { ref: 'R4', kind: 'resistor', value: '10', nodes: ['M1', 'M2'] },
+      ],
+    };
+    const model = circuitToBreadboard(circuit);
+    ['U1', 'U2', 'U3', 'RCS1'].forEach((ref) => {
+      const part = model.parts.find((candidate) => candidate.ref === ref);
+      expect(part.body, ref).toBe(part.kind);
+      expect(part.meta.slot, ref).toMatchObject({ height: PERIPHERAL_SLOT_HEIGHT });
+    });
+    assertBoardMatchesNetlist(circuit, model);
+    expect(model.integrity.ok).toBe(true);
+  });
+
+  it('keeps the small tier-2 breakouts inline as modules', () => {
+    const circuit = {
+      title: 'Small breakouts',
+      nodes: ['VCC', 'SDA', 'SCL', 'AOUT', 'DO', '0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'U1', kind: 'rtc_module', value: 'DS3231', nodes: ['0', 'VCC', 'SDA', 'SCL'] },
+        { ref: 'U2', kind: 'soil_moisture', value: '', nodes: ['VCC', '0', 'AOUT'] },
+        { ref: 'U3', kind: 'gas_sensor', value: 'MQ-2', nodes: ['VCC', '0', 'DO', 'AOUT'] },
+        { ref: 'R1', kind: 'resistor', value: '4.7k', nodes: ['SDA', 'VCC'] },
+        { ref: 'R2', kind: 'resistor', value: '4.7k', nodes: ['SCL', 'VCC'] },
+        { ref: 'R3', kind: 'resistor', value: '10k', nodes: ['AOUT', '0'] },
+        { ref: 'R4', kind: 'resistor', value: '10k', nodes: ['DO', 'VCC'] },
+      ],
+    };
+    const model = circuitToBreadboard(circuit);
+    ['U1', 'U2', 'U3'].forEach((ref) => {
+      expect(model.parts.find((part) => part.ref === ref).body, ref).toBe('module');
+    });
+    assertBoardMatchesNetlist(circuit, model);
+  });
+
+  it('sends a solar panel off-board as a rail-feeding pack, not a strip part', () => {
+    const circuit = {
+      title: 'Solar LED',
+      nodes: ['SUN', 'LEDA', '0'],
+      components: [
+        { ref: 'VSOL1', kind: 'solar_panel', value: '6V', nodes: ['SUN', '0'] },
+        { ref: 'R1', kind: 'resistor', value: '330', nodes: ['SUN', 'LEDA'] },
+        { ref: 'DLED1', kind: 'led', value: 'red', nodes: ['LEDA', '0'] },
+      ],
+    };
+    const model = circuitToBreadboard(circuit);
+    expect(model.parts.some((part) => part.ref === 'VSOL1')).toBe(false);
+    const pack = model.batteries.find((battery) => battery.ref === 'VSOL1');
+    expect(pack).toBeDefined();
+    expect(pack.kind).toBe('solar_panel');
+    expect(model.rails.railTopPlus).toBe('SUN');
+    assertBoardMatchesNetlist(circuit, model);
+    expect(model.integrity.ok).toBe(true);
+  });
+
+  it('fits a battery plus a solar panel on the rails but rejects a third source', () => {
+    const circuit = {
+      title: 'Hybrid supply',
+      nodes: ['VBAT', 'SUN', 'X1', '0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VBAT', '0'] },
+        { ref: 'VSOL1', kind: 'solar_panel', value: '6V', nodes: ['SUN', '0'] },
+        { ref: 'V3', kind: 'voltage_source', value: '9V', nodes: ['X1', '0'] },
+        { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VBAT', '0'] },
+        { ref: 'R2', kind: 'resistor', value: '1k', nodes: ['SUN', '0'] },
+        { ref: 'R3', kind: 'resistor', value: '1k', nodes: ['X1', '0'] },
+      ],
+    };
+    const model = circuitToBreadboard(circuit);
+    expect(model.batteries).toHaveLength(2);
+    expect(model.integrity.issues.some((issue) =>
+      issue.severity === 'error' && issue.message.includes('V3'))).toBe(true);
+  });
+
+  it('keeps the hall sensor inline in a TO-92 can and the sound sensor as a module', () => {
+    const circuit = {
+      title: 'Tier-3 sensors',
+      nodes: ['VCC', 'HOUT', 'AO1', '0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'U1', kind: 'hall_sensor', value: 'A3144', nodes: ['VCC', '0', 'HOUT'] },
+        { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['HOUT', 'VCC'] },
+        { ref: 'U2', kind: 'sound_sensor', value: 'KY-038', nodes: ['VCC', '0', 'NC_U2_3', 'AO1'] },
+        { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['AO1', '0'] },
+      ],
+    };
+    const model = circuitToBreadboard(circuit);
+    expect(model.parts.find((part) => part.ref === 'U1').body).toBe('to92');
+    expect(model.parts.find((part) => part.ref === 'U2').body).toBe('module');
+    assertBoardMatchesNetlist(circuit, model);
+  });
+
+  it('places all 14 Raspberry Pi pins with wires only on connected ones', () => {
+    const circuit = {
+      title: 'Pi SPI',
+      nodes: ['VCC5', 'SCLK', 'MISO', 'MOSI', 'CE0', '0'],
+      components: [
+        {
+          ref: 'U1',
+          kind: 'raspberry_pi',
+          value: 'Pi 4',
+          nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'CE0', 'MISO', 'MOSI', 'SCLK'],
+        },
+        { ref: 'U2', kind: 'sd_card', value: '', nodes: ['VCC5', '0', 'MISO', 'MOSI', 'SCLK', 'CE0'] },
+      ],
+    };
+    const model = circuitToBreadboard(circuit);
+    const pi = model.parts.find((part) => part.ref === 'U1');
+    expect(pi.body).toBe('raspberry_pi');
+    expect(pi.holes).toHaveLength(14);
+    // NC pins claim no holes; the four SPI pins and the power pins do.
+    expect(pi.holes.filter(Boolean).length).toBe(6);
+    assertBoardMatchesNetlist(circuit, model);
     expect(model.integrity.ok).toBe(true);
   });
 });

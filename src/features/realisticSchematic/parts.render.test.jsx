@@ -246,6 +246,90 @@ describe('realistic part rendering', () => {
     });
   });
 
+  it('renders the tier-1 off-board modules with their own bodies', () => {
+    const { model, markup } = renderModel({
+      title: 'Tier-1 peripherals',
+      components: [
+        {
+          ref: 'U1',
+          kind: 'arduino_uno',
+          value: 'Uno R3',
+          nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'DATA', 'NC_U1_12', 'SIN1', 'SIN2', 'SIN3', 'SIN4', 'NC_U1_17', 'NC_U1_18', 'NC_U1_19', 'NC_U1_20', 'NC_U1_21', 'NC_U1_22', 'SDA', 'SCL'],
+        },
+        { ref: 'U2', kind: 'stepper_driver', value: 'ULN2003', nodes: ['SIN1', 'SIN2', 'SIN3', 'SIN4', 'VCC5', '0', 'COILA', 'COILB', 'COILC', 'COILD'] },
+        { ref: 'M1', kind: 'stepper_motor', value: '', nodes: ['COILA', 'COILB', 'COILC', 'COILD', 'VCC5'] },
+        { ref: 'U3', kind: 'lcd_display', value: '', nodes: ['0', 'VCC5', 'SDA', 'SCL'] },
+        { ref: 'LS1', kind: 'led_strip', value: 'WS2812', nodes: ['VCC5', 'DATA', '0'] },
+      ],
+    });
+    ['stepper_driver', 'stepper_motor', 'lcd_display', 'led_strip'].forEach((kind) => {
+      const part = model.parts.find((candidate) => candidate.kind === kind);
+      expect(part.body).toBe(kind);
+      expect(part.meta.slot).toBeTruthy();
+    });
+    expect(markup).toContain('28BYJ-48'); // stepper can silk
+    expect(markup).toContain('LCD1602 I2C'); // LCD fallback silk
+    expect(markup).toContain('NeoPixel strip'); // OffboardModuleBody subtitle
+    expect(markup).toContain('Stepper driver');
+    expect(markup).toContain('rs-mcu-wires');
+    // Pad names come from the fixedPins contract.
+    ['>IN1</text>', '>OUTA</text>', '>SDA</text>', '>DIN</text>', '>COM</text>'].forEach((label) =>
+      expect(markup).toContain(label));
+  });
+
+  it('renders the L298N with its control header and screw-block outputs', () => {
+    const { markup } = renderModel({
+      title: 'Motor driver',
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '6V', nodes: ['VMOT', '0'] },
+        { ref: 'U2', kind: 'motor_driver', value: '', nodes: ['VMOT', '0', 'ENA', 'MIN1', 'MIN2', 'NC_U2_6', 'NC_U2_7', 'NC_U2_8', 'MA', 'MB', 'NC_U2_11', 'NC_U2_12'] },
+        { ref: 'RM1', kind: 'dc_motor', value: '', nodes: ['MA', 'MB'] },
+        { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['MIN1', '0'] },
+        { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['MIN2', '0'] },
+        { ref: 'R3', kind: 'resistor', value: '10k', nodes: ['ENA', '0'] },
+      ],
+    });
+    expect(markup).toContain('L298N'); // fallback silk
+    ['>VS</text>', '>ENA</text>', '>IN1</text>', '>OUT1</text>', '>OUT2</text>'].forEach((label) =>
+      expect(markup).toContain(label));
+    // Control pads are collinear on the top edge; OUT pads sit on the side blocks.
+    const slot = { x: 0, y: 0, width: 448, height: 120 };
+    expect(mcuPadPoint(slot, 0, 'motor_driver').y).toBe(40);
+    expect(mcuPadPoint(slot, 7, 'motor_driver').y).toBe(40);
+    expect(mcuPadPoint(slot, 8, 'motor_driver').x).toBeLessThan(mcuPadPoint(slot, 0, 'motor_driver').x);
+    expect(mcuPadPoint(slot, 10, 'motor_driver').x).toBeGreaterThan(mcuPadPoint(slot, 7, 'motor_driver').x);
+  });
+
+  it('renders the tier-2 off-board modules with their own bodies', () => {
+    const { model, markup } = renderModel({
+      title: 'Tier-2 peripherals',
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'U1', kind: 'keypad', value: '4x4', nodes: ['K1', 'NC_U1_2', 'NC_U1_3', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8'] },
+        { ref: 'U2', kind: 'joystick', value: '', nodes: ['0', 'VCC', 'JX', 'NC_U2_4', 'NC_U2_5'] },
+        { ref: 'U3', kind: 'rfid_reader', value: '', nodes: ['VCC', 'NC_U3_2', '0', 'NC_U3_4', 'NC_U3_5', 'NC_U3_6', 'NC_U3_7', 'RR'] },
+        { ref: 'RCS1', kind: 'current_sensor', value: '', nodes: ['M1', 'M2', 'VCC', 'NC_RCS1_4', '0'] },
+        { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['K1', 'VCC'] },
+        { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['JX', '0'] },
+        { ref: 'R3', kind: 'resistor', value: '10k', nodes: ['RR', 'VCC'] },
+        { ref: 'R4', kind: 'resistor', value: '10', nodes: ['M1', 'M2'] },
+      ],
+    });
+    ['keypad', 'joystick', 'rfid_reader', 'current_sensor'].forEach((kind) => {
+      const part = model.parts.find((candidate) => candidate.kind === kind);
+      expect(part.body, kind).toBe(kind);
+      expect(part.meta.slot, kind).toBeTruthy();
+    });
+    // Keypad legend digits + joystick default silk + OffboardModuleBody silk.
+    ['>1</text>', '>9</text>', '>*</text>', '>#</text>', '>D</text>'].forEach((digit) =>
+      expect(markup).toContain(digit));
+    expect(markup).toContain('KY-023');
+    expect(markup).toContain('RFID reader');
+    expect(markup).toContain('Current sensor');
+    ['>R1</text>', '>C4</text>', '>VRX</text>', '>IP+</text>', '>IP-</text>'].forEach((label) =>
+      expect(markup).toContain(label));
+  });
+
   it('falls back to the labeled module box for unknown kinds', () => {
     const { markup } = renderModel({
       title: 'Mystery',
@@ -273,6 +357,19 @@ describe('library part thumbnails', () => {
     expect(renderToStaticMarkup(<PartThumbnail kind="timer_555" />)).toContain('NE555');
     expect(renderToStaticMarkup(<PartThumbnail kind="pir_sensor" />)).toContain('url(#rsPirDome)');
     expect(renderToStaticMarkup(<PartThumbnail kind="voltage_source" />)).toContain('url(#rsPartBattery)');
+    expect(renderToStaticMarkup(<PartThumbnail kind="shift_register" />)).toContain('74HC595');
+    expect(renderToStaticMarkup(<PartThumbnail kind="lcd_display" />)).toContain('LCD1602 I2C');
+    expect(renderToStaticMarkup(<PartThumbnail kind="stepper_motor" />)).toContain('28BYJ-48');
+    expect(renderToStaticMarkup(<PartThumbnail kind="motor_driver" />)).toContain('L298N');
+    expect(renderToStaticMarkup(<PartThumbnail kind="rotary_encoder" />)).toContain('KY-040');
+    expect(renderToStaticMarkup(<PartThumbnail kind="imu_sensor" />)).toContain('MPU-6050');
+    expect(renderToStaticMarkup(<PartThumbnail kind="optocoupler" />)).toContain('PC817');
+    expect(renderToStaticMarkup(<PartThumbnail kind="adc_module" />)).toContain('MCP3008');
+    expect(renderToStaticMarkup(<PartThumbnail kind="keypad" />)).toContain('>*</text>');
+    expect(renderToStaticMarkup(<PartThumbnail kind="rfid_reader" />)).toContain('RC522');
+    expect(renderToStaticMarkup(<PartThumbnail kind="schottky" />)).toContain('url(#rsPartSchottky)');
+    expect(renderToStaticMarkup(<PartThumbnail kind="bridge_rectifier" />)).toContain('DB107');
+    expect(renderToStaticMarkup(<PartThumbnail kind="solar_panel" />)).toContain('url(#rsPartSolar)');
   });
 
   it('renders the regulator thumbnail with three TO-220 leads', () => {

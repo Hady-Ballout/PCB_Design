@@ -1,3 +1,4 @@
+import { padMcuNodes } from '../../core/componentKinds.js';
 import { LAYOUT_VERSION, layoutCircuitDiagram, repairDiagramLayout } from '../../core/schematicLayout.js';
 
 export const CHAT_STORAGE_KEY = 'prompt-to-pcb-chats-v1';
@@ -97,7 +98,9 @@ const normalizeMessage = (message) => {
     role: message.role,
     content: String(message.content || ''),
     createdAt: Number(message.createdAt) || Date.now(),
-    ...(message.circuit && typeof message.circuit === 'object' ? { circuit: message.circuit } : {}),
+    // Assistant-message circuits replay to the server as revision context —
+    // pad MCU boards saved before a pin-list extension so history stays valid.
+    ...(message.circuit && typeof message.circuit === 'object' ? { circuit: padMcuNodes(message.circuit) } : {}),
     ...(clarification ? { clarification } : {}),
   };
 };
@@ -117,12 +120,40 @@ const migrateDiagram = (diagram, circuit = null) => {
   }
 };
 
+// Keeps the JSON editor's stored text in step with an MCU pin-list migration:
+// without this, App's debounced JSON-sync effect would "sync" the stale,
+// shorter nodes array right back over the padded circuit after load.
+const migrateCircuitJson = (stored, result) => {
+  if (!stored) return result?.circuit ? JSON.stringify(result.circuit, null, 2) : '';
+  try {
+    const parsed = JSON.parse(stored);
+    const padded = padMcuNodes(parsed);
+    return padded === parsed ? stored : JSON.stringify(padded, null, 2);
+  } catch {
+    return stored; // unparseable user edit — leave it; the sync error already surfaces
+  }
+};
+
 const normalizeChat = (chat) => {
   if (!chat || typeof chat !== 'object') return null;
   const base = createChat({ id: String(chat.id || createId()), now: Number(chat.createdAt) || Date.now() });
-  const result = chat.result && typeof chat.result === 'object'
+  const rawResult = chat.result && typeof chat.result === 'object'
     ? { ...chat.result }
     : null;
+  // MCU pin lists only ever grow; pad circuits saved before an extension and
+  // reset the diagram layout version for just the affected chats so the
+  // migrateChatDiagram pass re-layouts them with the padded circuit.
+  const paddedCircuit = rawResult?.circuit ? padMcuNodes(rawResult.circuit) : null;
+  const mcuPadded = paddedCircuit !== null && paddedCircuit !== rawResult.circuit;
+  const result = mcuPadded
+    ? {
+        ...rawResult,
+        circuit: paddedCircuit,
+        ...(rawResult.diagram && typeof rawResult.diagram === 'object'
+          ? { diagram: { ...rawResult.diagram, layoutVersion: 0 } }
+          : {}),
+      }
+    : rawResult;
   return {
     ...base,
     ...chat,
@@ -151,7 +182,7 @@ const normalizeChat = (chat) => {
           proposed: String(chat.pendingKicadChange.proposed || ''),
         }
       : null,
-    editableCircuitJson: String(chat.editableCircuitJson || (chat.result?.circuit ? JSON.stringify(chat.result.circuit, null, 2) : '')),
+    editableCircuitJson: migrateCircuitJson(String(chat.editableCircuitJson || ''), result),
     editableCode: String(chat.editableCode || chat.result?.code || ''),
     pendingCodeChange: chat.pendingCodeChange && typeof chat.pendingCodeChange === 'object'
       ? {
@@ -160,7 +191,7 @@ const normalizeChat = (chat) => {
         }
       : null,
     editedDiagram: chat.editedDiagram && typeof chat.editedDiagram === 'object'
-      ? chat.editedDiagram
+      ? (mcuPadded ? { ...chat.editedDiagram, layoutVersion: 0 } : chat.editedDiagram)
       : null,
     editedBreadboard: chat.editedBreadboard && typeof chat.editedBreadboard === 'object'
       ? chat.editedBreadboard

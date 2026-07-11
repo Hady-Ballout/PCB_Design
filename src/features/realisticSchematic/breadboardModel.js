@@ -38,7 +38,7 @@ const TIMER_555_LEG_LAYOUT = { bottom: [0, 1, 2, 3], top: [7, 6, 5, 4] };
 // selection pin labels display; unused pins ride on NC_* placeholder nets.
 export const MCU_PINS = {
   arduino_uno: ['5V', '3V3', 'GND', 'VIN', 'D0', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'D13', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5'],
-  raspberry_pi: ['5V', '3V3', 'GND', 'GPIO2', 'GPIO3', 'GPIO4', 'GPIO17', 'GPIO18', 'GPIO27', 'GPIO22'],
+  raspberry_pi: ['5V', '3V3', 'GND', 'GPIO2', 'GPIO3', 'GPIO4', 'GPIO17', 'GPIO18', 'GPIO27', 'GPIO22', 'GPIO8', 'GPIO9', 'GPIO10', 'GPIO11'],
   esp32: ['3V3', 'GND', 'VIN', 'EN', 'GPIO2', 'GPIO4', 'GPIO5', 'GPIO13', 'GPIO18', 'GPIO19', 'GPIO21', 'GPIO22'],
 };
 
@@ -54,6 +54,15 @@ const OFFBOARD_SLOT_HEIGHTS = {
   servo: PERIPHERAL_SLOT_HEIGHT,
   dc_motor: PERIPHERAL_SLOT_HEIGHT,
   relay_module: PERIPHERAL_SLOT_HEIGHT,
+  lcd_display: PERIPHERAL_SLOT_HEIGHT,
+  motor_driver: PERIPHERAL_SLOT_HEIGHT,
+  stepper_motor: PERIPHERAL_SLOT_HEIGHT,
+  stepper_driver: PERIPHERAL_SLOT_HEIGHT,
+  led_strip: PERIPHERAL_SLOT_HEIGHT,
+  keypad: PERIPHERAL_SLOT_HEIGHT,
+  joystick: PERIPHERAL_SLOT_HEIGHT,
+  rfid_reader: PERIPHERAL_SLOT_HEIGHT,
+  current_sensor: PERIPHERAL_SLOT_HEIGHT,
 };
 const OFFBOARD_MCU_KINDS = new Set(['arduino_uno', 'raspberry_pi']);
 const ESP32_WIDTH_COLUMNS = 6;
@@ -78,6 +87,30 @@ const STRADDLE_PACKAGES = {
   // left-to-right on the top row are G,F,COM,A,B — the second COM leg is
   // internally tied to the first and stays decorative (null).
   seven_segment: { width: 5, legs: { bottom: [4, 3, 8, 2, 7], top: [6, 5, null, 0, 1] }, body: 'seven_segment', requirePins: 9 },
+  // 74HC595 DIP-16: canonical pin order is the physical DIP order, so the leg
+  // layout is the identity mapping — pins 1-8 left-to-right on the bottom row,
+  // pins 16-9 left-to-right on the top row.
+  shift_register: {
+    width: 8,
+    legs: { bottom: [0, 1, 2, 3, 4, 5, 6, 7], top: [15, 14, 13, 12, 11, 10, 9, 8] },
+    body: 'dip',
+    requirePins: 16,
+  },
+  // PC817 DIP-4: canonical order = physical DIP pins 1-4 (A, K on the bottom
+  // row; C, E on the top row reading left-to-right), identity layout.
+  optocoupler: {
+    width: 2,
+    legs: { bottom: [0, 1], top: [3, 2] },
+    body: 'dip',
+    requirePins: 4,
+  },
+  // MCP3008 DIP-16, same identity pattern as the 74HC595.
+  adc_module: {
+    width: 8,
+    legs: { bottom: [0, 1, 2, 3, 4, 5, 6, 7], top: [15, 14, 13, 12, 11, 10, 9, 8] },
+    body: 'dip',
+    requirePins: 16,
+  },
 };
 
 const straddleFor = (component) => {
@@ -109,6 +142,8 @@ const INLINE_BODY_BY_KIND = {
   mosfet_n: 'to92',
   mosfet_p: 'to92',
   temp_sensor: 'to92',
+  ir_receiver: 'to92',
+  hall_sensor: 'to92',
   regulator: 'to220',
 };
 
@@ -196,8 +231,8 @@ export function circuitToBreadboard(circuit, overrides = {}) {
   const usesGround = components.some((component) => (component.nodes ?? []).includes(GROUND_NET));
   if (usesGround) assignRail('railTopMinus', GROUND_NET);
 
-  // Voltage sources live off-board as battery packs feeding the rails.
-  const sources = components.filter((component) => component.kind === 'voltage_source');
+  // Voltage sources live off-board as battery/solar packs feeding the rails.
+  const sources = components.filter((component) => component.kind === 'voltage_source' || component.kind === 'solar_panel');
   sources.forEach((source, index) => {
     if (index >= 2) {
       integrityIssues.push({
@@ -216,6 +251,7 @@ export function circuitToBreadboard(circuit, overrides = {}) {
     if (minusNet != null && !isRailNet(minusNet)) assignRail(minusKey, minusNet);
     batteries.push({
       ref: source.ref,
+      kind: source.kind,
       value: source.value,
       nets: [plusNet ?? null, minusNet ?? null],
       plusHole: plusNet != null ? railHoleFor(plusNet, 1 + index, index === 0 ? 'top' : 'bottom') : null,
@@ -611,7 +647,7 @@ export function circuitToBreadboard(circuit, overrides = {}) {
   // Phase 1: honor persisted placements. Phase 2: greedy-place everything else
   // (added parts, packages that can't be pinned) around the reserved columns.
   components.forEach((component) => {
-    if (component.kind === 'voltage_source') return;
+    if (component.kind === 'voltage_source' || component.kind === 'solar_panel') return;
     const anchor = overrideParts[component.ref];
     if (anchor) placeAnchored(component, anchor);
   });
@@ -620,7 +656,7 @@ export function circuitToBreadboard(circuit, overrides = {}) {
   // earned under a component lead instead of allocating a spare group.
   const deferredOffboard = [];
   components.forEach((component) => {
-    if (component.kind === 'voltage_source') return; // handled in the rail pre-pass
+    if (component.kind === 'voltage_source' || component.kind === 'solar_panel') return; // handled in the rail pre-pass
     if (placedRefs.has(component.ref)) return; // pinned in Phase 1
     const pinCount = component.nodes?.length ?? 0;
     const straddle = straddleFor(component);

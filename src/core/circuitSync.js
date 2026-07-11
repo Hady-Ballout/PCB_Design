@@ -22,6 +22,7 @@ import {
   SPICE_PREFIX_BY_KIND,
   SYMBOL_TYPE_BY_KIND,
   WIRING_ONLY_KINDS,
+  padMcuNodes,
 } from './componentKinds.js';
 
 const decodeXml = (value) =>
@@ -175,10 +176,12 @@ export const parseCircuitJson = (source, baseCircuit = null) => {
   if (errors.length) return { ok: false, errors };
 
   const componentNodes = [...new Set(components.flatMap((component) => component.nodes))];
+  // padMcuNodes migrates pasted circuits saved before an MCU pin-list
+  // extension (nodes arrays shorter than the current fixed pin list).
   return {
     ok: true,
     errors: [],
-    circuit: {
+    circuit: padMcuNodes({
       ...(baseCircuit || {}),
       title: String(candidate.title || baseCircuit?.title || 'JSON synchronized circuit'),
       type: String(candidate.type || baseCircuit?.type || 'custom'),
@@ -187,7 +190,7 @@ export const parseCircuitJson = (source, baseCircuit = null) => {
       components,
       notes: Array.isArray(candidate.notes) ? candidate.notes.map(String) : baseCircuit?.notes || [],
       ...(candidate.schematic ? { schematic: candidate.schematic } : {}),
-    },
+    }),
   };
 };
 
@@ -252,8 +255,15 @@ export const parseSpiceNetlist = (source, baseCircuit) => {
       }
       const expression = tokens.slice(3).join(' ');
       const dcMatch = expression.match(/^DC\s+(.+)$/i);
+      // A DC V-line keeps a richer 2-lead source kind (solar_panel) instead
+      // of degrading to voltage_source; the 2-pin check excludes the 3-pin
+      // regulator and waveform expressions always reparse as signal_source.
+      const keepsSourceKind = base
+        && SPICE_PREFIX_BY_KIND[base.kind] === 'V'
+        && (DEFAULT_PIN_COUNT_BY_KIND[base.kind] ?? 2) === 2
+        && base.kind !== 'signal_source';
       record = dcMatch
-        ? { kind: 'voltage_source', nodes: tokens.slice(1, 3), value: voltageValue(dcMatch[1]) }
+        ? { kind: keepsSourceKind ? base.kind : 'voltage_source', nodes: tokens.slice(1, 3), value: voltageValue(dcMatch[1]) }
         : { kind: 'signal_source', nodes: tokens.slice(1, 3), value: expression };
     } else if (prefix === 'D') {
       if (tokens.length < 4) {
@@ -261,9 +271,11 @@ export const parseSpiceNetlist = (source, baseCircuit) => {
         continue;
       }
       const model = tokens[3];
-      const diodeKind = /DZEN/i.test(model) || base?.kind === 'zener'
-        ? 'zener'
-        : /DRED/i.test(model) || base?.kind === 'led' ? 'led' : 'diode';
+      const diodeKind = /DSCH/i.test(model) || base?.kind === 'schottky'
+        ? 'schottky'
+        : /DZEN/i.test(model) || base?.kind === 'zener'
+          ? 'zener'
+          : /DRED/i.test(model) || base?.kind === 'led' ? 'led' : 'diode';
       record = {
         kind: diodeKind,
         nodes: tokens.slice(1, 3),
@@ -285,7 +297,7 @@ export const parseSpiceNetlist = (source, baseCircuit) => {
       // Subcircuit instance: nodes then the model name. The model decides the
       // kind (LM358 op amp, LM393 comparator, TIMER555 8-pin timer).
       const model = tokens.at(-1);
-      const kindByModel = { LM358: 'opamp', LM393: 'comparator', TIMER555: 'timer_555' };
+      const kindByModel = { LM358: 'opamp', LM393: 'comparator', TIMER555: 'timer_555', PC817: 'optocoupler' };
       const kind = kindByModel[String(model || '').toUpperCase()] || base?.kind || 'opamp';
       const expectedNodes = DEFAULT_PIN_COUNT_BY_KIND[kind] ?? 5;
       if (tokens.length < expectedNodes + 2) {

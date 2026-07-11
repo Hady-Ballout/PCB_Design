@@ -320,9 +320,162 @@ describe('Ollama circuit output', () => {
     ['arduino_uno', 'raspberry_pi', 'esp32'].forEach((kind) => expect(kinds).toContain(kind));
     const body = buildOllamaRequestBody('Blink an LED with an Arduino', [], true);
     expect(body.messages[0].content).toContain('arduino_uno (24 nodes)');
-    expect(body.messages[0].content).toContain('raspberry_pi (10 nodes)');
+    expect(body.messages[0].content).toContain('raspberry_pi (14 nodes)');
     expect(body.messages[0].content).toContain('esp32 (12 nodes)');
     expect(body.messages[0].content).toContain('never write a SPICE line for them');
+  });
+
+  it('teaches the tier-1 module kinds in the schema and prompt', () => {
+    const kinds = CIRCUIT_SCHEMA.properties.components.items.properties.kind.enum as readonly string[];
+    ['stepper_motor', 'stepper_driver', 'motor_driver', 'lcd_display', 'rotary_encoder', 'led_strip', 'imu_sensor', 'ir_receiver', 'shift_register']
+      .forEach((kind) => expect(kinds).toContain(kind));
+    const body = buildOllamaRequestBody('Spin a stepper with an Arduino', [], true);
+    const prompt = body.messages[0].content;
+    // Fixed-pin contracts auto-derive from the registry.
+    expect(prompt).toContain('stepper_driver (10 nodes)');
+    expect(prompt).toContain('motor_driver (12 nodes)');
+    expect(prompt).toContain('shift_register (16 nodes)');
+    // Manual driver-rule prose and firmware library guidance.
+    expect(prompt).toContain('always add a stepper_driver');
+    expect(prompt).toContain('never a GPIO pin');
+    expect(prompt).toContain('LiquidCrystal_I2C');
+    expect(prompt).toContain('Adafruit_NeoPixel');
+  });
+
+  it('rejects a wiring-only module whose nodes array has the wrong length', () => {
+    expect(() => parseCircuitResponse(JSON.stringify({
+      reply: 'Motor driver circuit.',
+      circuit: {
+        title: 'Motor driver',
+        type: 'motor',
+        supplyVoltage: 5,
+        nodes: ['VCC5', 'MIN1', 'MIN2', 'MA', 'MB', '0'],
+        components: [
+          { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC5', '0'], footprint: '' },
+          { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['MIN1', '0'], footprint: '' },
+          { ref: 'R2', kind: 'resistor', value: '1k', nodes: ['MIN2', '0'], footprint: '' },
+          // 11 nodes instead of the fixed 12.
+          { ref: 'U2', kind: 'motor_driver', value: 'L298N', nodes: ['VCC5', '0', 'NC_U2_3', 'MIN1', 'MIN2', 'NC_U2_6', 'NC_U2_7', 'NC_U2_8', 'MA', 'MB', 'NC_U2_11'], footprint: '' },
+        ],
+        notes: [],
+      },
+      spice: '* Motor driver\nV1 VCC5 0 DC 5\nR1 MIN1 0 1k\nR2 MIN2 0 1k\n* U2 motor_driver (wiring-only)\n.end',
+    }))).toThrowError(expect.objectContaining({
+      code: 'schema_validation',
+      message: expect.stringContaining('exactly 12 nodes for kind motor_driver'),
+    }));
+  });
+
+  it('teaches the tier-2 module kinds in the schema and prompt', () => {
+    const kinds = CIRCUIT_SCHEMA.properties.components.items.properties.kind.enum as readonly string[];
+    ['optocoupler', 'current_sensor', 'keypad', 'joystick', 'rtc_module', 'sd_card', 'rfid_reader', 'soil_moisture', 'gas_sensor', 'baro_sensor', 'adc_module']
+      .forEach((kind) => expect(kinds).toContain(kind));
+    const body = buildOllamaRequestBody('Read soil moisture on a Pi', [], true);
+    const prompt = body.messages[0].content;
+    expect(prompt).toContain('optocoupler (4 nodes)');
+    expect(prompt).toContain('adc_module (16 nodes)');
+    expect(prompt).toContain('PC817 as the SPICE subcircuit name');
+    expect(prompt).toContain('raspberry_pi has no analog inputs');
+    expect(prompt).toContain('<REF>_S');
+    expect(prompt).toContain('MFRC522');
+  });
+
+  it('rejects a legacy 10-node raspberry_pi in fresh AI output', () => {
+    expect(() => parseCircuitResponse(JSON.stringify({
+      reply: 'Pi blink.',
+      circuit: {
+        title: 'Pi blink',
+        type: 'mcu_led',
+        supplyVoltage: 3.3,
+        nodes: ['LED', 'LEDK', '0'],
+        components: [
+          { ref: 'U1', kind: 'raspberry_pi', value: 'Pi 4', nodes: ['NC_U1_1', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'LED', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10'], footprint: '' },
+          { ref: 'R1', kind: 'resistor', value: '330', nodes: ['LED', 'LEDK'], footprint: '' },
+          { ref: 'DLED1', kind: 'led', value: 'red', nodes: ['LEDK', '0'], footprint: '' },
+        ],
+        notes: [],
+      },
+      spice: '* Pi blink\nR1 LED LEDK 330\nDLED1 LEDK 0 DRED\n* U1 raspberry_pi (microcontroller board, not simulated)\n.end',
+    }))).toThrowError(expect.objectContaining({
+      code: 'schema_validation',
+      message: expect.stringContaining('exactly 14 nodes for kind raspberry_pi'),
+    }));
+  });
+
+  it('accepts an optocoupler deck and normalizes value aliases to PC817', () => {
+    const response = parseCircuitResponse(JSON.stringify({
+      reply: 'Opto isolation stage around XU1.',
+      circuit: {
+        title: 'Opto stage',
+        type: 'isolation',
+        supplyVoltage: 5,
+        nodes: ['CTRL', 'ANO', 'V12', 'BZLOW', '0'],
+        components: [
+          { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['V12', '0'], footprint: '' },
+          { ref: 'V2', kind: 'voltage_source', value: '3.3V', nodes: ['CTRL', '0'], footprint: '' },
+          { ref: 'R1', kind: 'resistor', value: '330', nodes: ['CTRL', 'ANO'], footprint: '' },
+          { ref: 'XU1', kind: 'optocoupler', value: 'OPTOCOUPLER', nodes: ['ANO', '0', '0', 'BZLOW'], footprint: '' },
+          { ref: 'RBZ1', kind: 'buzzer', value: '100', nodes: ['V12', 'BZLOW'], footprint: '' },
+        ],
+        notes: [],
+      },
+      spice: '* Opto stage\nV1 V12 0 DC 12\nV2 CTRL 0 DC 3.3\nR1 CTRL ANO 330\nXU1 ANO 0 0 BZLOW PC817\nRBZ1 V12 BZLOW 100\n.end',
+    }));
+    expect(response.circuit.components.find((part) => part.ref === 'XU1')!.value).toBe('PC817');
+  });
+
+  it('accepts a current sensor written only as its derived shunt line', () => {
+    const response = parseCircuitResponse(JSON.stringify({
+      reply: 'Current sensing on the motor loop with RCS1.',
+      circuit: {
+        title: 'Current sense',
+        type: 'measurement',
+        supplyVoltage: 5,
+        nodes: ['VCC', 'MTOP', '0'],
+        components: [
+          { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'], footprint: '' },
+          { ref: 'RCS1', kind: 'current_sensor', value: 'ACS712', nodes: ['VCC', 'MTOP', 'VCC', 'NC_RCS1_4', '0'], footprint: '' },
+          { ref: 'RM1', kind: 'dc_motor', value: '12', nodes: ['MTOP', '0'], footprint: '' },
+        ],
+        notes: [],
+      },
+      spice: '* Current sense\nV1 VCC 0 DC 5\nRCS1_S VCC MTOP 0.0012\nRM1 MTOP 0 12\n.end',
+    }));
+    expect(response.circuit.components.find((part) => part.ref === 'RCS1')!.kind).toBe('current_sensor');
+  });
+
+  it('teaches the tier-3 kinds in the schema and prompt', () => {
+    const kinds = CIRCUIT_SCHEMA.properties.components.items.properties.kind.enum as readonly string[];
+    ['schottky', 'bridge_rectifier', 'fuse', 'vibration_motor', 'sound_sensor', 'hall_sensor', 'solar_panel']
+      .forEach((kind) => expect(kinds).toContain(kind));
+    const body = buildOllamaRequestBody('Solar powered night light', [], true);
+    const prompt = body.messages[0].content;
+    expect(prompt).toContain('schottky as D with the DSCH model');
+    expect(prompt).toContain('bridge_rectifier (4 nodes)');
+    expect(prompt).toContain('<REF>_A AC1 V+ DGEN');
+    expect(prompt).toContain('or solar_panel when the user asks for solar power');
+    expect(prompt).toContain('including vibration motors');
+    expect(prompt).toContain('open-collector');
+  });
+
+  it('accepts a bridge rectifier written only as derived diode lines', () => {
+    const response = parseCircuitResponse(JSON.stringify({
+      reply: 'AC to DC rectifier around DB1.',
+      circuit: {
+        title: 'Rectifier',
+        type: 'power',
+        supplyVoltage: 6,
+        nodes: ['AC1N', 'AC2N', 'DCP', 'DCM'],
+        components: [
+          { ref: 'V1', kind: 'signal_source', value: 'SINE(0 6 50)', nodes: ['AC1N', 'AC2N'], footprint: '' },
+          { ref: 'DB1', kind: 'bridge_rectifier', value: 'DB107', nodes: ['AC1N', 'AC2N', 'DCP', 'DCM'], footprint: '' },
+          { ref: 'C1', kind: 'capacitor', value: '100u', nodes: ['DCP', 'DCM'], footprint: '' },
+        ],
+        notes: [],
+      },
+      spice: '* Rectifier\nV1 AC1N AC2N SINE(0 6 50)\nDB1_A AC1N DCP DGEN\nDB1_B AC2N DCP DGEN\nDB1_C DCM AC1N DGEN\nDB1_D DCM AC2N DGEN\nC1 DCP DCM 100u\n.end',
+    }));
+    expect(response.circuit.components.find((part) => part.ref === 'DB1')!.kind).toBe('bridge_rectifier');
   });
 
   it('declares the optional firmware code field and teaches it in the prompt', () => {
