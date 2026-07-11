@@ -1,31 +1,17 @@
-// Browse-only component library popover for the Realistic Schematic canvas.
-// Opened by double-clicking the board (see RealisticSchematic.jsx); anchored at
-// the cursor. Lists every kind in the registry (src/core/componentKinds.js) so
-// the user can discover what components exist. Selecting an item is a no-op for
-// now — the optional `onSelect(kind)` prop is the seam for a future add flow.
+// Component library popover for the Realistic Schematic canvas. Opened by
+// double-clicking the board (see RealisticSchematic.jsx); anchored at the
+// cursor. Lists every kind in the registry (src/core/componentKinds.js) so the
+// user can discover what components exist. Picking an item calls `onSelect(kind)`
+// to add that part to the board and closes the popover; when `onSelect` is
+// omitted (read-only view) the popover is browse-only and items are inert.
 import { useEffect, useMemo, useState } from 'react';
 import {
   ALLOWED_KINDS,
-  COMPONENT_KINDS,
   MCU_KINDS,
   WIRING_ONLY_KINDS,
   kindLabel,
 } from '../../core/componentKinds.js';
-import { ComponentToolIcon } from '../schematic/symbols.jsx';
-
-// Map a registry `symbolType` onto the ComponentToolIcon vocabulary. Kinds with
-// no dedicated glyph fall through to the icon component's default (generic part).
-const ICON_TYPE_BY_SYMBOL = {
-  resistor: 'resistor',
-  capacitor: 'capacitor',
-  inductor: 'inductor',
-  led: 'led',
-  bjt_npn: 'bjt',
-  bjt_pnp: 'bjt',
-  voltage_source: 'source',
-};
-
-const iconType = (kind) => ICON_TYPE_BY_SYMBOL[COMPONENT_KINDS[kind]?.symbolType] || 'generic';
+import { PartThumbnail } from './parts.jsx';
 
 // Browse groups (registry order is preserved within each). Boards are checked
 // before wiring-only so an MCU board never falls into "Sensors & modules".
@@ -108,10 +94,11 @@ export function ComponentLibrary({ position, onClose, onSelect }) {
                       type="button"
                       className="realistic-library-item"
                       onClick={() => onSelect?.(kind)}
-                      title={kindLabel(kind)}
+                      disabled={!onSelect}
+                      title={onSelect ? `Add ${kindLabel(kind)}` : kindLabel(kind)}
                     >
                       <span className="realistic-library-item-icon">
-                        <ComponentToolIcon type={iconType(kind)} />
+                        <PartThumbnail kind={kind} />
                       </span>
                       <span className="realistic-library-item-label">{kindLabel(kind)}</span>
                     </button>

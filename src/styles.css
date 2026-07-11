@@ -1,33 +1,80 @@
+/* ══════════════════════════════════════════════════════════════════
+   PCB Pilot — Neo Brutalism
+   Cream paper, black ink, thick borders, hard offset shadows, and
+   flat saturated accents: yellow for action, blue for focus/links,
+   pink for anything live, flat green/red/orange for semantics.
+   ══════════════════════════════════════════════════════════════════ */
+
 :root {
-  --color-page: #ffffff;
+  /* Paper & surfaces */
+  --color-page: #faf3e8;
   --color-panel: #ffffff;
-  --color-surface: #f4f1ea;
+  --color-surface: #f3eada;
   --color-surface-soft: #ffffff;
-  --color-canvas: #faf9f5;
-  --color-code: #f4f1ea;
-  --color-primary: #d97757;
-  --color-primary-hover: #c2643f;
-  --color-primary-pressed: #a8532f;
-  --color-primary-soft: #fbe9e0;
-  --color-primary-border: #e7ac8d;
-  --color-text: #262521;
-  --color-text-muted: #6b6459;
-  --color-text-subtle: #8f887a;
-  --color-border: #dad5c9;
-  --color-border-soft: #ece8de;
-  --color-chart-bg: #faf9f5;
-  --color-diagram-bg: #fbfbf7;
-  --color-diagram-grid-small: #ece7dd;
-  --color-diagram-grid-large: #ddd5c6;
-  --color-error-bg: #fdecea;
-  --color-error-text: #b3261e;
-  --color-error-border: #c23b3b;
-  --color-warning-bg: #ffe58a;
-  --color-warning-text: #6b4e00;
+  --color-canvas: #fffdf7;
+  --color-code: #fffdf7;
+
+  /* Ink */
+  --color-text: #111111;
+  --color-text-muted: #57534a;
+  --color-text-subtle: #8b8577;
+
+  /* Borders: black is the house style; soft is for interior grids only */
+  --color-border: #111111;
+  --color-border-soft: #ded2bc;
+
+  /* Flat accent set */
+  --nb-yellow: #ffd43b;
+  --nb-yellow-soft: #ffe9a3;
+  --nb-blue: #3b7bff;
+  --nb-blue-soft: #d6e4ff;
+  --nb-pink: #ff5d8f;
+  --nb-pink-soft: #ffdbe7;
+  --nb-purple: #9d71ff;
+  --nb-purple-soft: #e6dbff;
+
+  /* Legacy accent aliases (used across feature stylesheets) */
+  --color-primary: var(--nb-blue);
+  --color-primary-hover: #2b6bef;
+  --color-primary-pressed: #1e5bd8;
+  --color-primary-soft: var(--nb-blue-soft);
+  --color-primary-border: #111111;
+
+  /* Live/streaming = hot pink */
+  --color-signal: var(--nb-pink);
+  --color-signal-soft: var(--nb-pink-soft);
+
+  /* Instrument screens (kept light and papery) */
+  --color-chart-bg: #fffdf7;
+  --color-diagram-bg: #fffdf7;
+  --color-diagram-grid-small: #f0e8d5;
+  --color-diagram-grid-large: #e2d6bd;
+
+  /* Semantic */
+  --color-success: #2fb344;
+  --color-success-bg: #dff5d8;
+  --color-error-bg: #ffe0e0;
+  --color-error-text: #d92b2b;
+  --color-error-border: #111111;
+  --color-warning-bg: #ffe8cc;
+  --color-warning-text: #111111;
+  --color-warning-border: #111111;
+
+  /* The hard-shadow system: no blur, ever */
+  --shadow-xs: 2px 2px 0 #111111;
+  --shadow-sm: 3px 3px 0 #111111;
+  --shadow-md: 5px 5px 0 #111111;
+  --shadow-lg: 8px 8px 0 #111111;
+
+  /* Type */
+  --font-display: 'Archivo Black', 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+
   color: var(--color-text);
   background: var(--color-page);
   color-scheme: light;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
   line-height: 1.5;
 }
 
@@ -35,8 +82,45 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  background: var(--color-page);
+  color: var(--color-text);
+}
+
 body {
   margin: 0;
+}
+
+::selection {
+  background: var(--nb-yellow);
+  color: #111111;
+}
+
+/* Chunky ink scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #111111 transparent;
+}
+
+*::-webkit-scrollbar {
+  height: 12px;
+  width: 12px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #111111;
+  border: 3px solid var(--color-page);
+  border-radius: 999px;
+}
+
+:focus-visible {
+  outline: 3px solid var(--nb-blue);
+  outline-offset: 2px;
 }
 
 button,
@@ -44,42 +128,88 @@ textarea {
   font: inherit;
 }
 
+/* The house button: white slab, black border, hard shadow that the
+   cursor physically presses down. */
 button {
-  border: 1px solid #b8beb5;
   background: #ffffff;
-  color: #17201a;
+  border: 2px solid #111111;
   border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+  color: #111111;
   cursor: pointer;
+  font-weight: 600;
   min-height: 40px;
   padding: 0 14px;
+  transition: transform 100ms ease, box-shadow 100ms ease, background 140ms ease;
 }
 
-button:hover {
-  border-color: #507861;
+button:hover:not(:disabled) {
+  box-shadow: 4px 4px 0 #111111;
+  transform: translate(-1px, -1px);
+}
+
+button:active:not(:disabled) {
+  box-shadow: 1px 1px 0 #111111;
+  transform: translate(2px, 2px);
 }
 
 button:disabled {
+  box-shadow: none;
   cursor: not-allowed;
-  opacity: 0.68;
+  opacity: 0.5;
+  transform: none;
 }
 
 button.primary {
-  background: #23533a;
-  color: #ffffff;
-  border-color: #23533a;
+  background: var(--nb-yellow);
 }
 
 .text-button {
   background: transparent;
   border: 0;
-  color: #23533a;
+  box-shadow: none;
+  color: var(--nb-blue);
   font-weight: 700;
   min-height: auto;
   padding: 0;
   text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
 }
 
+.text-button:hover:not(:disabled) {
+  box-shadow: none;
+  color: var(--color-primary-hover);
+  transform: none;
+}
+
+textarea,
+input {
+  background: #ffffff;
+  border: 2px solid #111111;
+  border-radius: 8px;
+  color: var(--color-text);
+  padding: 12px;
+  transition: box-shadow 120ms ease;
+}
+
+textarea {
+  resize: vertical;
+  width: 100%;
+}
+
+textarea:focus,
+input:focus {
+  box-shadow: 3px 3px 0 var(--nb-blue);
+  outline: none;
+}
+
+/* ── Shell & layout ── */
+
 .app-shell {
+  background: var(--color-page);
+  background-image: radial-gradient(rgba(17, 17, 17, 0.07) 1.5px, transparent 1.5px);
+  background-size: 22px 22px;
   min-height: 100vh;
   padding: 24px;
 }
@@ -94,12 +224,17 @@ button.primary {
 
 .main-panel,
 .panel-block {
-  background: #ffffff;
-  border: 1px solid #d8d9d2;
-  border-radius: 8px;
+  background: var(--color-panel);
+  border: 2px solid #111111;
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
 }
 
 .side-panel {
+  background: var(--color-panel);
+  border: 2px solid #111111;
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -118,11 +253,13 @@ button.primary {
   padding: 22px;
 }
 
+/* ── Type ── */
+
 .eyebrow {
-  color: #617066;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0;
+  color: var(--nb-blue);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
   margin: 0 0 6px;
   text-transform: uppercase;
 }
@@ -134,20 +271,28 @@ p {
   margin-top: 0;
 }
 
+h1,
+h2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
 h1 {
-  font-size: 30px;
-  line-height: 1.1;
+  font-size: 28px;
+  line-height: 1.15;
   margin-bottom: 0;
 }
 
 h2 {
-  font-size: 26px;
-  line-height: 1.15;
+  font-size: 24px;
+  line-height: 1.2;
   margin-bottom: 0;
 }
 
 h3 {
   font-size: 16px;
+  font-weight: 800;
   margin-bottom: 12px;
 }
 
@@ -157,10 +302,12 @@ h3 {
 }
 
 .prompt-box span {
-  color: #425147;
+  color: var(--color-text);
   font-size: 14px;
   font-weight: 700;
 }
+
+/* ── Chat panel ── */
 
 .chat-sidebar-header,
 .chat-section-label,
@@ -176,12 +323,12 @@ h3 {
 }
 
 .chat-sidebar-header h1 {
-  font-size: 24px;
+  font-size: 22px;
 }
 
 .chat-conversation-header {
   align-items: center;
-  border-bottom: 1px solid #d8d9d2;
+  border-bottom: 2px solid #111111;
   display: grid;
   gap: 8px;
   grid-template-columns: auto minmax(0, 1fr);
@@ -193,8 +340,9 @@ h3 {
 }
 
 .chat-conversation-title h1 {
+  font-family: var(--font-sans);
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -202,10 +350,12 @@ h3 {
 
 .chat-back-button {
   border-radius: 999px;
+  border-width: 2px;
+  box-shadow: var(--shadow-xs);
   font-size: 13px;
-  min-height: 22px;
+  min-height: 24px;
   padding: 0;
-  width: 22px;
+  width: 24px;
 }
 
 .new-chat-composer {
@@ -224,18 +374,19 @@ h3 {
 }
 
 .chat-section-label {
-  color: #617066;
-  font-size: 12px;
-  font-weight: 700;
+  color: var(--color-text);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .chat-history-list {
   display: grid;
-  gap: 6px;
+  gap: 10px;
   max-height: 100%;
   overflow-y: auto;
-  padding-right: 3px;
+  padding: 2px 6px 6px 2px;
 }
 
 .chat-history-page .chat-history-list {
@@ -244,35 +395,26 @@ h3 {
 
 .chat-history-item {
   align-items: center;
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  display: flex;
-  min-height: 36px;
-  padding: 8px 12px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 68px;
+  padding: 11px 12px;
   text-align: left;
   width: 100%;
 }
 
-.chat-history-item:hover {
-  background: #eef3ed;
-}
-
 .chat-history-item.active {
-  background: #eef3ed;
+  background: var(--nb-yellow-soft);
 }
 
 .chat-history-copy {
-  display: block;
+  display: grid;
   min-width: 0;
-  overflow: hidden;
-  width: 100%;
 }
 
 .chat-history-copy strong,
 .chat-history-copy small {
-  display: block;
-  font-weight: 400;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -280,8 +422,9 @@ h3 {
 
 .chat-history-copy small,
 .chat-history-item time {
-  color: #617066;
+  color: var(--color-text-muted);
   font-size: 11px;
+  font-weight: 400;
 }
 
 .chat-thread {
@@ -293,50 +436,64 @@ h3 {
 }
 
 .chat-messages {
+  background: var(--color-canvas);
+  border: 2px solid #111111;
+  border-radius: 10px;
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   min-height: 360px;
   overflow-y: auto;
-  padding: 4px 2px;
+  padding: 12px 10px;
 }
 
 .chat-welcome {
-  color: #425147;
+  color: var(--color-text);
   margin: auto;
   max-width: 260px;
   text-align: center;
 }
 
 .chat-welcome p {
-  color: #617066;
+  color: var(--color-text-muted);
   font-size: 13px;
   margin: 6px 0 0;
 }
 
 .chat-message {
   align-self: flex-start;
+  animation: message-in 300ms cubic-bezier(0.2, 1, 0.5, 1) both;
   background: #ffffff;
-  border: 1px solid #d8d9d2;
-  border-radius: 10px 10px 10px 3px;
+  border: 2px solid #111111;
+  border-radius: 10px;
+  box-shadow: var(--shadow-xs);
   display: grid;
   gap: 6px;
   max-width: 90%;
   padding: 9px 11px;
 }
 
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .chat-message.user {
   align-self: flex-end;
-  background: #23533a;
-  border-color: #23533a;
-  border-radius: 10px 10px 3px 10px;
-  color: #ffffff;
+  background: var(--nb-yellow);
 }
 
 .chat-message.pending {
-  color: #617066;
-  font-style: italic;
+  box-shadow: 3px 3px 0 var(--nb-pink);
+  color: var(--color-text-muted);
 }
 
 .chat-message p {
@@ -350,31 +507,273 @@ h3 {
 }
 
 .chat-message-meta time {
-  color: #7b877f;
-}
-
-.chat-message.user .chat-message-meta time {
-  color: #dce9df;
+  color: var(--color-text-subtle);
 }
 
 .chat-artifact-chip {
-  background: #eef3ed;
+  background: var(--nb-purple-soft);
+  border: 2px solid #111111;
   border-radius: 6px;
-  color: #17201a;
+  color: var(--color-text);
   display: grid;
   padding: 7px 8px;
 }
 
 .chat-artifact-chip span {
-  color: #617066;
+  color: var(--color-text-muted);
   font-size: 9px;
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .chat-artifact-chip strong {
   font-size: 12px;
 }
+
+/* ── Clarifying questions card ── */
+
+.clarify-card {
+  background: var(--nb-blue-soft);
+  border: 2px solid #111111;
+  border-radius: 6px;
+  display: grid;
+  gap: 12px;
+  padding: 10px;
+}
+
+.clarify-card.resolved {
+  opacity: 0.75;
+}
+
+.clarify-question {
+  display: grid;
+  gap: 6px;
+}
+
+.clarify-question > p {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.clarify-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.clarify-chip {
+  background: #ffffff;
+  border: 2px solid #111111;
+  border-radius: 999px;
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  min-height: 0;
+  padding: 4px 10px;
+}
+
+.clarify-chip.selected {
+  background: var(--nb-yellow);
+}
+
+.clarify-chip:disabled {
+  box-shadow: none;
+  cursor: default;
+}
+
+.clarify-custom {
+  display: flex;
+  gap: 6px;
+}
+
+.clarify-custom input {
+  border: 2px solid #111111;
+  border-radius: 6px;
+  flex: 1;
+  font-size: 11px;
+  min-height: 0;
+  padding: 4px 8px;
+}
+
+.clarify-custom button {
+  background: #ffffff;
+  border: 2px solid #111111;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  min-height: 0;
+  padding: 4px 10px;
+}
+
+.clarify-custom button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.clarify-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.clarify-actions small {
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.clarify-submit {
+  background: var(--nb-yellow);
+  border: 2px solid #111111;
+  border-radius: 6px;
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  min-height: 0;
+  padding: 6px 12px;
+}
+
+.clarify-skip {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  min-height: 0;
+  padding: 6px 4px;
+  text-decoration: underline;
+}
+
+.clarify-submit:disabled,
+.clarify-skip:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.clarify-resolved-note {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Generation stage trail: Circuit → Review → Reply */
+
+.generation-status {
+  display: grid;
+  gap: 8px;
+}
+
+.generation-status > p {
+  color: var(--color-text-muted);
+}
+
+.stage-trail {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+
+.stage-node {
+  align-items: center;
+  color: var(--color-text-subtle);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  gap: 5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.stage-node::before {
+  background: #ffffff;
+  border: 2px solid #111111;
+  border-radius: 50%;
+  content: "";
+  height: 9px;
+  transition: background 200ms ease;
+  width: 9px;
+}
+
+.stage-node.done {
+  color: var(--color-text);
+}
+
+.stage-node.done::before {
+  background: var(--nb-blue);
+}
+
+.stage-node.active {
+  color: var(--nb-pink);
+}
+
+.stage-node.active::before {
+  animation: stage-pulse 1.1s ease-in-out infinite;
+  background: var(--nb-pink);
+}
+
+@keyframes stage-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  50% {
+    transform: scale(0.6);
+    opacity: 0.65;
+  }
+}
+
+.stage-link {
+  background: #111111;
+  height: 2px;
+  width: 12px;
+}
+
+.typing-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.typing-dots i {
+  animation: typing-bounce 1.2s ease-in-out infinite;
+  background: var(--nb-pink);
+  border-radius: 50%;
+  display: inline-block;
+  height: 5px;
+  width: 5px;
+}
+
+.typing-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.typing-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing-bounce {
+  0%,
+  60%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+/* ── Composer ── */
 
 .chat-composer {
   display: grid;
@@ -386,48 +785,36 @@ h3 {
 }
 
 .chat-composer-input textarea {
-  min-height: 52px;
+  min-height: 92px;
   resize: none;
-  padding-right: 44px;
+  padding-right: 48px;
 }
 
 .composer-send-button {
   align-items: center;
-  background: var(--color-primary);
-  border: none;
+  background: var(--nb-yellow);
+  border: 2px solid #111111;
   border-radius: 50%;
   bottom: 10px;
-  color: #102116;
+  box-shadow: var(--shadow-xs);
+  color: #111111;
   cursor: pointer;
   display: flex;
-  height: 30px;
+  height: 32px;
   justify-content: center;
   min-height: 0;
   padding: 0;
   position: absolute;
   right: 10px;
-  width: 30px;
-}
-
-.composer-send-button:hover:not(:disabled) {
-  background: var(--color-primary-hover);
+  width: 32px;
 }
 
 .composer-send-button:disabled {
   cursor: wait;
-  opacity: 0.5;
 }
 
 .chat-error {
   margin: 0;
-}
-
-textarea {
-  width: 100%;
-  resize: vertical;
-  border: 1px solid #b8beb5;
-  border-radius: 8px;
-  padding: 12px;
 }
 
 .button-row {
@@ -436,19 +823,23 @@ textarea {
   gap: 10px;
 }
 
+/* ── Live (streaming) code — the hot-pink treatment ── */
+
 .live-spice-panel {
-  border-color: var(--color-primary-border);
+  border-color: var(--nb-pink);
 }
 
 .live-code-editor,
 .code-editor:read-only {
-  background: #f3f6f1;
-  border-color: #91aa99;
+  background: var(--nb-pink-soft);
+  border-color: #111111;
+  box-shadow: 3px 3px 0 var(--nb-pink);
 }
 
 .inline-error {
-  color: #97362a;
+  color: var(--color-error-text);
   font-size: 14px;
+  font-weight: 600;
   margin: -8px 0 0;
 }
 
@@ -460,7 +851,7 @@ textarea {
 }
 
 .empty-state p:last-child {
-  color: #617066;
+  color: var(--color-text-muted);
   max-width: 560px;
 }
 
@@ -474,55 +865,64 @@ textarea {
   min-height: calc(100vh - 48px);
 }
 
-/* Minimalist browser-style tab strip. */
+/* ── Editor tab strip ── */
+
 .editor-launchbar {
   align-items: flex-end;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 2px solid #111111;
   display: flex;
   flex-wrap: wrap;
-  gap: 2px;
+  gap: 4px;
   margin-top: 0;
-  padding: 0;
+  padding: 0 0 0 2px;
 }
 
 .editor-launchbar button {
-  background: transparent;
-  border: 1px solid transparent;
+  background: var(--color-surface);
+  border: 2px solid transparent;
   border-bottom: 0;
   border-radius: 8px 8px 0 0;
+  box-shadow: none;
   color: var(--color-text-muted);
   font-size: 12.5px;
-  font-weight: 500;
-  min-height: 30px;
+  font-weight: 600;
+  min-height: 32px;
   padding: 0 12px;
   position: relative;
-  top: 1px;
+  top: 2px;
   transition: background 120ms ease, color 120ms ease;
 }
 
-.editor-launchbar button:hover {
-  background: var(--color-surface-soft);
+.editor-launchbar button:hover:not(:disabled) {
+  background: #ffffff;
+  box-shadow: none;
   color: var(--color-text);
+  transform: none;
 }
 
-/* A view that is open in the split but not the focused tab. */
+.editor-launchbar button:active:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+}
+
 .editor-launchbar button.open {
-  background: var(--color-surface-soft);
-  border-color: var(--color-border);
+  background: #ffffff;
+  border-color: #111111;
   color: var(--color-text);
 }
 
-/* The focused tab reads as connected to the content below. */
 .editor-launchbar button.active {
-  background: var(--color-surface);
-  border-color: var(--color-border);
-  color: var(--color-text);
-  font-weight: 600;
+  background: var(--nb-yellow);
+  border-color: #111111;
+  color: #111111;
+  font-weight: 700;
 }
+
+/* ── Editor windows ── */
 
 .editor-window-layout {
   flex: 1;
-  margin-top: 12px;
+  margin-top: 14px;
   min-height: 580px;
 }
 
@@ -531,13 +931,11 @@ textarea {
   grid-template-columns: minmax(0, 1fr);
 }
 
-/* Maximized: the focused window fills the entire viewport as an overlay. */
 .editor-window-layout.maximized {
   min-height: 0;
 }
 
 .editor-window-layout .editor-window.maximized {
-  border: 0;
   border-radius: 0;
   box-shadow: none;
   inset: 0;
@@ -548,13 +946,13 @@ textarea {
 .editor-window-layout.split-two,
 .editor-split-row {
   display: grid;
-  grid-template-columns: minmax(220px, calc(var(--column-split) - 5px)) 10px minmax(220px, 1fr);
+  grid-template-columns: minmax(220px, calc(var(--column-split) - 5px)) 12px minmax(220px, 1fr);
   min-width: 0;
 }
 
 .editor-window-layout.split-three {
   display: grid;
-  grid-template-rows: minmax(320px, calc(var(--row-split) - 5px)) 10px minmax(280px, 1fr);
+  grid-template-rows: minmax(320px, calc(var(--row-split) - 5px)) 12px minmax(280px, 1fr);
   min-height: 860px;
 }
 
@@ -573,16 +971,16 @@ textarea {
 
 .editor-resize-handle.columns {
   cursor: col-resize;
-  width: 10px;
+  width: 12px;
 }
 
 .editor-resize-handle.rows {
   cursor: row-resize;
-  height: 10px;
+  height: 12px;
 }
 
 .editor-resize-handle::before {
-  background: #d8d9d2;
+  background: #111111;
   content: "";
   position: absolute;
   transition: background 120ms ease, transform 120ms ease;
@@ -590,16 +988,16 @@ textarea {
 
 .editor-resize-handle.columns::before {
   height: 100%;
-  width: 1px;
+  width: 2px;
 }
 
 .editor-resize-handle.rows::before {
-  height: 1px;
+  height: 2px;
   width: 100%;
 }
 
 .editor-resize-handle span {
-  background: #8d998f;
+  background: #111111;
   border-radius: 999px;
   display: block;
   position: relative;
@@ -608,11 +1006,11 @@ textarea {
 
 .editor-resize-handle.columns span {
   height: 44px;
-  width: 4px;
+  width: 6px;
 }
 
 .editor-resize-handle.rows span {
-  height: 4px;
+  height: 6px;
   width: 44px;
 }
 
@@ -620,13 +1018,19 @@ textarea {
 .editor-resize-handle:focus-visible::before,
 .resizing-columns .editor-resize-handle.columns::before,
 .resizing-rows > .editor-resize-handle.rows::before {
-  background: #23533a;
-  transform: scale(2);
+  background: var(--nb-blue);
+  transform: scale(1.5);
+}
+
+.editor-resize-handle:hover span,
+.resizing-columns .editor-resize-handle.columns span,
+.resizing-rows > .editor-resize-handle.rows span {
+  background: var(--nb-blue);
 }
 
 .editor-resize-handle:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: -2px;
+  outline: 3px solid var(--nb-blue);
+  outline-offset: -3px;
 }
 
 .editor-window-layout.resizing-columns,
@@ -650,9 +1054,10 @@ textarea {
 }
 
 .editor-window {
-  background: #fbfbf8;
-  border: 1px solid #cfd2ca;
-  border-radius: 7px;
+  background: var(--color-canvas);
+  border: 2px solid #111111;
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -660,35 +1065,37 @@ textarea {
   overflow: hidden;
 }
 
+/* The focused window's shadow turns blue — the brutalist "active" tell. */
 .editor-window.active {
-  border-color: #507861;
-  box-shadow: 0 0 0 1px #507861;
+  box-shadow: 5px 5px 0 var(--nb-blue);
 }
 
 .editor-window-titlebar {
   align-items: center;
-  background: #eef0ea;
-  border-bottom: 1px solid #d8d9d2;
+  background: var(--color-surface);
+  border-bottom: 2px solid #111111;
   display: flex;
   flex: 0 0 auto;
   justify-content: space-between;
-  min-height: 32px;
+  min-height: 34px;
   padding: 0 5px 0 12px;
 }
 
 .editor-window.active .editor-window-titlebar {
-  background: #e4ebe4;
+  background: var(--nb-blue-soft);
 }
 
 .editor-window-titlebar strong {
   font-size: 12.5px;
-  font-weight: 600;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
 .editor-window-controls {
   align-items: center;
   display: flex;
-  gap: 1px;
+  gap: 3px;
 }
 
 .editor-window-control {
@@ -696,7 +1103,8 @@ textarea {
   background: transparent;
   border: 0;
   border-radius: 5px;
-  color: var(--color-text-muted);
+  box-shadow: none;
+  color: var(--color-text);
   display: inline-flex;
   height: 24px;
   justify-content: center;
@@ -705,9 +1113,15 @@ textarea {
   width: 24px;
 }
 
-.editor-window-control:hover {
-  background: #d8ddd5;
-  color: var(--color-text);
+.editor-window-control:hover:not(:disabled) {
+  background: var(--nb-yellow);
+  box-shadow: none;
+  transform: none;
+}
+
+.editor-window-control:active:not(:disabled) {
+  box-shadow: none;
+  transform: none;
 }
 
 .editor-window-close {
@@ -737,7 +1151,7 @@ textarea {
 .workbench-empty,
 .editor-window-empty {
   align-content: center;
-  color: #425147;
+  color: var(--color-text);
   display: grid;
   flex: 1;
   justify-items: center;
@@ -748,7 +1162,7 @@ textarea {
 
 .workbench-empty p,
 .editor-window-empty p {
-  color: #617066;
+  color: var(--color-text-muted);
   margin-bottom: 0;
 }
 
@@ -780,17 +1194,17 @@ textarea {
 }
 
 .component-value-editor span {
-  color: #425147;
+  color: var(--color-text);
   font-size: 13px;
   font-weight: 700;
 }
 
 .component-value-editor input {
   background: #ffffff;
-  border: 1px solid #aeb6ad;
+  border: 2px solid #111111;
   border-radius: 6px;
-  color: #17201a;
-  font-family: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  color: var(--color-text);
+  font-family: var(--font-mono);
   font-size: 13px;
   min-height: 34px;
   padding: 6px 10px;
@@ -798,8 +1212,7 @@ textarea {
 }
 
 .component-value-editor input:focus {
-  border-color: #23533a;
-  box-shadow: 0 0 0 2px rgba(35, 83, 58, 0.14);
+  box-shadow: 3px 3px 0 var(--nb-blue);
   outline: none;
 }
 
@@ -818,10 +1231,10 @@ textarea {
 
 code,
 pre {
-  background: #eef0ea;
+  background: var(--color-surface);
   border-radius: 6px;
-  color: #17201a;
-  font-family: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  color: var(--color-text);
+  font-family: var(--font-mono);
 }
 
 code {
@@ -841,9 +1254,13 @@ pre {
 }
 
 .simulation-ok {
-  color: #1d6332;
+  background: var(--color-success-bg);
+  border: 2px solid #111111;
+  border-radius: 8px;
+  color: var(--color-text);
   font-size: 14px;
   font-weight: 700;
+  padding: 8px 12px;
 }
 
 .simulation-ok .text-button {
@@ -860,21 +1277,15 @@ pre {
 
 .play-simulation-button {
   align-items: center;
-  background: #23533a;
-  border-color: #23533a;
+  background: var(--nb-yellow);
   border-radius: 999px;
-  color: #ffffff;
+  color: #111111;
   display: inline-flex;
   font-size: 17px;
   justify-content: center;
   min-height: 42px;
   padding: 0;
   width: 42px;
-}
-
-.play-simulation-button:hover {
-  background: #1b432e;
-  border-color: #1b432e;
 }
 
 .play-simulation-button span {
@@ -890,8 +1301,10 @@ pre {
   display: none;
 }
 
+/* ── Waveform page ── */
+
 .waveform-page-shell {
-  background: #f5f3ee;
+  background: var(--color-page);
 }
 
 .waveform-page {
@@ -910,9 +1323,10 @@ pre {
 }
 
 .waveform-page-header {
-  background: #ffffff;
-  border: 1px solid #d8d9d2;
-  border-radius: 8px;
+  background: var(--color-panel);
+  border: 2px solid #111111;
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
   padding: 22px;
 }
 
@@ -922,7 +1336,7 @@ pre {
 
 .waveform-page-summary p,
 .empty-waveform-page p {
-  color: #617066;
+  color: var(--color-text-muted);
   margin-bottom: 0;
 }
 
@@ -935,15 +1349,17 @@ pre {
 }
 
 .waveform-card {
-  border: 1px solid #d8d9d2;
-  border-radius: 8px;
+  background: var(--color-chart-bg);
+  border: 2px solid #111111;
+  border-radius: 10px;
   margin-top: 18px;
   overflow: hidden;
   padding: 12px;
 }
 
 .waveform-toolbar {
-  border-bottom: 1px solid #d8d9d2;
+  background: var(--color-surface);
+  border-bottom: 2px solid #111111;
   display: grid;
   gap: 10px;
   margin: -12px -12px 12px;
@@ -951,7 +1367,6 @@ pre {
   position: sticky;
   top: 0;
   z-index: 2;
-  background: #ffffff;
 }
 
 .waveform-actions,
@@ -968,16 +1383,18 @@ pre {
 
 .trace-picker label {
   align-items: center;
-  border: 1px solid #d8d9d2;
-  border-radius: 8px;
-  color: #425147;
+  background: #ffffff;
+  border: 2px solid #111111;
+  border-radius: 999px;
+  box-shadow: var(--shadow-xs);
+  color: var(--color-text);
   cursor: pointer;
   display: inline-flex;
   font-size: 13px;
   font-weight: 700;
   gap: 7px;
   min-height: 34px;
-  padding: 0 10px;
+  padding: 0 12px;
 }
 
 .trace-picker input {
@@ -995,25 +1412,26 @@ pre {
 }
 
 .waveform-card text {
-  fill: #425147;
+  fill: var(--color-text-muted);
   font-size: 12px;
 }
 
 .chart-bg {
-  fill: #fafaf7;
+  fill: var(--color-chart-bg);
 }
 
 .grid-line {
-  stroke: #d8d9d2;
+  stroke: var(--color-diagram-grid-small);
   stroke-width: 1;
 }
 
 .axis-line {
-  stroke: #617066;
-  stroke-width: 1.5;
+  stroke: #111111;
+  stroke-width: 2;
 }
 
 .trace-picker i {
+  border: 1px solid #111111;
   border-radius: 999px;
   display: inline-block;
   height: 10px;
@@ -1021,19 +1439,20 @@ pre {
 }
 
 .cursor-line {
-  stroke: #97362a;
+  stroke: var(--nb-pink);
   stroke-dasharray: 4 4;
-  stroke-width: 1.5;
+  stroke-width: 2;
 }
 
 .cursor-box {
   fill: #ffffff;
-  opacity: 0.94;
-  stroke: #b8beb5;
+  opacity: 0.97;
+  stroke: #111111;
+  stroke-width: 1.5;
 }
 
 .empty-chart {
-  color: #617066;
+  color: var(--color-text-muted);
   margin: 8px 0 0;
   padding: 18px 6px 6px;
 }
@@ -1047,10 +1466,12 @@ pre {
   font-weight: 700;
 }
 
+/* ── Schematic canvas: ink drawing on paper ── */
+
 .diagram-card {
-  background: #f7f8f4;
-  border: 1px solid #d8d9d2;
-  border-radius: 8px;
+  background: var(--color-diagram-bg);
+  border: 2px solid #111111;
+  border-radius: 10px;
   margin-top: 18px;
   overflow: auto;
   padding: 12px;
@@ -1089,14 +1510,8 @@ pre {
   width: 42px;
 }
 
-.component-symbol-button:hover {
-  background: #f7faf5;
-}
-
 .active-tool {
-  background: #e3f3e7;
-  border-color: #23533a;
-  color: #1d6332;
+  background: var(--nb-yellow);
 }
 
 .diagram-card svg {
@@ -1111,40 +1526,28 @@ pre {
 }
 
 .diagram-bg {
-  fill: #fbfbf7;
+  fill: var(--color-diagram-bg);
 }
 
 .diagram-grid-small {
   fill: none;
-  stroke: #e2e5dc;
+  stroke: var(--color-diagram-grid-small);
   stroke-width: 0.8;
 }
 
 .diagram-grid-large {
   fill: none;
-  stroke: #cfd6ca;
+  stroke: var(--color-diagram-grid-large);
   stroke-width: 1.2;
 }
 
 .diagram-wire,
 .diagram-symbol {
   fill: none;
-  stroke: #17201a;
+  stroke: #111111;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
-}
-
-/* Wires share the symbol ink and weight — one pen for the whole drawing. */
-.diagram-wire {
-  stroke: #17201a;
-  stroke-width: 2;
-}
-
-.diagram-wire.pending {
-  stroke: #23533a;
-  stroke-dasharray: 8 8;
-  stroke-width: 2.5;
 }
 
 .diagram-wire {
@@ -1152,21 +1555,27 @@ pre {
   pointer-events: stroke;
 }
 
+.diagram-wire.pending {
+  stroke: var(--nb-pink);
+  stroke-dasharray: 8 8;
+  stroke-width: 2.5;
+}
+
 .diagram-wire:hover,
 .diagram-wire.selected {
-  stroke: #23533a;
+  stroke: var(--nb-blue);
   stroke-width: 4;
 }
 
 .diagram-bridge-clear {
-  stroke: #fbfbf7;
+  stroke: var(--color-diagram-bg);
   stroke-linecap: round;
   stroke-width: 7;
 }
 
 .diagram-bridge-arc {
   fill: none;
-  stroke: #17201a;
+  stroke: #111111;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
@@ -1174,52 +1583,52 @@ pre {
 
 .diagram-fill {
   fill: #ffffff;
-  stroke: #17201a;
+  stroke: #111111;
   stroke-linejoin: round;
   stroke-width: 2;
 }
 
 .diagram-node {
-  fill: #23533a;
+  fill: #111111;
 }
 
 .diagram-net {
-  fill: #eef0ea;
-  stroke: #b8beb5;
+  fill: var(--color-surface);
+  stroke: #111111;
 }
 
 .diagram-slot-rect {
   fill: none;
-  stroke: #c2c8bd;
+  stroke: var(--color-border-soft);
   stroke-dasharray: 8 6;
   stroke-width: 1.5;
 }
 
 .diagram-slot-label {
-  fill: #b4b9ac;
+  fill: var(--color-text-subtle);
   font-size: 22px;
   font-weight: 600;
 }
 
 .diagram-slot-pin-dot {
-  fill: #c2c8bd;
+  fill: var(--color-border-soft);
 }
 
 .diagram-slot-pin-label {
-  fill: #9aa093;
+  fill: var(--color-text-subtle);
   font-size: 12px;
   font-weight: 600;
 }
 
 .diagram-ground {
   fill: none;
-  stroke: #17201a;
+  stroke: #111111;
   stroke-linecap: round;
   stroke-width: 2;
 }
 
 .diagram-text {
-  fill: #17201a;
+  fill: #111111;
   font-size: 14px;
   font-weight: 700;
   pointer-events: none;
@@ -1228,7 +1637,7 @@ pre {
 }
 
 .diagram-small {
-  fill: #425147;
+  fill: var(--color-text-muted);
   font-size: 12px;
   pointer-events: none;
   user-select: none;
@@ -1248,18 +1657,18 @@ pre {
 .editable-component:hover .diagram-symbol,
 .editable-component.selected .diagram-symbol,
 .editable-net:hover .diagram-net {
-  stroke: #23533a;
+  stroke: var(--nb-blue);
   stroke-width: 3;
 }
 
 .editable-net:hover .diagram-ground,
 .editable-net.selected .diagram-ground {
-  stroke: #23533a;
+  stroke: var(--nb-blue);
   stroke-width: 3;
 }
 
 .editable-net.selected .diagram-net {
-  stroke: #23533a;
+  stroke: var(--nb-blue);
   stroke-width: 3;
 }
 
@@ -1280,7 +1689,7 @@ pre {
 .terminal-dot {
   fill: #ffffff;
   opacity: 0;
-  stroke: #23533a;
+  stroke: var(--nb-blue);
   stroke-width: 2;
 }
 
@@ -1291,8 +1700,22 @@ pre {
 }
 
 .terminal-dot.selected {
-  fill: #23533a;
+  fill: var(--nb-blue);
 }
+
+/* Net names read as plain hand-lettered flags; the box only appears as an
+   affordance when hovered or selected. */
+.editable-net .diagram-net {
+  fill: transparent;
+  stroke: transparent;
+}
+
+.diagram-port .diagram-net {
+  fill: var(--color-diagram-bg);
+  stroke: var(--color-text-muted);
+}
+
+/* ── Code editors ── */
 
 .editor-header {
   align-items: flex-start;
@@ -1302,16 +1725,16 @@ pre {
 }
 
 .editor-header p {
-  color: #617066;
+  color: var(--color-text-muted);
   margin-bottom: 0;
 }
 
 .code-editor {
-  background: #eef0ea;
-  border: 1px solid #d8d9d2;
-  border-radius: 6px;
-  color: #17201a;
-  font-family: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  background: var(--color-code);
+  border: 2px solid #111111;
+  border-radius: 8px;
+  color: var(--color-text);
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.45;
   margin-top: 16px;
@@ -1321,6 +1744,63 @@ pre {
   tab-size: 2;
   white-space: pre;
 }
+
+/* ── Netlist diff review ── */
+
+.netlist-review-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 4px;
+  margin-left: 10px;
+  vertical-align: middle;
+}
+
+.netlist-review-button {
+  border-width: 2px;
+  box-shadow: var(--shadow-xs);
+  color: #111111;
+  font-size: 14px;
+  font-weight: 800;
+  height: 26px;
+  min-height: 26px;
+  min-width: 26px;
+  padding: 0;
+}
+
+.netlist-review-button.accept {
+  background: var(--color-success-bg);
+}
+
+.netlist-review-button.reject {
+  background: var(--color-error-bg);
+}
+
+.netlist-diff {
+  padding: 12px;
+}
+
+.netlist-diff .diff-line {
+  align-items: center;
+  display: flex;
+  min-height: 1.45em;
+  width: max-content;
+}
+
+.netlist-diff .diff-line code {
+  font: inherit;
+  white-space: pre;
+}
+
+.netlist-diff .diff-line.changed {
+  background: var(--nb-yellow);
+  box-shadow: -12px 0 var(--nb-yellow), 12px 0 var(--nb-yellow);
+}
+
+.netlist-diff .diff-line.changed code {
+  color: #111111;
+}
+
+/* ── Responsive ── */
 
 @media (max-width: 900px) {
   .app-shell {
@@ -1358,7 +1838,7 @@ pre {
   .editor-split-row {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
     min-height: auto;
   }
 
@@ -1371,374 +1851,14 @@ pre {
   }
 }
 
-.netlist-review-actions {
-  display: inline-flex;
-  flex: 0 0 auto;
-  gap: 4px;
-  margin-left: 10px;
-  vertical-align: middle;
-}
+/* ── Motion accessibility ── */
 
-.netlist-review-button {
-  color: #ffffff;
-  font-size: 14px;
-  font-weight: 700;
-  height: 24px;
-  min-width: 24px;
-  padding: 0;
-}
-
-.netlist-review-button.accept {
-  background: #237a43;
-  border-color: #237a43;
-}
-
-.netlist-review-button.reject {
-  background: #b63b31;
-  border-color: #b63b31;
-}
-
-.netlist-diff {
-  padding: 12px;
-}
-
-.netlist-diff .diff-line {
-  align-items: center;
-  display: flex;
-  min-height: 1.45em;
-  width: max-content;
-}
-
-.netlist-diff .diff-line code {
-  font: inherit;
-  white-space: pre;
-}
-
-.netlist-diff .diff-line.changed {
-  background: #ffe58a;
-  box-shadow: -12px 0 #ffe58a, 12px 0 #ffe58a;
-}
-
-/* Dark theme overrides */
-html,
-body {
-  background: var(--color-page);
-  color: var(--color-text);
-}
-
-body,
-.app-shell,
-.waveform-page-shell {
-  background: var(--color-page);
-}
-
-button,
-textarea,
-input {
-  background: var(--color-surface-soft);
-  border-color: var(--color-border);
-  color: var(--color-text);
-}
-
-button:hover,
-button:focus-visible,
-textarea:focus,
-input:focus {
-  border-color: var(--color-primary);
-  outline-color: var(--color-primary);
-}
-
-button.primary,
-.play-simulation-button,
-.netlist-review-button.accept {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  color: #102116;
-}
-
-button.primary:hover,
-.play-simulation-button:hover {
-  background: var(--color-primary-hover);
-  border-color: var(--color-primary-hover);
-}
-
-.text-button {
-  color: var(--color-primary-pressed);
-}
-
-.main-panel,
-.panel-block,
-.waveform-page-header {
-  background: var(--color-panel);
-  border-color: var(--color-border);
-}
-
-.eyebrow,
-.chat-section-label,
-.chat-history-copy small,
-.chat-history-item time,
-.chat-welcome p,
-.empty-state p:last-child,
-.workbench-empty p,
-.editor-window-empty p,
-.editor-header p,
-.waveform-page-summary p,
-.empty-waveform-page p,
-.empty-chart,
-.chat-message.pending {
-  color: var(--color-text-muted);
-}
-
-.prompt-box span,
-.chat-welcome,
-.component-value-editor span,
-.workbench-empty,
-.editor-window-empty,
-.waveform-card text,
-.diagram-small,
-.trace-picker label {
-  color: var(--color-text);
-  fill: var(--color-text);
-}
-
-.chat-conversation-header,
-.editor-launchbar,
-.waveform-toolbar,
-.editor-window-titlebar {
-  border-color: var(--color-border);
-}
-
-.editor-window,
-.waveform-card,
-.diagram-card {
-  background: var(--color-canvas);
-  border-color: var(--color-border);
-}
-
-.chat-message,
-.editor-window-titlebar,
-.waveform-toolbar,
-.trace-picker label,
-.cursor-box {
-  background: var(--color-surface-soft);
-  border-color: var(--color-border);
-  color: var(--color-text);
-}
-
-.chat-artifact-chip {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  color: var(--color-text);
-}
-
-.chat-message.user {
-  background: var(--color-primary);
-  border-color: var(--color-primary);
-  color: #102116;
-}
-
-.chat-message.user .chat-message-meta time {
-  color: #3a1c10;
-}
-
-.chat-artifact-chip span,
-.chat-message-meta time,
-.user-bar,
-.user-bar button {
-  color: var(--color-text-muted);
-}
-
-.chat-history-item.active,
-.active-tool,
-.live-code-editor,
-.code-editor:read-only {
-  background: var(--color-primary-soft);
-  border-color: var(--color-primary-border);
-  color: var(--color-text);
-}
-
-.editor-window.active {
-  border-color: var(--color-primary);
-}
-
-/* Focused tab: subtle accent underline instead of a solid fill. */
-.editor-launchbar button.active {
-  box-shadow: inset 0 -2px 0 var(--color-primary);
-}
-
-.editor-window {
-  background: var(--color-surface-soft);
-}
-
-.editor-window.active {
-  box-shadow: 0 0 0 1px var(--color-primary);
-}
-
-.editor-window-titlebar,
-.editor-window.active .editor-window-titlebar {
-  background: var(--color-surface);
-}
-
-.editor-window-control:hover,
-.component-symbol-button:hover {
-  background: var(--color-primary-soft);
-  color: var(--color-text);
-}
-
-.editor-resize-handle::before {
-  background: var(--color-border);
-}
-
-.editor-resize-handle span {
-  background: var(--color-text-subtle);
-}
-
-.editor-resize-handle:hover::before,
-.editor-resize-handle:focus-visible::before,
-.resizing-columns .editor-resize-handle.columns::before,
-.resizing-rows > .editor-resize-handle.rows::before {
-  background: var(--color-primary);
-}
-
-.component-value-editor input,
-code,
-pre,
-.code-editor {
-  background: var(--color-code);
-  border-color: var(--color-border);
-  color: var(--color-text);
-}
-
-.component-value-editor input:focus {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.2);
-}
-
-.simulation-ok {
-  background: var(--color-primary-soft);
-  color: var(--color-primary-pressed);
-}
-
-.inline-error {
-  color: var(--color-error-text);
-}
-
-.netlist-review-button.reject {
-  background: var(--color-error-border);
-  border-color: var(--color-error-border);
-}
-
-.netlist-diff .diff-line.changed {
-  background: var(--color-warning-bg);
-  box-shadow: -12px 0 var(--color-warning-bg), 12px 0 var(--color-warning-bg);
-}
-
-.netlist-diff .diff-line.changed code {
-  color: var(--color-warning-text);
-}
-
-.chart-bg {
-  fill: var(--color-chart-bg);
-}
-
-.grid-line {
-  stroke: var(--color-border-soft);
-}
-
-.axis-line {
-  stroke: var(--color-text-muted);
-}
-
-.cursor-line {
-  stroke: var(--color-primary-hover);
-}
-
-.cursor-box {
-  fill: var(--color-surface);
-  opacity: 0.96;
-  stroke: var(--color-border);
-}
-
-.diagram-bg {
-  fill: var(--color-diagram-bg);
-}
-
-.diagram-grid-small {
-  stroke: var(--color-diagram-grid-small);
-}
-
-.diagram-grid-large {
-  stroke: var(--color-diagram-grid-large);
-}
-
-.diagram-wire,
-.diagram-symbol,
-.diagram-ground,
-.diagram-bridge-arc {
-  stroke: var(--color-text);
-}
-
-.diagram-bridge-clear {
-  stroke: var(--color-diagram-bg);
-}
-
-.diagram-wire.pending,
-.diagram-wire:hover,
-.diagram-wire.selected,
-.editable-component:hover .diagram-symbol,
-.editable-component.selected .diagram-symbol,
-.editable-net:hover .diagram-net,
-.editable-net:hover .diagram-ground,
-.editable-net.selected .diagram-ground,
-.editable-net.selected .diagram-net {
-  stroke: var(--color-primary);
-}
-
-.diagram-fill,
-.terminal-dot {
-  fill: var(--color-surface-soft);
-  stroke: var(--color-text);
-}
-
-/* Junction and node dots are drawn with the same ink as the wires they join. */
-.diagram-node {
-  fill: var(--color-text);
-}
-
-.terminal-dot.selected {
-  fill: var(--color-primary);
-}
-
-.diagram-net {
-  fill: var(--color-surface);
-  stroke: var(--color-border);
-}
-
-.diagram-slot-rect {
-  stroke: var(--color-border);
-}
-
-.diagram-slot-label,
-.diagram-slot-pin-label {
-  fill: var(--color-text-muted);
-}
-
-.diagram-slot-pin-dot {
-  fill: var(--color-border);
-}
-
-/* Net names read as plain hand-lettered flags; the box only appears as an
-   affordance when hovered or selected. */
-.editable-net .diagram-net {
-  fill: transparent;
-  stroke: transparent;
-}
-
-.diagram-port .diagram-net {
-  fill: var(--color-diagram-bg);
-  stroke: var(--color-text-muted);
-}
-
-.diagram-text {
-  fill: var(--color-text);
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

@@ -129,7 +129,7 @@ Use these node orders consistently:
 | `load` | `[positive_or_input, return]` |
 | `regulator` | `[input, ground, output]` |
 | `opamp` | `[non_inverting, inverting, output, positive_supply, negative_supply]` |
-| `arduino_uno` | `[5V, 3V3, GND, VIN, D2, D3, D5, D9, D13, A0, A1, A2]` (exactly 12 nodes) |
+| `arduino_uno` | `[5V, 3V3, GND, VIN, D0, D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11, D12, D13, A0, A1, A2, A3, A4, A5]` (exactly 24 nodes) |
 | `raspberry_pi` | `[5V, 3V3, GND, GPIO2, GPIO3, GPIO4, GPIO17, GPIO18, GPIO27, GPIO22]` (exactly 10 nodes) |
 | `esp32` | `[3V3, GND, VIN, EN, GPIO2, GPIO4, GPIO5, GPIO13, GPIO18, GPIO19, GPIO21, GPIO22]` (exactly 12 nodes) |
 
@@ -210,6 +210,9 @@ Before returning a circuit, verify:
 - MOSFET gates are not left floating.
 - Switching transistors have a defined load path.
 - Inductive loads have a flyback diode when switched.
+- Buzzers, motors, relay coils, and speakers are switched by a transistor stage, never wired directly onto a GPIO pin's net.
+- No resistor "divider" runs from a GPIO-driven load node to ground — that pattern powers nothing and defeats the GPIO's switching.
+- Each GPIO pin sources/sinks at most ~12 mA (esp32, raspberry_pi) or ~20 mA (arduino_uno); anything heavier goes through a transistor.
 - Op amps have supply rails and feedback when used as linear amplifiers.
 - Regulators include appropriate input and output capacitors.
 - The requested output node is clearly named.
@@ -225,7 +228,7 @@ Structure: `VIN -- R1 -- VOUT -- R2 -- 0`
 - Typical values: `R1 = 10k`, `R2 = 10k`.
 - Divider current should usually be around 0.1-1 mA.
 - Formula: `VOUT = VIN * R2 / (R1 + R2)`.
-- Avoid using a divider as a power supply for a substantial load.
+- Avoid using a divider as a power supply for a substantial load, and never build one on a GPIO-driven net (see Actuator Driver Rules).
 
 ### LED Indicator
 
@@ -315,6 +318,38 @@ Structure: `U1(D13) -- RLED -- DLED1 -- 0`, with `U1(GND) -- 0`.
 - Never drive an LED from a GPIO without a series resistor.
 - Return matching firmware in the top-level `code` field that drives the same pin.
 
+### Actuator Driver Rules (buzzer, motor, relay coil, speaker)
+
+A GPIO pin can only source or sink a few milliamps (~12 mA on esp32/raspberry_pi, ~20 mA on arduino_uno). Any actuator heavier than a small LED must be switched by a transistor stage:
+
+- Structure: `GPIO -- RBASE(1k) -- BASE`, `EMITTER -- 0`, `SUPPLY -- ACTUATOR -- COLLECTOR`.
+- Never place the actuator on the GPIO pin's own net.
+- Never add a resistor from the GPIO/load net to ground as a "divider" — it does not switch the load; the base resistor belongs **in series between the GPIO and the base**.
+- Motors and relay coils additionally need a flyback diode across the load (cathode to the supply side).
+- GPIO current budget: ~12 mA per pin on esp32 and raspberry_pi, ~20 mA on arduino_uno. When in doubt, drive through the transistor.
+
+Worked example — ESP32 GPIO2 switching an active buzzer. The buzzer sits between 3V3 and the collector; GPIO2 only ever sees the 1k base resistor:
+
+```
+RB1   CTRL  BASE  1k       ; GPIO2 net -> series base resistor
+Q1    BZLOW BASE  0 2N2222 ; nodes [collector, base, emitter]
+RBZ1  VCC3  BZLOW 100      ; buzzer modeled as a resistive load
+* U1 esp32 (wiring-only)
+```
+
+Matching JSON components (esp32 pin order: 3V3, GND, VIN, EN, GPIO2, GPIO4, GPIO5, GPIO13, GPIO18, GPIO19, GPIO21, GPIO22):
+
+```json
+[
+  {"ref":"U1","kind":"esp32","value":"DevKit V1","nodes":["VCC3","0","NC_U1_3","NC_U1_4","CTRL","NC_U1_6","NC_U1_7","NC_U1_8","NC_U1_9","NC_U1_10","NC_U1_11","NC_U1_12"],"footprint":"Module:ESP32-DevKitC"},
+  {"ref":"RB1","kind":"resistor","value":"1k","nodes":["CTRL","BASE"],"footprint":"Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"},
+  {"ref":"Q1","kind":"bjt_npn","value":"2N2222","nodes":["BZLOW","BASE","0"],"footprint":"Package_TO_SOT_THT:TO-92_Inline"},
+  {"ref":"RBZ1","kind":"buzzer","value":"5V active","nodes":["VCC3","BZLOW"],"footprint":"Buzzer_Beeper:Buzzer_12x9.5RM7.6"}
+]
+```
+
+Here `CTRL` connects to U1.GPIO2 and RB1 (two pins), `BASE` connects to RB1 and Q1 (two pins), and `BZLOW` connects to RBZ1 and Q1's collector (two pins) — the GPIO switches the base current only, and the buzzer's supply current flows through the transistor, never through the GPIO. The same structure applies to dc_motor (add a flyback diode across the motor) and any speaker or lamp.
+
 ### Pull-Up, Pull-Down, and Debounce
 
 - Pull-up: `VCC -- RPULL -- INPUT`, switch from `INPUT` to `0`.
@@ -381,7 +416,7 @@ When specs are missing, choose conservative defaults and record them in `notes`:
 - Ground: node `"0"`
 - Output node: `"VOUT"`
 
-Do not ask for clarification when a safe and reasonable default produces a useful educational circuit. Ask or decline only when missing information materially affects safety or correctness.
+Clarifying questions are handled by a separate pre-generation round (`/api/clarify-circuit`): the user answers multiple-choice questions before this generation call runs, and their answers arrive inside the prompt as `User clarifications:` lines. Never ask for clarification in this call — apply the user's clarification answers when present (they override the conservative defaults above), and fall back to those defaults for any answer marked "No preference (you decide)" or missing entirely.
 
 ## Output Style
 

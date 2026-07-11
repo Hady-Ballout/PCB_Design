@@ -1,6 +1,8 @@
 import { normalizeChatMemory, sanitizeConversationHistory } from './chatMemory.js';
 import { circuitKnowledgePrompt } from './circuitKnowledge.js';
 import { parseSpiceNetlist } from '../../src/core/circuitSync.js';
+import { toSpice } from '../../src/core/pcbGenerator.js';
+import { applySafeAutoFixes, checkCircuitTopology, composeTopologyCorrection } from '../../src/core/topologyRules.js';
 import {
   ALLOWED_KINDS,
   COMPOUND_SPICE_KINDS,
@@ -15,9 +17,11 @@ import type {
   Circuit,
   CorrectionContext,
   CurrentDesign,
+  GeneratedCircuit,
   OllamaRequestBody,
   ParsedCircuitResponse,
   ProviderConfig,
+  RuleViolation,
   StreamState,
 } from '../types.js';
 
@@ -38,6 +42,15 @@ const COMPOUND_NODE_HINTS = ALLOWED_KINDS
   .filter((kind) => COMPOUND_SPICE_KINDS.has(kind) && !FIXED_PIN_NAMES[kind])
   .map((kind) => `${kind} (${DEFAULT_PIN_COUNT_BY_KIND[kind]} nodes)`)
   .join(', ');
+
+// Kinds whose pins are mapped by position downstream (breadboard leg layouts,
+// fixed pin names, compound SPICE expansion); a wrong node count is rejected
+// rather than silently mis-wired.
+const POSITIONAL_NODE_KINDS = new Set([
+  ...Object.keys(FIXED_PIN_NAMES),
+  ...COMPOUND_SPICE_KINDS,
+  'opamp', 'comparator', 'pushbutton', 'bjt_npn', 'bjt_pnp', 'mosfet_n', 'mosfet_p',
+]);
 
 const SYSTEM_PROMPT = `You are a JSON API for beginner-safe electronics circuit generation.
 Return exactly one valid JSON object and no other text.
@@ -63,7 +76,7 @@ Component refs must be SPICE-compatible because the program will simulate them w
 - regulator refs may use U in the JSON, but include enough surrounding passives/load nodes for simulation.
 - microcontroller board refs (arduino_uno, raspberry_pi, esp32) start with U, e.g. U1.
 Microcontroller boards use fixed positional pin lists. The nodes array must have exactly this length and order, with "NC_<REF>_<pinNumber>" for every unused pin:
-- arduino_uno (12 nodes): 5V, 3V3, GND, VIN, D2, D3, D5, D9, D13, A0, A1, A2
+- arduino_uno (24 nodes): 5V, 3V3, GND, VIN, D0, D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11, D12, D13, A0, A1, A2, A3, A4, A5
 - raspberry_pi (10 nodes): 5V, 3V3, GND, GPIO2, GPIO3, GPIO4, GPIO17, GPIO18, GPIO27, GPIO22
 - esp32 (12 nodes): 3V3, GND, VIN, EN, GPIO2, GPIO4, GPIO5, GPIO13, GPIO18, GPIO19, GPIO21, GPIO22
 Use value for the board name, e.g. "Uno R3", "Pi 5", or "DevKit V1".
@@ -72,8 +85,15 @@ Connect the board's GND pin to node 0. When no separate supply exists, power the
 Added sensor and module parts (${WIRING_ONLY_PARTS}) are wiring-only like microcontroller boards: they are never simulated, so emit each only as a SPICE comment line, for example "* U1 dht_sensor (wiring-only)". Every component that is not a microcontroller board or a wiring-only part must still appear as a real SPICE element.
 The following parts use fixed positional node lists; the nodes array length and order must match exactly, using "NC_<REF>_<pinNumber>" for any unused pin:
 ${FIXED_PIN_CONTRACT}
-Compound parts expand into several SPICE lines and take a fixed node count: ${COMPOUND_NODE_HINTS}. The remaining two-lead additions (zener as D with a breakdown value like 5.1, photoresistor/thermistor/buzzer/dc_motor/pushbutton as R, crystal as C) follow the standard ref-prefix rules above.
+Compound parts take a fixed node count (${COMPOUND_NODE_HINTS}; seven_segment uses its 9 fixed pins) and never appear in SPICE as one element line with their bare ref. Write only their derived lines, named <REF>_<suffix>, using the exact JSON node names:
+- potentiometer nodes [END_A, WIPER, END_B]: "<REF>_A END_A WIPER 5k" plus "<REF>_B WIPER END_B 5k" (each line gets half the total resistance).
+- switch_spdt nodes [THROW1, COM, THROW2]: "<REF>_A COM THROW1 1m" plus "<REF>_B COM THROW2 10Meg".
+- rgb_led nodes [R_ANODE, G_ANODE, B_ANODE, CATHODE]: "<REF>_R R_ANODE CATHODE DRED", "<REF>_G G_ANODE CATHODE DGRN", "<REF>_B B_ANODE CATHODE DBLU". An rgb_led is never one two-node diode line.
+- seven_segment: one diode per used segment to COM, e.g. "<REF>_A <A node> <COM node> DRED".
+The remaining two-lead additions (zener as D with a breakdown value like 5.1, photoresistor/thermistor/buzzer/dc_motor/pushbutton as R, crystal as C) follow the standard ref-prefix rules above.
 A GPIO/digital pin driving a load must share its net with at least one other component, e.g. a series resistor. Only add a separate voltage_source or signal_source for a pin's waveform when the user explicitly wants to simulate that pin's behavior.
+Never drive a buzzer, motor, relay coil, or speaker directly from a GPIO pin — always switch it with an NPN transistor or N-MOSFET: GPIO pin -> 1k base resistor -> base, emitter -> 0, load between the supply and the collector, plus a flyback diode across any motor or coil.
+Never build a resistor divider to "power" a load from a GPIO net: a resistor from a GPIO-driven load node to ground does not switch anything and just wastes current.
 When circuit.components includes a microcontroller board (arduino_uno, raspberry_pi, or esp32), also return a top-level "code" field with complete ready-to-run firmware for that board:
 - arduino_uno: an Arduino C++ sketch with setup() and loop(). Use the digit from the pin name: D13 is pin 13, A0 is A0.
 - esp32: an Arduino-style C++ sketch with setup() and loop(). Use the GPIO number: GPIO2 is pin 2.
@@ -196,7 +216,7 @@ export const AI_RESPONSE_SCHEMA = {
   required: ['reply', 'circuit', 'spice'],
 } as const;
 
-function findBalancedJson(text: string): { jsonText: string; balanced: boolean } {
+export function findBalancedJson(text: string): { jsonText: string; balanced: boolean } {
   const start = text.indexOf('{');
   if (start === -1) return { jsonText: '', balanced: false };
 
@@ -248,7 +268,7 @@ const describeComponent = (component: ComponentLike): string => {
   return `${ref}: ${kind}, value=${value}, nodes=${nodes}`;
 };
 
-const currentCircuitInventory = (circuit: Circuit | null | undefined): string => {
+export const currentCircuitInventory = (circuit: Circuit | null | undefined): string => {
   const components = Array.isArray(circuit?.components) ? circuit!.components : [];
   if (!components.length) return '';
   const refs = components.map((component) => String(component.ref || '').toUpperCase()).filter(Boolean);
@@ -299,6 +319,13 @@ export function validateCircuitResponse(circuit: Record<string, unknown>): strin
       if (typeof component.value !== 'string' || !component.value) errors.push(`${label}.value must be a non-empty string`);
       if (!Array.isArray(component.nodes) || (component.nodes as unknown[]).length === 0 || (component.nodes as unknown[]).some((node: unknown) => typeof node !== 'string')) {
         errors.push(`${label}.nodes must be a non-empty array of strings`);
+      } else if (POSITIONAL_NODE_KINDS.has(component.kind as string)
+        && (component.nodes as unknown[]).length !== DEFAULT_PIN_COUNT_BY_KIND[component.kind as string]) {
+        // Positional kinds map pins by index (breadboard leg layouts, SPICE
+        // expansion, fixed pin names), so a wrong-length nodes array silently
+        // wires the wrong physical pins downstream.
+        const expectedOrder = FIXED_PIN_NAMES[component.kind as string];
+        errors.push(`${label}.nodes must list exactly ${DEFAULT_PIN_COUNT_BY_KIND[component.kind as string]} nodes for kind ${component.kind}${expectedOrder ? ` in the order [${expectedOrder.join(', ')}]` : ''}, using NC_<REF>_<pinNumber> for unused pins`);
       }
       if (typeof component.footprint !== 'string') errors.push(`${label}.footprint must be a string`);
     });
@@ -379,19 +406,37 @@ const electricalSignature = (circuit: Record<string, unknown> | null | undefined
   nodes: (component.nodes || []).map((node) => String(node)),
 })).sort((a, b) => a.ref.localeCompare(b.ref));
 
+// Derived-line suffixes per compound kind, mirrored from the toSpice exporter,
+// so a mismatch on a compound part tells the correction retry exactly which
+// SPICE lines to write instead of just naming the wrong kind.
+const COMPOUND_DERIVED_SUFFIXES: Record<string, string[]> = {
+  potentiometer: ['A', 'B'],
+  switch_spdt: ['A', 'B'],
+  rgb_led: ['R', 'G', 'B'],
+  seven_segment: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'DP'],
+};
+
+const compoundSpiceHint = (component: SignatureEntry | undefined): string | null => {
+  const suffixes = component && COMPOUND_DERIVED_SUFFIXES[component.kind];
+  if (!component || !suffixes) return null;
+  const derived = suffixes.map((suffix) => `${component.ref}_${suffix}`).join(', ');
+  return `${component.ref} is a ${component.kind}, which must appear in SPICE only as derived lines (${derived}) connecting its JSON nodes, never as a single ${component.ref} element line.`;
+};
+
 const describeSignatureMismatch = (expected: SignatureEntry[], actual: SignatureEntry[]): string => {
   const expectedByRef = new Map(expected.map((component) => [component.ref, component]));
   const actualByRef = new Map(actual.map((component) => [component.ref, component]));
   const missing = expected.filter((component) => !actualByRef.has(component.ref)).map((component) => component.ref);
   const extra = actual.filter((component) => !expectedByRef.has(component.ref)).map((component) => component.ref);
-  if (missing.length) return `SPICE is missing component ${missing[0]}.`;
+  if (missing.length) return compoundSpiceHint(expectedByRef.get(missing[0])) || `SPICE is missing component ${missing[0]}.`;
   if (extra.length) return `SPICE includes unexpected component ${extra[0]}.`;
 
   for (const expectedComponent of expected) {
     const actualComponent = actualByRef.get(expectedComponent.ref);
     if (!actualComponent) continue;
     if (actualComponent.kind !== expectedComponent.kind) {
-      return `${expectedComponent.ref} has kind ${actualComponent.kind} in SPICE but ${expectedComponent.kind} in JSON.`;
+      return compoundSpiceHint(expectedComponent)
+        || `${expectedComponent.ref} has kind ${actualComponent.kind} in SPICE but ${expectedComponent.kind} in JSON.`;
     }
     if (actualComponent.value !== expectedComponent.value) {
       return `${expectedComponent.ref} has value ${actualComponent.value} in SPICE but ${expectedComponent.value} in JSON.`;
@@ -432,7 +477,10 @@ const sanitizeFirmwareCode = (value: unknown): string => {
   return text.replace(/^```[a-zA-Z0-9+-]*\s*\n?/, '').replace(/\n?```\s*$/, '').trim();
 };
 
-export function parseCircuitResponse(text: string): ParsedCircuitResponse {
+export function parseCircuitResponse(
+  text: string,
+  options: { regenerateSpiceOnMismatch?: boolean } = {},
+): ParsedCircuitResponse {
   const trimmed = text.trim();
   const { jsonText, balanced } = findBalancedJson(trimmed);
   if (!jsonText) {
@@ -469,22 +517,36 @@ export function parseCircuitResponse(text: string): ParsedCircuitResponse {
     );
   }
   const normalizedCircuit = normalizeCircuitForValidation(circuit);
-  validateAiSpice(responseObject.spice, normalizedCircuit);
+  let spice = responseObject.spice as string;
+  try {
+    validateAiSpice(responseObject.spice, normalizedCircuit);
+  } catch (error) {
+    // The JSON circuit is canonical and already schema-validated. On the last
+    // attempt, a deck the model still cannot reconcile (compound parts like
+    // rgb_led are the usual culprit) is regenerated deterministically from the
+    // JSON instead of failing the whole chat turn.
+    if (!options.regenerateSpiceOnMismatch || (error as CircuitGenerationError).code !== 'spice_validation') throw error;
+    try {
+      spice = toSpice(normalizedCircuit);
+    } catch {
+      throw error;
+    }
+  }
 
   return {
     reply,
     circuit: normalizedCircuit as unknown as Circuit,
-    spice: responseObject.spice as string,
+    spice,
     code: sanitizeFirmwareCode(responseObject.code),
   };
 }
 
-const positiveIntegerOption = (value: string | undefined, fallback: number): number => {
+export const positiveIntegerOption = (value: string | undefined, fallback: number): number => {
   const parsed = Number.parseInt(value || '', 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-const providerConfig = (): ProviderConfig => {
+export const providerConfig = (): ProviderConfig => {
   const provider = String(process.env.AI_PROVIDER || 'ollama').toLowerCase();
   if (provider === 'ollama') {
     return {
@@ -581,73 +643,85 @@ const authHeaders = (apiKey = ''): Record<string, string> => {
   return headers;
 };
 
-const ollamaHeaders = (): Record<string, string> => authHeaders(process.env.OLLAMA_API_KEY);
+export const ollamaHeaders = (): Record<string, string> => authHeaders(process.env.OLLAMA_API_KEY);
 
 const retryableOutputCodes = new Set([
   'json_missing', 'json_truncated', 'json_syntax', 'schema_validation', 'spice_validation',
 ]);
 
+const MAX_GENERATION_ATTEMPTS = 3;
+
 const finalOutputError = (error: CircuitGenerationError): CircuitGenerationError => new CircuitGenerationError(
   error.code || 'invalid_output',
-  `Circuit generation failed after one automatic correction attempt. ${error.message}`,
+  `Circuit generation failed after ${MAX_GENERATION_ATTEMPTS - 1} automatic correction attempts. ${error.message}`,
   error,
 );
 
-// Detect the classic simulation-killer: an op-amp input sitting on a node no
-// other component uses (floating high-impedance input → singular matrix). Kept
-// deliberately narrow so it never rejects a legitimately driven output node.
-const floatingOpampInputCorrection = (circuit: Circuit): string | null => {
-  const components = Array.isArray(circuit?.components) ? circuit.components : [];
-  const nodeUse = new Map<string, number>();
-  for (const part of components) {
-    for (const node of part.nodes || []) nodeUse.set(String(node), (nodeUse.get(String(node)) || 0) + 1);
-  }
-  const problems: string[] = [];
-  for (const part of components) {
-    if (part.kind !== 'opamp') continue;
-    const [plus, minus] = (part.nodes || []).map(String);
-    ([['non-inverting (+)', plus], ['inverting (-)', minus]] as const).forEach(([label, node]) => {
-      if (!node || node === '0') return; // a grounded input is fine
-      if ((nodeUse.get(node) || 0) < 2) problems.push(`${part.ref}'s ${label} input (node "${node}")`);
-    });
-  }
-  if (!problems.length) return null;
-  return `Floating op-amp input(s): ${problems.join('; ')} connect to no other component. Each op-amp input must join the rest of the circuit: the inverting input to the feedback/summing network, and the non-inverting input to a reference node — ground "0" or a mid-rail bias-divider node. Reuse the existing reference node name for that input; do not leave it on its own node. Return the corrected circuit and matching SPICE.`;
-};
-
+// Retry policy: structural failures (bad JSON/schema/SPICE) retry with the
+// parser's error text; a parseable circuit is then gated on the topology rule
+// engine, whose error-severity violations become the corrective feedback.
+// Once any attempt has parsed, this never throws — after the retry budget the
+// best candidate (fewest errors, later attempt wins ties) is accepted and its
+// remaining violations surface to the UI instead of failing the chat turn.
 const parseWithCorrectionRetry = async (
   requestAttempt: (correction: CorrectionContext | null, attempt: number) => Promise<string>,
-): Promise<ParsedCircuitResponse> => {
+): Promise<GeneratedCircuit> => {
   let correction: CorrectionContext | null = null;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  let best: { parsed: ParsedCircuitResponse; issues: RuleViolation[]; errorCount: number } | null = null;
+  let lastStructuralError: CircuitGenerationError | null = null;
+
+  for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt += 1) {
     const content = await requestAttempt(correction, attempt);
     let parsed: ParsedCircuitResponse;
     try {
-      parsed = parseCircuitResponse(content);
+      parsed = parseCircuitResponse(content, { regenerateSpiceOnMismatch: attempt === MAX_GENERATION_ATTEMPTS - 1 });
     } catch (error) {
-      if (attempt === 1 || !retryableOutputCodes.has((error as CircuitGenerationError).code)) throw finalOutputError(error as CircuitGenerationError);
+      if (!retryableOutputCodes.has((error as CircuitGenerationError).code)) throw finalOutputError(error as CircuitGenerationError);
+      lastStructuralError = error as CircuitGenerationError;
+      if (attempt === MAX_GENERATION_ATTEMPTS - 1) break;
       correction = { content, error: (error as Error).message };
       continue;
     }
-    // Semantic connectivity check: retry once with a targeted correction, but
-    // never hard-fail on it — accept the circuit (with its warnings) otherwise.
-    const floating = floatingOpampInputCorrection(parsed.circuit);
-    if (floating && attempt === 0) {
-      correction = { content, error: floating };
-      continue;
+    const { violations } = checkCircuitTopology(parsed.circuit) as { violations: RuleViolation[] };
+    const errorCount = violations.filter((entry) => entry.severity === 'error').length;
+    if (!best || errorCount <= best.errorCount) best = { parsed, issues: violations, errorCount };
+    if (!errorCount) {
+      return { ...parsed, issues: violations, generation: { attempts: attempt + 1, degraded: false } };
     }
-    return parsed;
+    correction = { content, error: composeTopologyCorrection(violations) };
   }
-  throw new CircuitGenerationError('invalid_output', 'Circuit generation did not return a usable response.');
+
+  if (best) {
+    // Additive-only repairs (gate pull-down, flyback diode) are safe to apply
+    // deterministically; the deck is regenerated so SPICE stays in sync.
+    const { circuit, violations, applied } = applySafeAutoFixes(best.parsed.circuit, best.issues) as {
+      circuit: Circuit; violations: RuleViolation[]; applied: boolean;
+    };
+    let spice = best.parsed.spice;
+    if (applied) {
+      try {
+        spice = toSpice(circuit as unknown as Record<string, unknown>);
+      } catch { /* keep the original deck if regeneration fails */ }
+    }
+    return {
+      ...best.parsed,
+      circuit,
+      spice,
+      issues: violations,
+      generation: { attempts: MAX_GENERATION_ATTEMPTS, degraded: true },
+    };
+  }
+  throw finalOutputError(lastStructuralError
+    || new CircuitGenerationError('invalid_output', 'Circuit generation did not return a usable response.'));
 };
 
-const ollamaUrl = (): string => `${(process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '')}/api/chat`;
+export const ollamaUrl = (): string => `${(process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/$/, '')}/api/chat`;
 
 const isZaiProvider = (provider: string): boolean => new Set(['zai', 'zhipu', 'bigmodel']).has(provider);
 
 const shouldUseJsonResponseFormat = (): boolean => process.env.AI_RESPONSE_FORMAT !== 'text';
 
-const buildOpenAiCompatibleBody = (config: ProviderConfig, ollamaBody: OllamaRequestBody): Record<string, unknown> => ({
+export const buildOpenAiCompatibleBody = (config: ProviderConfig, ollamaBody: OllamaRequestBody): Record<string, unknown> => ({
   model: config.model,
   temperature: ollamaBody.options.temperature,
   max_tokens: positiveIntegerOption(process.env.AI_MAX_TOKENS, isZaiProvider(config.provider) ? 12000 : 4096),
@@ -661,7 +735,7 @@ const buildOpenAiCompatibleBody = (config: ProviderConfig, ollamaBody: OllamaReq
   messages: ollamaBody.messages,
 });
 
-const openAiCompatibleHeaders = (config: ProviderConfig): Record<string, string> => {
+export const openAiCompatibleHeaders = (config: ProviderConfig): Record<string, string> => {
   const headers = authHeaders(config.apiKey);
   if (config.provider === 'openrouter') {
     headers['HTTP-Referer'] = 'https://pcb-pilot.web.app';
@@ -670,7 +744,7 @@ const openAiCompatibleHeaders = (config: ProviderConfig): Record<string, string>
   return headers;
 };
 
-const openAiCompatibleUrl = (config: ProviderConfig): string => {
+export const openAiCompatibleUrl = (config: ProviderConfig): string => {
   if (!config.baseUrl) throw new Error('AI_API_URL is not set.');
   if (!config.model) throw new Error('AI_MODEL is not set.');
   if (!config.apiKey) throw new Error('AI_API_KEY is not set.');
@@ -686,7 +760,7 @@ const stringifyContentPart = (part: unknown): string => {
   return '';
 };
 
-const readOpenAiCompatibleContent = (data: Record<string, unknown>): string => {
+export const readOpenAiCompatibleContent = (data: Record<string, unknown>): string => {
   const choice = (data?.choices as Record<string, unknown>[])?.[0]
     || ((data?.data as Record<string, unknown>)?.choices as Record<string, unknown>[])?.[0];
   const message = (choice?.message || choice?.delta || choice) as Record<string, unknown> | undefined;
@@ -748,7 +822,7 @@ export async function generateCircuitWithOllama(
   history: ChatMessage[] = [],
   currentDesign: CurrentDesign | null = null,
   memory: Partial<ChatMemory> | null = null,
-): Promise<ParsedCircuitResponse> {
+): Promise<GeneratedCircuit> {
   const config = providerConfig();
   if (config.provider !== 'ollama') {
     return parseWithCorrectionRetry((correction) =>
@@ -774,7 +848,7 @@ export async function streamCircuitWithOllama(
   currentDesign: CurrentDesign | null = null,
   onContent: (content: string, state: StreamState) => void = () => {},
   memory: Partial<ChatMemory> | null = null,
-): Promise<ParsedCircuitResponse> {
+): Promise<GeneratedCircuit> {
   const config = providerConfig();
   if (config.provider !== 'ollama') {
     return parseWithCorrectionRetry(async (correction, attempt) => {

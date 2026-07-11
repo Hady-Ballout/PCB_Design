@@ -6,7 +6,7 @@
 // be copied out and pasted into an AI to sanity-check the generated schematic.
 // No React imports so it stays unit-testable.
 
-import { GROUND_NET } from './breadboardModel.js';
+import { GROUND_NET, verifyBoardConnectivity } from './breadboardModel.js';
 import { TOP_STRIP_ROW_LETTERS, BOTTOM_STRIP_ROW_LETTERS } from './breadboardGeometry.js';
 import { pinLabelsFor } from './selectionModel.js';
 
@@ -32,54 +32,9 @@ const describeHole = (hole) => {
   return `${rowLetter}${hole.column}`;
 };
 
-// Reconstruct electrical nodes from the physical board (tie groups + rails +
-// jumpers) so we can diff the built board against the intended netlist. Mirrors
-// the union-find used in breadboardModel.test.js.
-const reconstructNodes = (model) => {
-  const parent = new Map();
-  const find = (key) => {
-    if (!parent.has(key)) parent.set(key, key);
-    let root = key;
-    while (parent.get(root) !== root) root = parent.get(root);
-    return root;
-  };
-  const union = (a, b) => parent.set(find(a), find(b));
-  const keyOf = (hole) =>
-    hole.strip.startsWith('rail') ? `rail:${hole.strip}` : `${hole.strip}:${hole.column}`;
-  (model.jumpers ?? []).forEach((jumper) => union(keyOf(jumper.from), keyOf(jumper.to)));
-  return { find, keyOf };
-};
-
-const connectivityReport = (model) => {
-  const { find, keyOf } = reconstructNodes(model);
-  const netToNodes = new Map(); // net -> Set(node roots)
-  const nodeToNets = new Map(); // node root -> Set(nets)
-  (model.parts ?? []).forEach((part) => {
-    (part.pinNets ?? []).forEach((net, index) => {
-      if (isUnconnectedTerminal(net, part.ref, index + 1)) return;
-      const hole = part.holes?.[index];
-      if (!hole) return;
-      const node = find(keyOf(hole));
-      if (!netToNodes.has(net)) netToNodes.set(net, new Set());
-      netToNodes.get(net).add(node);
-      if (!nodeToNets.has(node)) nodeToNets.set(node, new Set());
-      nodeToNets.get(node).add(net);
-    });
-  });
-
-  const issues = [];
-  netToNodes.forEach((nodes, net) => {
-    if (nodes.size > 1) {
-      issues.push(`SPLIT: net ${netName(net)} lands on ${nodes.size} unconnected nodes on the board.`);
-    }
-  });
-  nodeToNets.forEach((nets) => {
-    if (nets.size > 1) {
-      issues.push(`SHORT: one board node carries multiple nets: ${[...nets].map(netName).join(', ')}.`);
-    }
-  });
-  return issues;
-};
+// The SPLIT/SHORT reconstruction now lives in breadboardModel.js
+// (verifyBoardConnectivity), where it also gates the live view.
+const connectivityReport = (model) => verifyBoardConnectivity(model).issues.map((issue) => issue.message);
 
 export function describeBreadboard(circuit, model) {
   const components = circuit?.components ?? [];

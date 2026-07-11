@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { toSpice } from '../../src/core/pcbGenerator.js';
 import {
   AI_RESPONSE_SCHEMA,
   CIRCUIT_SCHEMA,
@@ -31,7 +32,66 @@ const validAiResponse = {
 };
 
 // parseCircuitResponse always adds a code field ('' when the AI omits it).
+// The stream/generate wrappers additionally attach issues + generation
+// metadata, so resolved values are asserted with toMatchObject.
 const parsedAiResponse = { ...validAiResponse, code: '' };
+
+const ESP32_PINS = ['3V3', 'GND', 'VIN', 'EN', 'GPIO2', 'GPIO4', 'GPIO5', 'GPIO13', 'GPIO18', 'GPIO19', 'GPIO21', 'GPIO22'];
+const esp32Nodes = (pins: Record<string, string>) =>
+  ESP32_PINS.map((name, index) => pins[name] || `NC_U1_${index + 1}`);
+
+// The field bug the topology gate exists for: perfect net continuity, no
+// transistor driver — R2 is a fixed divider to ground on GPIO2's net while
+// the buzzer is fed straight from 3V3.
+const buzzerBugCircuit = {
+  title: 'Buzzer bug',
+  type: 'buzzer',
+  supplyVoltage: 3.3,
+  nodes: ['3V3', 'BUZZER', '0'],
+  components: [
+    { ref: 'U1', kind: 'esp32', value: 'DevKit V1', nodes: esp32Nodes({ '3V3': '3V3', GND: '0', GPIO2: 'BUZZER' }), footprint: '' },
+    { ref: 'R2', kind: 'resistor', value: '330', nodes: ['BUZZER', '0'], footprint: '' },
+    { ref: 'RBZ1', kind: 'buzzer', value: '100', nodes: ['3V3', 'BUZZER'], footprint: '' },
+  ],
+  notes: [],
+};
+
+const buzzerFixedCircuit = {
+  title: 'Buzzer driver',
+  type: 'buzzer',
+  supplyVoltage: 3.3,
+  nodes: ['3V3', 'CTRL', 'BASE', 'BZLOW', '0'],
+  components: [
+    { ref: 'U1', kind: 'esp32', value: 'DevKit V1', nodes: esp32Nodes({ '3V3': '3V3', GND: '0', GPIO2: 'CTRL' }), footprint: '' },
+    { ref: 'RB1', kind: 'resistor', value: '1k', nodes: ['CTRL', 'BASE'], footprint: '' },
+    { ref: 'Q1', kind: 'bjt_npn', value: '2N2222', nodes: ['BZLOW', 'BASE', '0'], footprint: '' },
+    { ref: 'RBZ1', kind: 'buzzer', value: '100', nodes: ['3V3', 'BZLOW'], footprint: '' },
+  ],
+  notes: [],
+};
+
+// Reversed LEDs (each with a series resistor) trip exactly one led_polarity
+// error apiece — a convenient dial for best-candidate selection tests.
+const reversedLedCircuit = (title: string, ledCount: number) => ({
+  title,
+  type: 'led_demo',
+  supplyVoltage: 5,
+  nodes: ['VCC', '0', ...Array.from({ length: ledCount }, (_, index) => `LEDA${index + 1}`)],
+  components: [
+    { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'], footprint: '' },
+    ...Array.from({ length: ledCount }, (_, index) => [
+      { ref: `R${index + 1}`, kind: 'resistor', value: '330', nodes: [`LEDA${index + 1}`, '0'], footprint: '' },
+      { ref: `DLED${index + 1}`, kind: 'led', value: 'red', nodes: [`LEDA${index + 1}`, 'VCC'], footprint: '' },
+    ]).flat(),
+  ],
+  notes: [],
+});
+
+const aiResponseFor = (circuit: Record<string, unknown>, reply = 'Here is the circuit.') => JSON.stringify({
+  reply,
+  circuit,
+  spice: toSpice(circuit),
+});
 
 const opampCircuit = {
   title: 'Op Amp Buffer',
@@ -65,6 +125,33 @@ const sourceCircuit = {
     },
   ],
   notes: [],
+};
+
+const rgbLedCircuit = {
+  title: 'RGB LED demo',
+  type: 'rgb_led_demo',
+  supplyVoltage: 5,
+  nodes: ['VCC', 'ANO_R', '0'],
+  components: [
+    { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'], footprint: '' },
+    { ref: 'R1', kind: 'resistor', value: '220', nodes: ['VCC', 'ANO_R'], footprint: '' },
+    {
+      ref: 'DLED1',
+      kind: 'rgb_led',
+      value: 'RGB',
+      nodes: ['ANO_R', 'NC_DLED1_2', 'NC_DLED1_3', '0'],
+      footprint: '',
+    },
+  ],
+  notes: [],
+};
+
+// The classic small-model mistake: one plain diode line instead of the
+// derived DLED1_R/_G/_B compound expansion.
+const rgbLedBadSpiceResponse = {
+  reply: 'I wired the red channel of the RGB LED through R1.',
+  circuit: rgbLedCircuit,
+  spice: '* rgb\nV1 VCC 0 DC 5\nR1 VCC ANO_R 220\nDLED1 ANO_R 0 DRED\n.end',
 };
 
 const circuitWithLoad = {
@@ -232,7 +319,7 @@ describe('Ollama circuit output', () => {
     const kinds = CIRCUIT_SCHEMA.properties.components.items.properties.kind.enum as readonly string[];
     ['arduino_uno', 'raspberry_pi', 'esp32'].forEach((kind) => expect(kinds).toContain(kind));
     const body = buildOllamaRequestBody('Blink an LED with an Arduino', [], true);
-    expect(body.messages[0].content).toContain('arduino_uno (12 nodes)');
+    expect(body.messages[0].content).toContain('arduino_uno (24 nodes)');
     expect(body.messages[0].content).toContain('raspberry_pi (10 nodes)');
     expect(body.messages[0].content).toContain('esp32 (12 nodes)');
     expect(body.messages[0].content).toContain('never write a SPICE line for them');
@@ -273,7 +360,8 @@ describe('Ollama circuit output', () => {
           ref: 'U1',
           kind: 'arduino_uno',
           value: 'Uno R3',
-          nodes: ['NC_U1_1', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'LED', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+          // Canonical 24-pin order: GND@2, D13@17 drives the LED.
+          nodes: ['NC_U1_1', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12', 'NC_U1_13', 'NC_U1_14', 'NC_U1_15', 'NC_U1_16', 'NC_U1_17', 'LED', 'NC_U1_19', 'NC_U1_20', 'NC_U1_21', 'NC_U1_22', 'NC_U1_23', 'NC_U1_24'],
           footprint: 'Module:Arduino_UNO_R3',
         },
         { ref: 'RLED', kind: 'resistor', value: '330', nodes: ['LED', 'LEDK'], footprint: '' },
@@ -357,6 +445,63 @@ describe('Ollama circuit output', () => {
     }))).toThrowError(expect.objectContaining({ code: 'spice_validation' }));
   });
 
+  it('teaches the compound-part derived SPICE line contract in the prompt', () => {
+    const body = buildOllamaRequestBody('Make an RGB LED circuit', [], true);
+    expect(body.messages[0].content).toContain('never appear in SPICE as one element line with their bare ref');
+    expect(body.messages[0].content).toContain('"<REF>_R R_ANODE CATHODE DRED"');
+    expect(body.messages[0].content).toContain('"<REF>_A COM THROW1 1m"');
+    expect(body.messages[0].content).toContain('An rgb_led is never one two-node diode line');
+  });
+
+  it('accepts compound-part SPICE written as derived lines', () => {
+    const response = parseCircuitResponse(JSON.stringify({
+      ...rgbLedBadSpiceResponse,
+      spice: '* rgb\nV1 VCC 0 DC 5\nR1 VCC ANO_R 220\nDLED1_R ANO_R 0 DRED\n.end',
+    }));
+
+    expect(response.circuit.components.find((part) => part.ref === 'DLED1')!.kind).toBe('rgb_led');
+  });
+
+  it('explains the derived-line contract when a compound part is one bare SPICE line', () => {
+    expect(() => parseCircuitResponse(JSON.stringify(rgbLedBadSpiceResponse))).toThrowError(
+      expect.objectContaining({
+        code: 'spice_validation',
+        message: expect.stringContaining('derived lines (DLED1_R, DLED1_G, DLED1_B)'),
+      }),
+    );
+  });
+
+  it('rejects a compound part whose JSON nodes array has the wrong length', () => {
+    expect(() => parseCircuitResponse(JSON.stringify({
+      ...rgbLedBadSpiceResponse,
+      circuit: {
+        ...rgbLedCircuit,
+        components: rgbLedCircuit.components.map((part) => (
+          part.ref === 'DLED1' ? { ...part, nodes: ['ANO_R', '0'] } : part
+        )),
+      },
+    }))).toThrowError(expect.objectContaining({
+      code: 'schema_validation',
+      message: expect.stringContaining('exactly 4 nodes for kind rgb_led'),
+    }));
+  });
+
+  it('regenerates the deck from the canonical JSON when every correction attempt still mismatches', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(JSON.stringify(rgbLedBadSpiceResponse)))
+      .mockResolvedValueOnce(streamResponse(JSON.stringify(rgbLedBadSpiceResponse)))
+      .mockResolvedValueOnce(streamResponse(JSON.stringify(rgbLedBadSpiceResponse)));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await streamCircuitWithOllama('Make an RGB LED circuit');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(retryBody.messages.at(-1).content).toContain('derived lines (DLED1_R, DLED1_G, DLED1_B)');
+    expect(response.circuit.components.find((part) => part.ref === 'DLED1')!.kind).toBe('rgb_led');
+    expect(response.spice).toContain('DLED1_R ANO_R 0 DRED');
+    expect(response.spice).not.toMatch(/^DLED1 /m);
+  });
+
   it('classifies malformed and schema-invalid responses', () => {
     expect(() => parseCircuitResponse('{"title": broken}')).toThrowError(
       expect.objectContaining({ code: 'json_syntax' }),
@@ -390,7 +535,7 @@ describe('Ollama circuit output', () => {
     const onContent = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(streamCircuitWithOllama('Make an RC filter', [], null, onContent)).resolves.toEqual(parsedAiResponse);
+    await expect(streamCircuitWithOllama('Make an RC filter', [], null, onContent)).resolves.toMatchObject(parsedAiResponse);
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     const firstBody = JSON.parse(fetchMock.mock.calls[0][1].body);
@@ -412,7 +557,7 @@ describe('Ollama circuit output', () => {
       .mockResolvedValueOnce(streamResponse(JSON.stringify(validAiResponse)));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(streamCircuitWithOllama('Make an RC filter')).resolves.toEqual(parsedAiResponse);
+    await expect(streamCircuitWithOllama('Make an RC filter')).resolves.toMatchObject(parsedAiResponse);
 
     const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(retryBody.messages.some((message: any) => message.role === 'assistant')).toBe(false);
@@ -430,22 +575,68 @@ describe('Ollama circuit output', () => {
       .mockResolvedValueOnce(streamResponse(JSON.stringify(validAiResponse)));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(streamCircuitWithOllama('Make an RC filter')).resolves.toEqual(parsedAiResponse);
+    await expect(streamCircuitWithOllama('Make an RC filter')).resolves.toMatchObject(parsedAiResponse);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(retryBody.messages.at(-1).content).toContain('SPICE must exactly match');
   });
 
-  it('reports a classified error after the correction attempt also fails', async () => {
+  it('reports a classified error after every correction attempt fails structurally', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(streamResponse('{"title": broken}'))
-      .mockResolvedValueOnce(streamResponse('{"title": stillBroken}'));
+      .mockResolvedValueOnce(streamResponse('{"title": stillBroken}'))
+      .mockResolvedValueOnce(streamResponse('{"title": brokenAgain}'));
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(streamCircuitWithOllama('Make a filter')).rejects.toMatchObject({
       code: 'json_syntax',
-      message: expect.stringContaining('after one automatic correction attempt'),
+      message: expect.stringContaining('after 2 automatic correction attempts'),
     });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('feeds topology violations back to the model and resolves once corrected', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(aiResponseFor(buzzerBugCircuit)))
+      .mockResolvedValueOnce(streamResponse(aiResponseFor(buzzerFixedCircuit)));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await streamCircuitWithOllama('Add a buzzer on GPIO2');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(retryBody.messages.at(-1).content).toContain('functional design errors');
+    expect(retryBody.messages.at(-1).content).toContain('divider_powered_load');
+    expect(retryBody.messages.at(-1).content).toContain('NPN transistor');
+    expect(response.circuit.title).toBe('Buzzer driver');
+    expect(response.generation).toEqual({ attempts: 2, degraded: false });
+    expect(response.issues.filter((issue) => issue.severity === 'error')).toEqual([]);
+  });
+
+  it('degrades gracefully instead of failing when violations survive every retry', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(aiResponseFor(buzzerBugCircuit)))
+      .mockResolvedValueOnce(streamResponse(aiResponseFor(buzzerBugCircuit)))
+      .mockResolvedValueOnce(streamResponse(aiResponseFor(buzzerBugCircuit)));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await streamCircuitWithOllama('Add a buzzer on GPIO2');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(response.circuit.title).toBe('Buzzer bug');
+    expect(response.generation).toEqual({ attempts: 3, degraded: true });
+    expect(response.issues.map((issue) => issue.id)).toContain('divider_powered_load');
+  });
+
+  it('accepts the best candidate across attempts, not the last one', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(aiResponseFor(reversedLedCircuit('Two errors', 2))))
+      .mockResolvedValueOnce(streamResponse(aiResponseFor(reversedLedCircuit('One error', 1))))
+      .mockResolvedValueOnce(streamResponse(aiResponseFor(reversedLedCircuit('Two errors again', 2))));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await streamCircuitWithOllama('Make an LED demo');
+    expect(response.circuit.title).toBe('One error');
+    expect(response.generation).toEqual({ attempts: 3, degraded: true });
+    expect(response.issues.filter((issue) => issue.severity === 'error')).toHaveLength(1);
   });
 
   it('uses the OpenAI-compatible endpoint for Z.ai with JSON mode and thinking disabled', async () => {
@@ -456,7 +647,7 @@ describe('Ollama circuit output', () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(openAiResponse(JSON.stringify(validAiResponse)));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(streamCircuitWithOllama('Make an RC filter')).resolves.toEqual(parsedAiResponse);
+    await expect(streamCircuitWithOllama('Make an RC filter')).resolves.toMatchObject(parsedAiResponse);
 
     expect(fetchMock).toHaveBeenCalledWith(
       'https://open.bigmodel.cn/api/paas/v4/chat/completions',
@@ -484,7 +675,7 @@ describe('Ollama circuit output', () => {
     ]));
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(streamCircuitWithOllama('Make an RC filter')).resolves.toEqual(parsedAiResponse);
+    await expect(streamCircuitWithOllama('Make an RC filter')).resolves.toMatchObject(parsedAiResponse);
   });
 
   it('reports length-stopped Z.ai reasoning output as an output budget problem', async () => {

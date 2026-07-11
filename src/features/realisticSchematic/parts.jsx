@@ -1,6 +1,7 @@
 // Realistic SVG renderers for breadboard parts and jumper wires. Each renderer
 // receives the placement-model part and draws leads from its exact hole
 // positions up onto a photo-style body.
+import { FIXED_PIN_NAMES } from '../../core/componentKinds.js';
 import { HOLE_PITCH, MCU_PIN_SPACING, TRENCH_CENTER_Y, holeCenter } from './breadboardGeometry.js';
 import { MCU_PINS } from './breadboardModel.js';
 import { BAND_COLOR_HEX, capStyle, ledColor, resistorColorBands } from './partVisuals.js';
@@ -17,8 +18,11 @@ const DARK_HALO = { ...HALO, stroke: 'rgba(20,26,30,0.75)' };
 // below on the bottom strip, so bodies lean away from the trench.
 const bodyDir = (strip) => (strip === 'bottom' ? 1 : -1);
 
+// NOTE (here and throughout): a light color must ride inside the style object,
+// not the `fill` attribute — LABEL_STYLE carries its own fill, and an inline
+// style always beats a presentation attribute.
 const RefLabel = ({ x, y, text, light = false }) => (
-  <text x={x} y={y} textAnchor="middle" style={{ ...LABEL_STYLE, ...(light ? DARK_HALO : HALO) }} fill={light ? '#f0f0ea' : LABEL_STYLE.fill}>
+  <text x={x} y={y} textAnchor="middle" style={{ ...LABEL_STYLE, ...(light ? DARK_HALO : HALO), fill: light ? '#f0f0ea' : LABEL_STYLE.fill }}>
     {text}
   </text>
 );
@@ -33,8 +37,7 @@ const Silk = ({ x, y, text, size = 5, fill = '#eaf1f4', weight, anchor = 'middle
     x={x}
     y={y}
     textAnchor={anchor}
-    style={{ ...LABEL_STYLE, fontSize: size, fontWeight: weight, letterSpacing: 0.2 }}
-    fill={fill}
+    style={{ ...LABEL_STYLE, fontSize: size, fontWeight: weight, letterSpacing: 0.2, fill }}
     pointerEvents="none"
   >
     {text}
@@ -95,11 +98,11 @@ const MountHole = ({ cx, cy, r = 4 }) => (
 );
 
 // Small metal-can crystal (16 MHz on the Uno) — silver oval can.
-const Crystal = ({ cx, cy, w = 18, h = 9 }) => (
+const Crystal = ({ cx, cy, w = 18, h = 9, label = '16MHz' }) => (
   <g>
     <ellipse cx={cx} cy={cy} rx={w / 2} ry={h / 2} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth={0.5} />
     <ellipse cx={cx} cy={cy} rx={w / 2 - 2} ry={h / 2 - 1.6} fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth={0.4} />
-    <Silk x={cx} y={cy + 1.6} text="16MHz" size={3.4} fill="#3c4640" />
+    <Silk x={cx} y={cy + 1.6} text={label} size={3.4} fill="#3c4640" />
   </g>
 );
 
@@ -220,8 +223,8 @@ function CapacitorBody({ part, points }) {
         <Lead from={b} to={{ x: mid + 4, y: y + 8 }} />
         <rect x={mid - width / 2} y={y - 12} width={width} height={24} rx={4} fill="url(#rsPartCan)" stroke="#1b2947" strokeWidth="0.6" />
         <rect x={stripeX} y={y - 12} width={5} height={24} rx={2} fill="#d8dde6" opacity="0.85" />
-        <text x={stripeX + 2.5} y={y + 2} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6, fontWeight: 700 }} fill="#2b3550">−</text>
-        <text x={plusX} y={y - 4.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6, fontWeight: 700 }} fill="#e8ecf4">+</text>
+        <text x={stripeX + 2.5} y={y + 2} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6, fontWeight: 700, fill: '#2b3550' }}>−</text>
+        <text x={plusX} y={y - 4.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6, fontWeight: 700, fill: '#e8ecf4' }}>+</text>
         <RefLabel x={mid} y={y - 17} text={`${part.ref} · ${part.value}`} />
       </g>
     );
@@ -231,7 +234,7 @@ function CapacitorBody({ part, points }) {
       <Lead from={a} to={{ x: mid - 4, y: y + 5 }} />
       <Lead from={b} to={{ x: mid + 4, y: y + 5 }} />
       <circle cx={mid} cy={y - 2} r={9.5} fill="url(#rsPartCeramic)" stroke="#b28a2e" strokeWidth="0.6" />
-      <text x={mid} y={y + 0.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 5.5 }} fill="#4a3c14">{part.value}</text>
+      <text x={mid} y={y + 0.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 5.5, fill: '#4a3c14' }}>{part.value}</text>
       <RefLabel x={mid} y={y - 15} text={part.ref} />
     </g>
   );
@@ -262,7 +265,7 @@ function LedBody({ part, points }) {
   );
 }
 
-function DiodeBody({ part, points }) {
+function DiodeBody({ part, points, bodyFill = 'url(#rsPartDiode)', bodyStroke = '#111' }) {
   const [a, b] = points;
   const dir = bodyDir(part.strip);
   const y = Math.min(a.y, b.y) + dir * 13;
@@ -273,9 +276,103 @@ function DiodeBody({ part, points }) {
     <g>
       <Lead from={a} to={{ x: mid - length / 2 + 2, y }} />
       <Lead from={b} to={{ x: mid + length / 2 - 2, y }} />
-      <rect x={mid - length / 2} y={y - 5} width={length} height={10} rx={4} fill="url(#rsPartDiode)" stroke="#111" strokeWidth="0.5" />
+      <rect x={mid - length / 2} y={y - 5} width={length} height={10} rx={4} fill={bodyFill} stroke={bodyStroke} strokeWidth="0.5" />
       <rect x={bandX} y={y - 5} width={4} height={10} fill="#cfd4da" />
       <RefLabel x={mid} y={y + dir * 12} text={part.ref} />
+    </g>
+  );
+}
+
+// Zener: same axial glass package as the rectifier diode, but with the blue
+// tint of a real BZX-style body. Breakdown voltage rides in `part.value`.
+const ZenerBody = (props) => <DiodeBody {...props} bodyFill="url(#rsPartZener)" bodyStroke="#122036" />;
+
+// Photoresistor (LDR): pale ceramic disc with the characteristic dark-red
+// serpentine track combed across the face. Nonpolar.
+function LdrBody({ part, points }) {
+  const [a, b] = points;
+  const dir = bodyDir(part.strip);
+  const y = Math.min(a.y, b.y) + dir * 16;
+  const mid = (a.x + b.x) / 2;
+  const r = 10;
+  const cy = y - 2;
+  const track = [-5, -2.5, 0, 2.5, 5]
+    .map((dy, index) => {
+      const half = Math.sqrt(r * r - dy * dy) - 2.6;
+      const from = index % 2 === 0 ? mid - half : mid + half;
+      const to = index % 2 === 0 ? mid + half : mid - half;
+      return `${index === 0 ? 'M' : 'L'} ${from} ${cy + dy} L ${to} ${cy + dy}`;
+    })
+    .join(' ');
+  return (
+    <g>
+      <Lead from={a} to={{ x: mid - 4, y: y + 6 }} />
+      <Lead from={b} to={{ x: mid + 4, y: y + 6 }} />
+      <circle cx={mid} cy={cy} r={r} fill="url(#rsPartLdr)" stroke="#8a6b42" strokeWidth="0.7" />
+      <path d={track} stroke="#a3402c" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      <RefLabel x={mid} y={y - 16} text={part.ref} />
+    </g>
+  );
+}
+
+// Thermistor: small near-black epoxy drop, value printed on the face like a
+// real 10k NTC bead.
+function ThermistorBody({ part, points }) {
+  const [a, b] = points;
+  const dir = bodyDir(part.strip);
+  const y = Math.min(a.y, b.y) + dir * 15;
+  const mid = (a.x + b.x) / 2;
+  const cy = y - 2;
+  return (
+    <g>
+      <Lead from={a} to={{ x: mid - 3.5, y: y + 5 }} />
+      <Lead from={b} to={{ x: mid + 3.5, y: y + 5 }} />
+      <circle cx={mid} cy={cy} r={8} fill="url(#rsPartThermistor)" stroke="#050607" strokeWidth="0.6" />
+      {/* fill lives in the style: LABEL_STYLE carries its own fill, and the
+          inline style would override a fill attribute */}
+      <text x={mid} y={cy - 0.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 4.5, fill: '#e8ecef' }}>{part.value}</text>
+      <text x={mid} y={cy + 4.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 3.6, fill: '#9aa3ab' }}>NTC</text>
+      <RefLabel x={mid} y={y - 14} text={part.ref} />
+    </g>
+  );
+}
+
+// Buzzer, top view: black cylinder with an inset ring, a center sound hole,
+// and a white "+" over the positive (pin 1) side.
+function BuzzerBody({ part, points }) {
+  const [a, b] = points;
+  const dir = bodyDir(part.strip);
+  const y = Math.min(a.y, b.y) + dir * 17;
+  const mid = (a.x + b.x) / 2;
+  const cy = y - 1;
+  const r = 11;
+  const plusX = mid + (a.x < b.x ? -1 : 1) * 5.5;
+  return (
+    <g>
+      <Lead from={a} to={{ x: mid - 4.5, y: y + 8 }} />
+      <Lead from={b} to={{ x: mid + 4.5, y: y + 8 }} />
+      <circle cx={mid} cy={cy} r={r} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.6" />
+      <circle cx={mid} cy={cy} r={r - 2.4} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="0.8" />
+      <circle cx={mid} cy={cy} r={2.4} fill="#000" stroke="#2c3237" strokeWidth="0.5" />
+      <text x={plusX} y={cy - 4.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6, fontWeight: 700, fill: '#e8ecef' }}>+</text>
+      <RefLabel x={mid} y={y - 16} text={part.ref} />
+    </g>
+  );
+}
+
+// Discrete HC-49 crystal: reuses the silver-can glyph from the Uno board art,
+// printing the part's own frequency on the can.
+function CrystalBody({ part, points }) {
+  const [a, b] = points;
+  const dir = bodyDir(part.strip);
+  const y = Math.min(a.y, b.y) + dir * 14;
+  const mid = (a.x + b.x) / 2;
+  return (
+    <g>
+      <Lead from={a} to={{ x: mid - 6, y: y + 4 }} />
+      <Lead from={b} to={{ x: mid + 6, y: y + 4 }} />
+      <Crystal cx={mid} cy={y - 1} w={22} h={11} label={part.value || 'XTAL'} />
+      <RefLabel x={mid} y={y - 12} text={part.ref} />
     </g>
   );
 }
@@ -290,8 +387,188 @@ function InductorBody({ part, points }) {
       <Lead from={a} to={{ x: mid - 8, y: y + 7 }} />
       <Lead from={b} to={{ x: mid + 8, y: y + 7 }} />
       <ellipse cx={mid} cy={y} rx={13} ry={10} fill="url(#rsPartDrum)" stroke="#1e5c38" strokeWidth="0.7" />
-      <text x={mid} y={y + 2.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6 }} fill="#dff2e6">{part.value}</text>
+      <text x={mid} y={y + 2.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6, fill: '#dff2e6' }}>{part.value}</text>
       <RefLabel x={mid} y={y - 14} text={part.ref} />
+    </g>
+  );
+}
+
+// Trimmer potentiometer: blue square body with a white adjustment screw
+// (cross slot) on top. Canonical pins [A, W, B] — the wiper is the center leg,
+// matching the compound SPICE image's two half-value resistors.
+function PotentiometerBody({ part, points }) {
+  const dir = bodyDir(part.strip);
+  const mid = points[1].x;
+  const y = Math.min(...points.map((point) => point.y)) + dir * 20;
+  const edgeY = y - dir * 11; // body edge nearest the holes
+  return (
+    <g>
+      {points.map((point, index) => (
+        <path key={index} d={`M ${point.x} ${point.y} L ${mid + (index - 1) * 7} ${edgeY}`} {...LEAD_STROKE} />
+      ))}
+      <rect x={mid - 12} y={y - 11} width={24} height={22} rx={2} fill="url(#rsBluePlastic)" stroke="#173a75" strokeWidth="0.6" />
+      <circle cx={mid} cy={y - 2.5} r={5.5} fill="#e9edf0" stroke="#7c848b" strokeWidth="0.6" />
+      <line x1={mid - 3.6} y1={y - 2.5} x2={mid + 3.6} y2={y - 2.5} stroke="#8a929a" strokeWidth="1.1" />
+      <line x1={mid} y1={y - 6.1} x2={mid} y2={y + 1.1} stroke="#8a929a" strokeWidth="1.1" />
+      <text x={mid} y={y + 8.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 4.2, fill: '#d7e2f4' }}>{part.value}</text>
+      <RefLabel x={mid} y={y - 16} text={part.ref} />
+    </g>
+  );
+}
+
+// SPDT slide switch: brushed-metal case with the black knob thrown toward
+// pin 1 — throw A, the position the compound SPICE image simulates as closed.
+function SlideSwitchBody({ part, points }) {
+  const dir = bodyDir(part.strip);
+  const mid = points[1].x;
+  const y = Math.min(...points.map((point) => point.y)) + dir * 16;
+  const edgeY = y - dir * 6.5;
+  const throwSign = points[0].x < mid ? -1 : 1;
+  return (
+    <g>
+      {points.map((point, index) => (
+        <path key={index} d={`M ${point.x} ${point.y} L ${mid + (index - 1) * 7} ${edgeY}`} {...LEAD_STROKE} />
+      ))}
+      <rect x={mid - 18} y={y - 6.5} width={36} height={13} rx={1.5} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.5" />
+      <line x1={mid - 16.5} y1={y - 4.5} x2={mid + 16.5} y2={y - 4.5} stroke="rgba(255,255,255,0.6)" strokeWidth="0.5" />
+      <rect x={mid - 13} y={y - 3} width={26} height={6} rx={1} fill="#20262b" />
+      <rect x={mid + throwSign * 8 - 3.5} y={y - 4.5} width={7} height={9} rx={1} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.4" />
+      <RefLabel x={mid} y={y - 12} text={part.ref} />
+    </g>
+  );
+}
+
+// RGB LED: oversized clear lens holding three tiny R/G/B dies. Canonical pins
+// [R, G, B, K] — the flat chord marks the common-cathode (pin 4) side.
+function RgbLedBody({ part, points }) {
+  const dir = bodyDir(part.strip);
+  const y = Math.min(...points.map((point) => point.y)) + dir * 17;
+  const first = points[0];
+  const last = points[points.length - 1];
+  const mid = (first.x + last.x) / 2;
+  const flat = last.x > first.x ? 7 : -7;
+  const chordY = Math.sqrt(11 * 11 - flat * flat);
+  const sweep = flat > 0 ? 0 : 1;
+  const lens = `M ${mid + flat} ${y - chordY} A 11 11 0 1 ${sweep} ${mid + flat} ${y + chordY} Z`;
+  const dies = ['#e0453a', '#3fae5a', '#3f8fe8'];
+  return (
+    <g>
+      {points.map((point, index) => (
+        <Lead key={index} from={point} to={{ x: mid + (index - 1.5) * 4.5, y: y + 10 }} />
+      ))}
+      <path d={lens} fill="#f2f2ee" fillOpacity="0.85" stroke="rgba(0,0,0,0.35)" strokeWidth="0.7" />
+      {dies.map((color, index) => (
+        <rect key={color} x={mid - 6.2 + index * 4.4} y={y - 1.5} width={3.2} height={3.2} rx={0.6} fill={color} />
+      ))}
+      <path d={lens} fill="url(#rsPartLens)" />
+      <line x1={mid + flat} y1={y - chordY + 1} x2={mid + flat} y2={y + chordY - 1} stroke="rgba(0,0,0,0.4)" strokeWidth="1.4" />
+      <ellipse cx={mid - 3.5} cy={y - 4.5} rx={3} ry={2} fill="rgba(255,255,255,0.75)" />
+      <RefLabel x={mid} y={y - 17} text={part.ref} />
+    </g>
+  );
+}
+
+// Shared frame for the on-board sensor modules: leads from the holes to the
+// PCB edge nearest them, gold header pads where they land, and the body
+// geometry every module builds on. Bodies stay under ~34px tall so they clear
+// the power rails above/below the strip.
+const moduleFrame = (part, points) => {
+  const dir = bodyDir(part.strip);
+  const xs = points.map((point) => point.x);
+  const mid = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const cy = Math.min(...points.map((point) => point.y)) + dir * 21;
+  const edgeY = cy - dir * 15; // PCB edge nearest the holes
+  return { dir, mid, cy, edgeY, span: Math.max(...xs) - Math.min(...xs) };
+};
+
+const ModulePins = ({ points, edgeY }) => (
+  <g>
+    {points.map((point, index) => (
+      <g key={index}>
+        <Lead from={point} to={{ x: point.x, y: edgeY }} />
+        <GoldPad x={point.x} y={edgeY} s={3.4} />
+      </g>
+    ))}
+  </g>
+);
+
+// HC-SR04 ultrasonic ranger: blue PCB with two silver transducer cans (dark
+// mesh centers), a small crystal can between them.
+function UltrasonicBody({ part, points }) {
+  const { mid, cy, edgeY, span } = moduleFrame(part, points);
+  const width = span + 22;
+  return (
+    <g>
+      <rect x={mid - width / 2} y={cy - 15} width={width} height={30} rx={2} fill="url(#rsPcbBlue)" stroke="#123a63" strokeWidth="0.6" />
+      {[-1, 1].map((side) => (
+        <g key={side}>
+          <circle cx={mid + side * 16} cy={cy - 2} r={9.5} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.5" />
+          <circle cx={mid + side * 16} cy={cy - 2} r={6.6} fill="#20262b" />
+          <circle cx={mid + side * 16} cy={cy - 2} r={4.2} fill="none" stroke="#3a4147" strokeWidth="0.7" />
+          <circle cx={mid + side * 16} cy={cy - 2} r={2} fill="none" stroke="#3a4147" strokeWidth="0.7" />
+        </g>
+      ))}
+      <ellipse cx={mid} cy={cy + 6} rx={4.5} ry={2.2} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.4" />
+      <Silk x={mid - width / 2 + 3} y={cy - 10.5} text={part.ref} size={3.8} fill="#dbe7f2" anchor="start" />
+      <Silk x={mid} y={cy + 13} text="HC-SR04" size={3.6} fill="#dbe7f2" />
+      <ModulePins points={points} edgeY={edgeY} />
+    </g>
+  );
+}
+
+// DHT temperature/humidity sensor: matte-blue cuboid with the vent lattice.
+function DhtBody({ part, points }) {
+  const { mid, cy, edgeY } = moduleFrame(part, points);
+  return (
+    <g>
+      <rect x={mid - 13} y={cy - 17} width={26} height={34} rx={2} fill="url(#rsBluePlastic)" stroke="#173a75" strokeWidth="0.7" />
+      <rect x={mid - 11.5} y={cy - 15.5} width={23} height={31} rx={1.6} fill="none" stroke="rgba(255,255,255,0.14)" strokeWidth="0.5" />
+      {Array.from({ length: 4 }, (_, row) =>
+        Array.from({ length: 3 }, (_, col) => (
+          <rect key={`${row}-${col}`} x={mid - 8 + col * 5.5} y={cy - 13 + row * 4.6} width={3.4} height={3.2} rx={0.5} fill="#132a52" />
+        )),
+      )}
+      <Silk x={mid} y={cy + 8.5} text={part.ref} size={4} fill="#d7e2f4" />
+      <Silk x={mid} y={cy + 13.5} text={part.value || 'DHT11'} size={3.4} fill="#a9bcdc" />
+      <ModulePins points={points} edgeY={edgeY} />
+    </g>
+  );
+}
+
+// I2C OLED breakout: dark PCB with the near-black glass panel and a thin cyan
+// pixel row hinting at the lit display.
+function OledBody({ part, points }) {
+  const { mid, cy, edgeY, span } = moduleFrame(part, points);
+  const width = span + 22;
+  return (
+    <g>
+      <rect x={mid - width / 2} y={cy - 15} width={width} height={30} rx={2} fill="url(#rsPartDip)" stroke="#000" strokeWidth="0.6" />
+      <rect x={mid - width / 2 + 4} y={cy - 8} width={width - 8} height={19} rx={1.2} fill="#0a0c10" stroke="#1d232a" strokeWidth="0.5" />
+      <rect x={mid - width / 2 + 4} y={cy - 8} width={width - 8} height={19} rx={1.2} fill="url(#rsPartLens)" opacity="0.25" />
+      <rect x={mid - width / 2 + 6} y={cy - 6} width={width - 12} height={2.4} rx={0.8} fill="#59e3f2" opacity="0.85" />
+      <Silk x={mid} y={cy - 10.5} text={[part.ref, part.value || 'SSD1306'].filter(Boolean).join(' · ')} size={3.6} fill="#c8d2da" />
+      <ModulePins points={points} edgeY={edgeY} />
+    </g>
+  );
+}
+
+// HC-SR501 PIR motion sensor: green PCB dominated by the white Fresnel dome,
+// with the two orange trimmers peeking out beneath.
+function PirBody({ part, points }) {
+  const { mid, cy, edgeY } = moduleFrame(part, points);
+  const width = 44;
+  return (
+    <g>
+      <rect x={mid - width / 2} y={cy - 15} width={width} height={30} rx={2} fill="url(#rsPartPi)" stroke="#0f4423" strokeWidth="0.6" />
+      {[-1, 1].map((side) => (
+        <rect key={side} x={mid + side * 15 - 2.2} y={cy + 9.5} width={4.4} height={4.4} rx={0.6} fill="#e07020" stroke="#8a4310" strokeWidth="0.4" />
+      ))}
+      <circle cx={mid} cy={cy - 1} r={12.5} fill="url(#rsPirDome)" stroke="#c9c9ba" strokeWidth="0.6" />
+      <circle cx={mid} cy={cy - 1} r={8.4} fill="none" stroke="#d8d8ca" strokeWidth="0.6" />
+      <circle cx={mid} cy={cy - 1} r={4.4} fill="none" stroke="#d8d8ca" strokeWidth="0.6" />
+      <path d={`M ${mid - 12.5} ${cy - 1} H ${mid + 12.5} M ${mid} ${cy - 13.5} V ${cy + 11.5}`} stroke="#d8d8ca" strokeWidth="0.6" fill="none" />
+      <Silk x={mid} y={cy + 13.8} text={part.ref} size={3.8} fill="#dff2e6" />
+      <ModulePins points={points} edgeY={edgeY} />
     </g>
   );
 }
@@ -311,8 +588,8 @@ function ModuleBody({ part, points }) {
         <Lead key={index} from={point} to={{ x: Math.min(Math.max(point.x, mid - width / 2 + 4), mid + width / 2 - 4), y: y + 9 }} />
       ))}
       <rect x={mid - width / 2} y={y - 9} width={width} height={18} rx={3.5} fill="url(#rsPartModule)" stroke="#4d565e" strokeWidth="0.6" />
-      <text x={mid} y={y - 0.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6 }} fill="#e8ecef">{part.ref}</text>
-      <text x={mid} y={y + 6.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 5 }} fill="#aeb7bd">{part.value}</text>
+      <text x={mid} y={y - 0.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6, fill: '#e8ecef' }}>{part.ref}</text>
+      <text x={mid} y={y + 6.5} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 5, fill: '#aeb7bd' }}>{part.value}</text>
     </g>
   );
 }
@@ -352,11 +629,14 @@ function To220Body({ part, points }) {
       <rect x={mid - 13} y={y - 16} width={26} height={7} rx={1} fill="url(#rsPartTab)" stroke="#7c848b" strokeWidth="0.4" />
       <circle cx={mid} cy={y - 12.5} r={2} fill="#e9edf0" stroke="#7c848b" strokeWidth="0.4" />
       <rect x={mid - 13} y={y - 10} width={26} height={20} rx={1.5} fill="url(#rsPartTo92)" stroke="#000" strokeWidth="0.5" />
-      <text x={mid} y={y + 1} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 5.5 }} fill="#cfd4d8">{part.value}</text>
+      <text x={mid} y={y + 1} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 5.5, fill: '#cfd4d8' }}>{part.value}</text>
       <RefLabel x={mid} y={y - 20} text={part.ref} />
     </g>
   );
 }
+
+// Part-number silk when a DIP part carries no explicit value.
+const DIP_DEFAULT_SILK = { comparator: 'LM393', timer_555: 'NE555' };
 
 function DipBody({ part }) {
   const left = holeCenter({ strip: 'top', column: part.meta.columnStart, row: 4 });
@@ -381,8 +661,90 @@ function DipBody({ part }) {
       {/* pin-1 notch on the left edge */}
       <path d={`M ${x0} ${TRENCH_CENTER_Y - 4} A 4 4 0 0 1 ${x0} ${TRENCH_CENTER_Y + 4}`} fill="#242a30" stroke="#000" strokeWidth="0.4" />
       <circle cx={x0 + 7} cy={bodyBottom - 5} r={1.6} fill="#151a1e" stroke="#3c444c" strokeWidth="0.5" />
-      <text x={(x0 + x1) / 2 + 2} y={TRENCH_CENTER_Y - 1} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6.5, fontWeight: 600 }} fill="#f2f5f7">{part.ref}</text>
-      <text x={(x0 + x1) / 2 + 2} y={TRENCH_CENTER_Y + 7} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 5.5 }} fill="#c6ccd2">{part.value}</text>
+      <text x={(x0 + x1) / 2 + 2} y={TRENCH_CENTER_Y - 1} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6.5, fontWeight: 600, fill: '#f2f5f7' }}>{part.ref}</text>
+      <text x={(x0 + x1) / 2 + 2} y={TRENCH_CENTER_Y + 7} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 5.5, fill: '#c6ccd2' }}>{part.value || DIP_DEFAULT_SILK[part.kind]}</text>
+    </g>
+  );
+}
+
+// Tactile pushbutton bridging the trench: black base, silver top plate, round
+// plunger. The two electrical legs sit on the bottom strip; the top-strip leg
+// stubs are decorative (their columns are reserved but hold no pins), drawn
+// from the package meta rather than part.holes.
+function PushbuttonBody({ part }) {
+  const { columnStart, columnEnd } = part.meta;
+  const bodyTop = TRENCH_CENTER_Y - 13;
+  const bodyBottom = TRENCH_CENTER_Y + 13;
+  const legs = [];
+  for (let column = columnStart; column <= columnEnd; column += 1) {
+    const topHole = holeCenter({ strip: 'top', column, row: 4 });
+    const bottomHole = holeCenter({ strip: 'bottom', column, row: 0 });
+    legs.push(
+      <rect key={`t${column}`} x={topHole.x - 1.4} y={topHole.y - 1} width={2.8} height={bodyTop - topHole.y + 2} fill="url(#rsPartTab)" />,
+      <rect key={`b${column}`} x={bottomHole.x - 1.4} y={bodyBottom - 1} width={2.8} height={bottomHole.y - bodyBottom + 2} fill="url(#rsPartTab)" />,
+    );
+  }
+  const left = holeCenter({ strip: 'bottom', column: columnStart, row: 0 });
+  const right = holeCenter({ strip: 'bottom', column: columnEnd, row: 0 });
+  const x0 = left.x - 6;
+  const x1 = right.x + 6;
+  const mid = (x0 + x1) / 2;
+  return (
+    <g>
+      {legs}
+      <rect x={x0} y={bodyTop} width={x1 - x0} height={bodyBottom - bodyTop} rx={2.5} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.6" />
+      <rect x={x0 + 2.5} y={bodyTop + 2.5} width={x1 - x0 - 5} height={bodyBottom - bodyTop - 5} rx={2} fill="url(#rsPartTab)" stroke="#7c848b" strokeWidth="0.4" />
+      <circle cx={mid} cy={TRENCH_CENTER_Y} r={6.5} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.5" />
+      <circle cx={mid - 2} cy={TRENCH_CENTER_Y - 2} r={1.6} fill="rgba(255,255,255,0.14)" />
+      <RefLabel x={mid} y={bodyTop - 5} text={part.ref} />
+    </g>
+  );
+}
+
+// 7-segment display (5161AS-style DIP-10) bridging the trench: black face with
+// the unlit "8" figure-eight, a decimal point, and ten silver leg stubs (the
+// decorative second COM leg included).
+function SevenSegmentBody({ part }) {
+  const { columnStart, columnEnd } = part.meta;
+  const faceTop = TRENCH_CENTER_Y - 22;
+  const faceBottom = TRENCH_CENTER_Y + 22;
+  const legs = [];
+  for (let column = columnStart; column <= columnEnd; column += 1) {
+    const topHole = holeCenter({ strip: 'top', column, row: 4 });
+    const bottomHole = holeCenter({ strip: 'bottom', column, row: 0 });
+    legs.push(
+      <rect key={`t${column}`} x={topHole.x - 1.4} y={topHole.y - 1} width={2.8} height={faceTop - topHole.y + 2} fill="url(#rsPartTab)" />,
+      <rect key={`b${column}`} x={bottomHole.x - 1.4} y={faceBottom - 1} width={2.8} height={bottomHole.y - faceBottom + 2} fill="url(#rsPartTab)" />,
+    );
+  }
+  const left = holeCenter({ strip: 'top', column: columnStart, row: 4 });
+  const right = holeCenter({ strip: 'top', column: columnEnd, row: 4 });
+  const x0 = left.x - 6;
+  const x1 = right.x + 6;
+  const cx = (x0 + x1) / 2;
+  const cy = TRENCH_CENTER_Y;
+  // Unlit segments on the dark face; the slight skew gives the classic italic
+  // digit. Horizontal A/G/D bars plus vertical F/B/E/C bars.
+  const seg = { fill: '#565b52', rx: 1.2 };
+  const segments = (
+    <g transform={`translate(${cx} ${cy}) skewX(-6)`}>
+      <rect x={-6.5} y={-16.5} width={13} height={3} {...seg} />
+      <rect x={-6.5} y={-1.5} width={13} height={3} {...seg} />
+      <rect x={-6.5} y={13.5} width={13} height={3} {...seg} />
+      <rect x={-9.5} y={-13} width={3} height={11} {...seg} />
+      <rect x={6.5} y={-13} width={3} height={11} {...seg} />
+      <rect x={-9.5} y={2} width={3} height={11} {...seg} />
+      <rect x={6.5} y={2} width={3} height={11} {...seg} />
+    </g>
+  );
+  return (
+    <g>
+      {legs}
+      <rect x={x0} y={faceTop} width={x1 - x0} height={faceBottom - faceTop} rx={2.5} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.6" />
+      <rect x={x0 + 1.4} y={faceTop + 1.4} width={x1 - x0 - 2.8} height={faceBottom - faceTop - 2.8} rx={2} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="0.6" />
+      {segments}
+      <circle cx={cx + 12} cy={cy + 15.5} r={1.8} fill="#565b52" />
+      <Silk x={x0 + 4} y={faceTop + 6.5} text={part.ref} size={4} fill="#8a9096" anchor="start" />
     </g>
   );
 }
@@ -450,10 +812,36 @@ function Esp32Body({ part }) {
 // Pin-group breaks per MCU kind (indexes a group starts at, first group
 // implicit): the Uno's canonical pins split power | digital | analog, mirrored
 // as physical gaps in the header strip like the real board's 8/10-pin blocks.
-const MCU_PIN_GROUPS = { arduino_uno: [4, 9] };
+const MCU_PIN_GROUPS = { arduino_uno: [4, 18] };
 const MCU_GROUP_GAP = 10;
 
-const mcuPadPoint = (slot, index, kind) => {
+// Secondary silk annotations printed under specific header pads (by pin index),
+// like the real board's alternate-function marks. The Uno's D0/D1 double as the
+// serial RX/TX lines; the functional pin name stays D0/D1 so the firmware/AI
+// D<n>→pin-number contract is unaffected.
+const MCU_PIN_ALIASES = { arduino_uno: { 4: 'RX', 5: 'TX' } };
+
+// Off-board peripherals anchor their pads on the part's *real* terminals (motor
+// solder tabs, servo connector, relay input header + screw block) instead of a
+// floating strip at the top of the slot. Coordinates are expressed off each
+// body's own origin (see the body components below) so artwork and the
+// connect-to-board wires share one source of truth. MCU boards are absent here
+// and keep the collinear `slot.y + 18` default their body rects are drawn around.
+const PERIPHERAL_PAD_LAYOUTS = {
+  dc_motor: (slot, i) => {
+    const cx = slot.x + 88;
+    const cy = slot.y + 74; // DcMotorBody can center
+    return { x: cx + 46, y: cy + (i === 0 ? -10.5 : 10.5) }; // the two end-bell tabs
+  },
+  servo: (slot, i) => ({ x: slot.x + 74 + i * 11, y: slot.y + 58 }), // top-edge 3-pin connector
+  relay_module: (slot, i) => (i < 3
+    ? { x: slot.x + 26 + i * 12, y: slot.y + 40 } // VCC/GND/IN input header on the PCB edge
+    : { x: slot.x + 162, y: slot.y + 58 + (i - 3) * 15 }), // COM/NO/NC screw terminals
+};
+
+export const mcuPadPoint = (slot, index, kind) => {
+  const layout = PERIPHERAL_PAD_LAYOUTS[kind];
+  if (layout) return layout(slot, index);
   const breaks = MCU_PIN_GROUPS[kind] ?? [];
   const gaps = breaks.filter((breakIndex) => index >= breakIndex).length;
   return { x: slot.x + 24 + index * MCU_PIN_SPACING + gaps * MCU_GROUP_GAP, y: slot.y + 18 };
@@ -484,9 +872,12 @@ function McuPinWires({ part }) {
   );
 }
 
+// Pad names for off-board kinds without a fixedPins registry contract.
+const OFFBOARD_PIN_NAMES = { dc_motor: ['+', '−'] };
+
 function McuHeader({ part, light = false }) {
   const slot = part.meta.slot;
-  const names = MCU_PINS[part.kind] ?? [];
+  const names = FIXED_PIN_NAMES[part.kind] ?? OFFBOARD_PIN_NAMES[part.kind] ?? [];
   const pinCount = part.pinNets?.length ?? names.length;
   if (pinCount === 0) return null;
   // One plastic strip per pin group (power | digital | analog on the Uno),
@@ -510,15 +901,158 @@ function McuHeader({ part, light = false }) {
       })}
       {Array.from({ length: pinCount }, (_, index) => {
         const pad = mcuPadPoint(slot, index, part.kind);
+        const alias = MCU_PIN_ALIASES[part.kind]?.[index];
         return (
           <g key={index}>
             <GoldPad x={pad.x} y={pad.y} s={4.4} />
-            <text x={pad.x} y={pad.y + 14} textAnchor="middle" style={{ ...LABEL_STYLE, ...DARK_HALO, fontSize: 6 }} fill={light ? '#e9ede8' : '#f0f0ea'}>
+            <text x={pad.x} y={pad.y + 14} textAnchor="middle" style={{ ...LABEL_STYLE, ...DARK_HALO, fontSize: 6, fill: light ? '#e9ede8' : '#f0f0ea' }}>
+              {names[index] ?? index + 1}
+            </text>
+            {alias && (
+              <text x={pad.x} y={pad.y + 20.5} textAnchor="middle" style={{ ...LABEL_STYLE, ...DARK_HALO, fontSize: 4, fill: light ? '#bcd7d9' : '#bcdedf' }}>
+                {alias}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+// SG90 micro servo in a compact off-board slot: blue body with mounting ears,
+// the output hub, and a white two-arm cross horn.
+function ServoBody({ part }) {
+  const slot = part.meta.slot;
+  if (!slot) return null;
+  const x0 = slot.x + 16;
+  const bodyY = slot.y + 58;
+  const bodyW = 104;
+  const bodyH = 50;
+  const hubX = x0 + 26;
+  const names = FIXED_PIN_NAMES[part.kind] ?? OFFBOARD_PIN_NAMES[part.kind] ?? [];
+  const pinCount = part.pinNets?.length ?? names.length;
+  return (
+    <g>
+      <rect x={x0 - 12} y={bodyY + 17} width={14} height={16} rx={2} fill="url(#rsBluePlastic)" stroke="#173a75" strokeWidth="0.5" />
+      <rect x={x0 + bodyW - 2} y={bodyY + 17} width={14} height={16} rx={2} fill="url(#rsBluePlastic)" stroke="#173a75" strokeWidth="0.5" />
+      <MountHole cx={x0 - 5} cy={bodyY + 25} r={3.2} />
+      <MountHole cx={x0 + bodyW + 5} cy={bodyY + 25} r={3.2} />
+      <rect x={x0} y={bodyY} width={bodyW} height={bodyH} rx={4} fill="url(#rsBluePlastic)" stroke="#173a75" strokeWidth="0.7" />
+      <rect x={x0 + 1.6} y={bodyY + 1.6} width={bodyW - 3.2} height={bodyH - 3.2} rx={3.2} fill="none" stroke="rgba(255,255,255,0.14)" strokeWidth="0.6" />
+      {/* output hub + white cross horn */}
+      <circle cx={hubX} cy={bodyY} r={10} fill="url(#rsBluePlastic)" stroke="#173a75" strokeWidth="0.7" />
+      <rect x={hubX - 21} y={bodyY - 2.5} width={42} height={5} rx={2.5} fill="#f0f0ea" stroke="#c9c9bd" strokeWidth="0.5" />
+      <rect x={hubX - 2.5} y={bodyY - 17} width={5} height={17} rx={2.5} fill="#f0f0ea" stroke="#c9c9bd" strokeWidth="0.5" />
+      <circle cx={hubX} cy={bodyY} r={2.8} fill="#f0f0ea" stroke="#c9c9bd" strokeWidth="0.5" />
+      <Silk x={x0 + bodyW * 0.66} y={bodyY + 24} text={part.value || 'SG90'} size={6} weight={700} fill="#eaf1f4" />
+      <Silk x={x0 + bodyW * 0.66} y={bodyY + 33} text="Micro Servo" size={3.8} fill="#cdd8ea" />
+      <Silk x={x0 + bodyW * 0.66} y={bodyY + 43} text={part.ref} size={4.6} fill="#eaf1f4" />
+      {/* Integrated 3-pin servo lead connector on the top edge (VCC/GND/SIG). */}
+      <rect x={x0 + 52} y={bodyY - 6} width={39} height={12} rx={1.5} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.4" />
+      <line x1={x0 + 53} y1={bodyY - 5} x2={x0 + 90} y2={bodyY - 5} stroke="rgba(255,255,255,0.16)" strokeWidth="0.5" />
+      {Array.from({ length: pinCount }, (_, index) => {
+        const pad = mcuPadPoint(slot, index, part.kind);
+        return (
+          <g key={index}>
+            <GoldPad x={pad.x} y={pad.y} s={4.4} />
+            <text x={pad.x} y={pad.y + 12} textAnchor="middle" style={{ ...LABEL_STYLE, ...DARK_HALO, fontSize: 5, fill: '#f0f0ea' }}>
               {names[index] ?? index + 1}
             </text>
           </g>
         );
       })}
+      <McuPinWires part={part} />
+    </g>
+  );
+}
+
+// Brushed DC motor: silver can with a black end bell, two solder tabs, and the
+// gold shaft stub.
+function DcMotorBody({ part }) {
+  const slot = part.meta.slot;
+  if (!slot) return null;
+  const cx = slot.x + 88;
+  const cy = slot.y + 74;
+  return (
+    <g>
+      {/* shaft */}
+      <rect x={cx - 45 - 15} y={cy - 2.5} width={16} height={5} rx={1.5} fill="url(#rsPartTab)" stroke="#7c848b" strokeWidth="0.4" />
+      {/* can */}
+      <rect x={cx - 45} y={cy - 22} width={90} height={44} rx={21} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.6" />
+      <line x1={cx - 38} y1={cy - 17} x2={cx + 30} y2={cy - 17} stroke="rgba(255,255,255,0.6)" strokeWidth="0.6" />
+      {/* end bell with the two solder tabs */}
+      <path d={`M ${cx + 31} ${cy - 22} h 6 a 8 8 0 0 1 8 8 v 28 a 8 8 0 0 1 -8 8 h -6 Z`} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.5" />
+      <rect x={cx + 43} y={cy - 13} width={6} height={5} rx={1} fill="url(#rsGoldPad)" stroke="#8a6d14" strokeWidth="0.4" />
+      <rect x={cx + 43} y={cy + 8} width={6} height={5} rx={1} fill="url(#rsGoldPad)" stroke="#8a6d14" strokeWidth="0.4" />
+      <Silk x={cx - 6} y={cy + 2} text={part.ref} size={5} fill="#3c4640" />
+      {part.value && <Silk x={cx - 6} y={cy + 9} text={part.value} size={3.8} fill="#5a636b" />}
+      {/* The two end-bell tabs above are the actual terminals; label their polarity. */}
+      <Silk x={cx + 39} y={cy - 8.5} text="+" size={5} weight={700} fill="#f0f0ea" />
+      <Silk x={cx + 39} y={cy + 12.5} text="−" size={5} weight={700} fill="#f0f0ea" />
+      <McuPinWires part={part} />
+    </g>
+  );
+}
+
+// Single-channel relay breakout: green PCB carrying the blue relay cube, a
+// screw-terminal block on the COM/NO/NC side, and an indicator LED by the
+// input header.
+function RelayModuleBody({ part }) {
+  const slot = part.meta.slot;
+  if (!slot) return null;
+  const x0 = slot.x + 10;
+  const y0 = slot.y + 40;
+  const w = 176;
+  const h = 66;
+  const names = FIXED_PIN_NAMES[part.kind] ?? OFFBOARD_PIN_NAMES[part.kind] ?? [];
+  const pinCount = part.pinNets?.length ?? names.length;
+  return (
+    <g>
+      <rect x={x0} y={y0} width={w} height={h} rx={3} fill="url(#rsPartPi)" stroke="#0f4423" strokeWidth="0.7" />
+      <MountHole cx={x0 + 6} cy={y0 + h - 6} r={2.6} />
+      <MountHole cx={x0 + w - 6} cy={y0 + h - 6} r={2.6} />
+      {/* input side: indicator LED + driver transistor */}
+      <SmdLed cx={x0 + 14} cy={y0 + 12} color="#e0453a" w={5} h={3} />
+      <rect x={x0 + 8} y={y0 + 22} width={13} height={9} rx={1} fill="url(#rsPartDip)" stroke="#000" strokeWidth="0.4" />
+      {/* the blue Songle cube */}
+      <rect x={x0 + 54} y={y0 + 8} width={64} height={50} rx={2} fill="url(#rsBluePlastic)" stroke="#173a75" strokeWidth="0.7" />
+      <rect x={x0 + 55.6} y={y0 + 9.6} width={60.8} height={46.8} rx={1.6} fill="none" stroke="rgba(255,255,255,0.14)" strokeWidth="0.6" />
+      <Silk x={x0 + 86} y={y0 + 26} text="SONGLE" size={5} weight={700} fill="#eaf1f4" />
+      <Silk x={x0 + 86} y={y0 + 36} text={part.value || 'SRD-05VDC-SL-C'} size={3.2} fill="#cdd8ea" />
+      {/* screw terminal block, COM/NO/NC side */}
+      <rect x={x0 + w - 40} y={y0 + 9} width={32} height={48} rx={2} fill="#1f4d33" stroke="#0f2f1e" strokeWidth="0.6" />
+      {[0, 1, 2].map((index) => (
+        <g key={index}>
+          <circle cx={x0 + w - 24} cy={y0 + 18 + index * 15} r={4.6} fill="url(#rsBrushedShield)" stroke="#5f6870" strokeWidth="0.5" />
+          <line x1={x0 + w - 27} y1={y0 + 18 + index * 15} x2={x0 + w - 21} y2={y0 + 18 + index * 15} stroke="#565e66" strokeWidth="1" />
+        </g>
+      ))}
+      <Silk x={x0 + 8} y={y0 + h - 5} text={part.ref} size={4.6} fill="#dff2e6" anchor="start" />
+      {/* Integrated 3-pin input header (VCC/GND/IN) on the PCB's top edge. */}
+      <rect x={x0 + 10} y={y0 - 5} width={46} height={10} rx={1.5} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.4" />
+      {Array.from({ length: Math.min(3, pinCount) }, (_, index) => {
+        const pad = mcuPadPoint(slot, index, part.kind);
+        return (
+          <g key={`in${index}`}>
+            <GoldPad x={pad.x} y={pad.y} s={4.4} />
+            <text x={pad.x} y={pad.y - 7} textAnchor="middle" style={{ ...LABEL_STYLE, ...DARK_HALO, fontSize: 4.6, fill: '#f0f0ea' }}>
+              {names[index] ?? index + 1}
+            </text>
+          </g>
+        );
+      })}
+      {/* COM/NO/NC names beside the screw-terminal circles drawn above. */}
+      {Array.from({ length: Math.max(0, pinCount - 3) }, (_, k) => {
+        const index = k + 3;
+        const pad = mcuPadPoint(slot, index, part.kind);
+        return (
+          <text key={`sc${index}`} x={x0 + w - 34} y={pad.y + 1.6} textAnchor="middle" style={{ ...LABEL_STYLE, ...DARK_HALO, fontSize: 4, fill: '#f0f0ea' }}>
+            {names[index] ?? index + 1}
+          </text>
+        );
+      })}
+      <McuPinWires part={part} />
     </g>
   );
 }
@@ -604,7 +1138,7 @@ function ArduinoUnoBody({ part }) {
       {/* silkscreen: logo + wordmarks + section labels */}
       <ArduinoLogo cx={fx(0.44)} cy={fy(0.36)} r={5} />
       <Silk x={fx(0.44)} y={fy(0.36) + 12} text="ARDUINO" size={7} weight={700} fill="#eef6f6" />
-      <text x={fx(0.62)} y={fy(0.4)} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 13, fontWeight: 800 }} fill="none" stroke="#eef6f6" strokeWidth="0.7">UNO</text>
+      <text x={fx(0.62)} y={fy(0.4)} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 13, fontWeight: 800, fill: 'none' }} stroke="#eef6f6" strokeWidth="0.7">UNO</text>
       <Silk x={fx(0.5)} y={fy(0.17)} text="DIGITAL (PWM~)" size={4} fill="#cfe4e6" />
       <Silk x={fx(0.3)} y={fy(0.95)} text="POWER" size={4} fill="#cfe4e6" />
       <Silk x={fx(0.72)} y={fy(0.95)} text="ANALOG IN" size={4} fill="#cfe4e6" />
@@ -775,12 +1309,12 @@ export function BatteryPack({ battery, index }) {
       <circle cx={x + 17} cy={terminalY} r={2.6} fill="#22262a" />
       <circle cx={x + width - 17} cy={terminalY} r={3.4} fill="url(#rsBrushedShield)" stroke="#565e66" strokeWidth="0.7" />
       <circle cx={x + width - 18} cy={terminalY - 1} r={1.2} fill="rgba(255,255,255,0.55)" />
-      <text x={x + width / 2} y={y + height / 2 + 6} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 9 }} fill="#f0ede4" fontWeight="600">
+      <text x={x + width / 2} y={y + height / 2 + 6} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 9, fill: '#f0ede4' }} fontWeight="600">
         {battery.value || '?V'}
       </text>
-      <text x={x + width / 2} y={y + height - 8} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6 }} fill="#c9c4b6">{battery.ref}</text>
-      <text x={x + width - 17} y={terminalY + 12} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 8, fontWeight: 700 }} fill="#f0ede4">+</text>
-      <text x={x + 17} y={terminalY + 12} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 8, fontWeight: 700 }} fill="#f0ede4">−</text>
+      <text x={x + width / 2} y={y + height - 8} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 6, fill: '#c9c4b6' }}>{battery.ref}</text>
+      <text x={x + width - 17} y={terminalY + 12} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 8, fontWeight: 700, fill: '#f0ede4' }}>+</text>
+      <text x={x + 17} y={terminalY + 12} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 8, fontWeight: 700, fill: '#f0ede4' }}>−</text>
     </g>
   );
 }
@@ -837,7 +1371,7 @@ export function PinLabels({ part }) {
         const point = holeCenter(hole);
         // Chips sit opposite the body: away from the trench for
         // trench-straddling packages, toward the trench for everything else.
-        const chipDy = part.body === 'dip' || part.body === 'esp32'
+        const chipDy = part.meta?.columnStart != null
           ? (hole.strip === 'top' ? -11 : 11)
           : (hole.strip === 'bottom' ? -11 : 11);
         const y = point.y + chipDy;
@@ -884,6 +1418,34 @@ export function PartDefs() {
       <radialGradient id="rsPartDrum" cx="0.4" cy="0.35" r="0.95">
         <stop offset="0" stopColor="#4fa872" />
         <stop offset="1" stopColor="#2a6b45" />
+      </radialGradient>
+      <linearGradient id="rsPartZener" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stopColor="#4a6da8" />
+        <stop offset="0.5" stopColor="#27406e" />
+        <stop offset="1" stopColor="#182a4c" />
+      </linearGradient>
+      <radialGradient id="rsPartLdr" cx="0.35" cy="0.35" r="0.95">
+        <stop offset="0" stopColor="#f0dcb8" />
+        <stop offset="1" stopColor="#d9ae74" />
+      </radialGradient>
+      <radialGradient id="rsPartThermistor" cx="0.35" cy="0.3" r="0.95">
+        <stop offset="0" stopColor="#333a41" />
+        <stop offset="1" stopColor="#101316" />
+      </radialGradient>
+      <linearGradient id="rsBluePlastic" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stopColor="#2f6fd0" />
+        <stop offset="0.5" stopColor="#255bb0" />
+        <stop offset="1" stopColor="#1d4c9a" />
+      </linearGradient>
+      <linearGradient id="rsPcbBlue" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stopColor="#2b6fb0" />
+        <stop offset="0.5" stopColor="#245c94" />
+        <stop offset="1" stopColor="#1c4a80" />
+      </linearGradient>
+      <radialGradient id="rsPirDome" cx="0.38" cy="0.32" r="0.95">
+        <stop offset="0" stopColor="#ffffff" />
+        <stop offset="0.6" stopColor="#f0f0e6" />
+        <stop offset="1" stopColor="#d8d8cc" />
       </radialGradient>
       <linearGradient id="rsPartModule" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0" stopColor="#5d666e" />
@@ -942,24 +1504,141 @@ export function PartDefs() {
   );
 }
 
-const BODY_RENDERERS = {
+// Kind-specific artwork for parts whose placement body is the generic
+// 'twoLead'/'module'; anything not listed falls back to the labeled gray
+// ModuleBody box.
+const KIND_RENDERERS = {
   resistor: ResistorBody,
   capacitor: CapacitorBody,
   led: LedBody,
   diode: DiodeBody,
   inductor: InductorBody,
+  zener: ZenerBody,
+  photoresistor: LdrBody,
+  thermistor: ThermistorBody,
+  buzzer: BuzzerBody,
+  crystal: CrystalBody,
+  potentiometer: PotentiometerBody,
+  switch_spdt: SlideSwitchBody,
+  rgb_led: RgbLedBody,
+  ultrasonic_sensor: UltrasonicBody,
+  dht_sensor: DhtBody,
+  oled_display: OledBody,
+  pir_sensor: PirBody,
 };
 
 export function RealisticPart({ part }) {
-  // Off-board boards draw in their slot even when no pin is wired up yet.
+  // Off-board parts draw in their slot even when no pin is wired up yet.
   if (part.body === 'arduino_uno') return <ArduinoUnoBody part={part} />;
   if (part.body === 'raspberry_pi') return <RaspberryPiBody part={part} />;
+  if (part.body === 'servo') return <ServoBody part={part} />;
+  if (part.body === 'dc_motor') return <DcMotorBody part={part} />;
+  if (part.body === 'relay_module') return <RelayModuleBody part={part} />;
   const points = part.holes.map((hole) => (hole ? holeCenter(hole) : null)).filter(Boolean);
   if (points.length === 0) return null;
   if (part.body === 'esp32') return <Esp32Body part={part} />;
   if (part.body === 'dip') return <DipBody part={part} />;
+  if (part.body === 'pushbutton') return <PushbuttonBody part={part} />;
+  if (part.body === 'seven_segment') return <SevenSegmentBody part={part} />;
   if (part.body === 'to92') return <To92Body part={part} points={points} />;
   if (part.body === 'to220') return <To220Body part={part} points={points} />;
-  const Renderer = (part.body === 'twoLead' && BODY_RENDERERS[part.kind]) || ModuleBody;
+  const Renderer = ((part.body === 'twoLead' || part.body === 'module') && KIND_RENDERERS[part.kind]) || ModuleBody;
   return <Renderer part={part} points={points} />;
+}
+
+// --- component-library thumbnails ------------------------------------------
+// Renders a kind's real breadboard artwork into a small standalone SVG for the
+// library popover. Each spec fabricates the minimal synthetic part its
+// renderer needs — top-strip holes for point-driven bodies, package meta for
+// straddle/DIP bodies (plus one dummy hole to pass RealisticPart's empty-holes
+// guard; those bodies draw purely from meta), a fake slot rect for off-board
+// bodies — and a viewBox cropping the board-space region where that body
+// draws (top-strip holes sit at y=84, the trench at y=161, slots at y=0).
+// Every thumbnail embeds its own <PartDefs/>; duplicate gradient ids across
+// sibling SVGs are benign since the definitions are identical and url(#…)
+// resolves to the first one in the document.
+
+const thumbHoles = (columns) => columns.map((column) => ({ strip: 'top', column, row: 0 }));
+const DUMMY_THUMB_HOLES = [{ strip: 'bottom', column: 3, row: 0 }];
+
+const thumbPart = (kind, body, columns, value = '', meta = {}) => ({
+  kind, body, strip: 'top', ref: '', value, holes: thumbHoles(columns), pinNets: [], meta,
+});
+const dipThumb = (kind, value = '') => ({
+  part: { kind, body: 'dip', strip: 'top', ref: '', value, holes: DUMMY_THUMB_HOLES, pinNets: [], meta: { columnStart: 3, columnEnd: 6 } },
+  viewBox: '170 132 60 56',
+});
+// No pinNets on purpose: the slot bodies fall back to their pad-name list for
+// the pin count (an empty pinNets array would collapse the Uno/Pi board width
+// to a single pad).
+const slotThumb = (kind, height, viewBox, value = '') => ({
+  part: { kind, body: kind, strip: 'bottom', ref: '', value, holes: [], meta: { slot: { x: 0, y: 0, width: 448, height } } },
+  viewBox,
+});
+const batteryThumb = (value) => ({
+  render: () => <BatteryPack battery={{ ref: '', value }} index={0} />,
+  viewBox: '12 26 70 86',
+});
+
+const TWO_LEAD_VIEWBOX = '168 50 64 40';
+const MODULE3_VIEWBOX = '157 42 72 46';
+const MODULE4_VIEWBOX = '160 40 80 50';
+
+const THUMBNAIL_SPECS = {
+  resistor: { part: thumbPart('resistor', 'twoLead', [3, 6], '1k'), viewBox: TWO_LEAD_VIEWBOX },
+  capacitor: { part: thumbPart('capacitor', 'twoLead', [3, 6], '100nF'), viewBox: TWO_LEAD_VIEWBOX },
+  inductor: { part: thumbPart('inductor', 'twoLead', [3, 6], '10uH'), viewBox: TWO_LEAD_VIEWBOX },
+  diode: { part: thumbPart('diode', 'twoLead', [3, 6]), viewBox: TWO_LEAD_VIEWBOX },
+  led: { part: thumbPart('led', 'twoLead', [3, 6], 'red'), viewBox: TWO_LEAD_VIEWBOX },
+  zener: { part: thumbPart('zener', 'twoLead', [3, 6]), viewBox: TWO_LEAD_VIEWBOX },
+  photoresistor: { part: thumbPart('photoresistor', 'twoLead', [3, 6]), viewBox: TWO_LEAD_VIEWBOX },
+  thermistor: { part: thumbPart('thermistor', 'twoLead', [3, 6], '10k'), viewBox: TWO_LEAD_VIEWBOX },
+  buzzer: { part: thumbPart('buzzer', 'twoLead', [3, 6]), viewBox: TWO_LEAD_VIEWBOX },
+  crystal: { part: thumbPart('crystal', 'twoLead', [3, 6], '16MHz'), viewBox: TWO_LEAD_VIEWBOX },
+  load: { part: thumbPart('load', 'twoLead', [3, 6], 'load'), viewBox: TWO_LEAD_VIEWBOX },
+  bjt_npn: { part: thumbPart('bjt_npn', 'to92', [3, 4, 5]), viewBox: '163 52 60 38' },
+  bjt_pnp: { part: thumbPart('bjt_pnp', 'to92', [3, 4, 5]), viewBox: '163 52 60 38' },
+  mosfet_n: { part: thumbPart('mosfet_n', 'to92', [3, 4, 5]), viewBox: '163 52 60 38' },
+  mosfet_p: { part: thumbPart('mosfet_p', 'to92', [3, 4, 5]), viewBox: '163 52 60 38' },
+  temp_sensor: { part: thumbPart('temp_sensor', 'to92', [3, 4, 5]), viewBox: '163 52 60 38' },
+  regulator: { part: thumbPart('regulator', 'to220', [3, 4, 5], '7805'), viewBox: '162 44 62 44' },
+  opamp: dipThumb('opamp', 'LM358'),
+  comparator: dipThumb('comparator'),
+  timer_555: dipThumb('timer_555'),
+  pushbutton: {
+    part: { kind: 'pushbutton', body: 'pushbutton', strip: 'top', ref: '', value: '', holes: DUMMY_THUMB_HOLES, pinNets: [], meta: { columnStart: 3, columnEnd: 4 } },
+    viewBox: '158 134 56 54',
+  },
+  seven_segment: {
+    part: { kind: 'seven_segment', body: 'seven_segment', strip: 'top', ref: '', value: '', holes: DUMMY_THUMB_HOLES, pinNets: [], meta: { columnStart: 3, columnEnd: 7 } },
+    viewBox: '167 130 80 62',
+  },
+  esp32: {
+    part: { kind: 'esp32', body: 'esp32', strip: 'top', ref: '', value: '', holes: DUMMY_THUMB_HOLES, pinNets: [], meta: { columnStart: 2, columnEnd: 7 } },
+    viewBox: '150 130 100 62',
+  },
+  potentiometer: { part: thumbPart('potentiometer', 'module', [3, 4, 5], '10k'), viewBox: MODULE3_VIEWBOX },
+  switch_spdt: { part: thumbPart('switch_spdt', 'module', [3, 4, 5]), viewBox: MODULE3_VIEWBOX },
+  rgb_led: { part: thumbPart('rgb_led', 'module', [3, 4, 5, 6]), viewBox: MODULE4_VIEWBOX },
+  ultrasonic_sensor: { part: thumbPart('ultrasonic_sensor', 'module', [3, 4, 5, 6]), viewBox: MODULE4_VIEWBOX },
+  dht_sensor: { part: thumbPart('dht_sensor', 'module', [3, 4, 5]), viewBox: MODULE3_VIEWBOX },
+  oled_display: { part: thumbPart('oled_display', 'module', [3, 4, 5, 6]), viewBox: MODULE4_VIEWBOX },
+  pir_sensor: { part: thumbPart('pir_sensor', 'module', [3, 4, 5]), viewBox: MODULE3_VIEWBOX },
+  voltage_source: batteryThumb('9V'),
+  signal_source: batteryThumb('∿'),
+  servo: slotThumb('servo', 120, '0 36 142 80'),
+  dc_motor: slotThumb('dc_motor', 120, '22 46 132 56'),
+  relay_module: slotThumb('relay_module', 120, '4 34 188 78'),
+  arduino_uno: slotThumb('arduino_uno', 292, '0 0 380 290'),
+  raspberry_pi: slotThumb('raspberry_pi', 292, '0 0 420 285'),
+};
+
+export function PartThumbnail({ kind }) {
+  const spec = THUMBNAIL_SPECS[kind] ?? { part: thumbPart(kind, 'module', [3, 4, 5]), viewBox: MODULE3_VIEWBOX };
+  return (
+    <svg className="realistic-part-thumb" viewBox={spec.viewBox} aria-hidden="true" focusable="false">
+      <PartDefs />
+      {spec.render ? spec.render() : <RealisticPart part={spec.part} />}
+    </svg>
+  );
 }

@@ -112,27 +112,33 @@ export const viewBoxToBoard = (point, view) => ({
   y: (point.y - view.ty) / view.s,
 });
 
-// Off-board microcontroller boards (Arduino Uno, Raspberry Pi) sit in a stack
-// of fixed-height slots below the breadboard, one board per slot. Their header
-// pins fan out upward to the bottom strip and rails.
+// Off-board parts (MCU boards, servos, motors, relay breakouts) sit in a stack
+// of variable-height slots below the breadboard, one part per slot. Their
+// header pins fan out upward to the bottom strip and rails.
 export const MCU_SLOT_HEIGHT = 292; // tall enough for a true ~1.3:1 board aspect
+export const PERIPHERAL_SLOT_HEIGHT = 120; // servos, motors, relay breakouts
 export const MCU_SLOT_GAP = 14;
 export const MCU_MARGIN_TOP = 20; // gap between the board body and the first slot
-export const MCU_PIN_SPACING = 2 * HOLE_PITCH; // px between header pads
+export const MCU_PIN_SPACING = 1.5 * HOLE_PITCH; // px between header pads (kept tight so the 24-pin Uno header stays compact; labels are ≤3 chars)
 
-export const mcuSlotRect = (index, columns) => ({
+// A slot rectangle `offsetY` px into the slot stack (the sum of the heights
+// and gaps of the slots above it) with the slot's own height.
+export const slotRect = (offsetY, height, columns) => ({
   x: BOARD_MARGIN_LEFT,
-  y: TOTAL_ROWS * HOLE_PITCH + MCU_MARGIN_TOP + index * (MCU_SLOT_HEIGHT + MCU_SLOT_GAP),
+  y: TOTAL_ROWS * HOLE_PITCH + MCU_MARGIN_TOP + offsetY,
   width: Math.min(BOARD_PAD_X * 2 + (columns - 1) * HOLE_PITCH, 470),
-  height: MCU_SLOT_HEIGHT,
+  height,
 });
 
 // Full drawing size including the off-board battery margin, label gutter, and
-// any microcontroller slots below the board.
-export const boardSize = (columns, mcuSlots = 0) => ({
+// any off-board slots below the board. `slotHeights` is one entry per slot;
+// each slot also carries a trailing MCU_SLOT_GAP.
+export const boardSize = (columns, slotHeights = []) => ({
   width: BOARD_MARGIN_LEFT + BOARD_PAD_X * 2 + (columns - 1) * HOLE_PITCH + RIGHT_LABEL_MARGIN,
   height: TOTAL_ROWS * HOLE_PITCH
-    + (mcuSlots > 0 ? MCU_MARGIN_TOP + mcuSlots * (MCU_SLOT_HEIGHT + MCU_SLOT_GAP) : 0),
+    + (slotHeights.length > 0
+      ? MCU_MARGIN_TOP + slotHeights.reduce((sum, height) => sum + height + MCU_SLOT_GAP, 0)
+      : 0),
 });
 
 // The plastic board body rectangle (excludes the battery margin).

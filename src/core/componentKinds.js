@@ -24,8 +24,12 @@ export const COMPONENT_KINDS = {
   mosfet_n: { spicePrefix: 'M', pins: 3, symbolType: 'generic', label: 'N-channel MOSFET' },
   mosfet_p: { spicePrefix: 'M', pins: 3, symbolType: 'generic', label: 'P-channel MOSFET' },
   opamp: { spicePrefix: 'X', pins: 5, symbolType: 'opamp', label: 'Op amp' },
-  // Exported to SPICE as an ideal DC source on its output node, hence the V.
-  regulator: { spicePrefix: 'V', pins: 2, symbolType: 'generic', label: 'Voltage regulator' },
+  // Physically a three-pin IN/GND/OUT device. The SPICE exporter currently
+  // approximates it as an ideal DC source on its output node, hence the V.
+  regulator: {
+    spicePrefix: 'V', pins: 3, symbolType: 'generic', label: 'Voltage regulator',
+    fixedPins: ['IN', 'GND', 'OUT'],
+  },
   voltage_source: { spicePrefix: 'V', pins: 2, symbolType: 'voltage_source', label: 'Voltage source' },
   signal_source: { spicePrefix: 'V', pins: 2, symbolType: 'voltage_source', label: 'Signal source' },
   load: { spicePrefix: 'R', pins: 2, symbolType: 'resistor', label: 'Load' },
@@ -92,9 +96,12 @@ export const COMPONENT_KINDS = {
     fixedPins: ['VCC', 'GND', 'IN', 'COM', 'NO', 'NC'],
   },
   arduino_uno: {
-    spicePrefix: 'U', pins: 12, symbolType: 'generic', label: 'Arduino Uno',
+    spicePrefix: 'U', pins: 24, symbolType: 'generic', label: 'Arduino Uno',
     wiringOnly: true, mcu: true,
-    fixedPins: ['5V', '3V3', 'GND', 'VIN', 'D2', 'D3', 'D5', 'D9', 'D13', 'A0', 'A1', 'A2'],
+    // Full usable header: power | digital D0-D13 | analog A0-A5 (A4/A5 double
+    // as I2C SDA/SCL). Order is the positional contract every other pin array
+    // and the AI prompt must match by index.
+    fixedPins: ['5V', '3V3', 'GND', 'VIN', 'D0', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'D13', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5'],
   },
   raspberry_pi: {
     spicePrefix: 'U', pins: 10, symbolType: 'generic', label: 'Raspberry Pi',

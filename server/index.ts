@@ -3,6 +3,8 @@ import { loadEnv } from './env.js';
 import { buildCircuitResponse, reconcileCircuitRevision } from './circuit/circuitResponse.js';
 import { normalizeChatMemory, sanitizeConversationHistory, updateChatMemory } from './ai/chatMemory.js';
 import { streamCircuitWithOllama } from './ai/ollamaProvider.js';
+import { checkCircuitTopology } from '../src/core/topologyRules.js';
+import { generateClarifyingQuestions } from './ai/clarifyProvider.js';
 import { runNgspiceSimulation } from './simulation/simulator.js';
 import { buildStreamingSpice } from './circuit/streamingCircuit.js';
 import { initDb } from './auth/db.js';
@@ -151,6 +153,27 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
     return;
   }
 
+  if (request.url === '/api/clarify-circuit' && request.method === 'POST') {
+    try {
+      const body = await readJsonBody(request);
+      const prompt = String(body.prompt || '').trim();
+      if (!prompt) {
+        sendJson(response, 400, { code: 'clarify_failed', error: 'Prompt is required.' });
+        return;
+      }
+
+      const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
+      const currentDesign = (body.currentDesign as CurrentDesign)?.circuit ? body.currentDesign as CurrentDesign : null;
+      const memory = normalizeChatMemory(body.memory as Partial<ChatMemory> | null);
+      const result = await generateClarifyingQuestions(prompt, messages, currentDesign, memory);
+      sendJson(response, 200, result);
+    } catch (error) {
+      console.error(`[circuit-clarify] ${(error as Error).message}`);
+      sendJson(response, statusFor(error), { code: 'clarify_failed', error: (error as Error).message });
+    }
+    return;
+  }
+
   if (request.url === '/api/generate-circuit' && request.method === 'POST') {
     try {
       const body = await readJsonBody(request);
@@ -192,6 +215,18 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         });
       }, memory);
       const circuit = reconcileCircuitRevision(aiResponse.circuit as unknown as Record<string, unknown>, prompt, currentDesign?.circuit ?? null);
+      // Reconciliation can merge the candidate with the prior confirmed
+      // design, so re-run the topology check on what actually ships (keeping
+      // the retry loop's auto-fixed entries, which no longer trip the checker
+      // precisely because they were fixed); fall back to the retry loop's
+      // findings if the checker itself fails.
+      let issues = aiResponse.issues || [];
+      try {
+        const fresh = (checkCircuitTopology(circuit) as { violations: typeof issues }).violations;
+        issues = [...issues.filter((issue) => issue.autoFixed), ...fresh];
+      } catch (topologyError) {
+        console.error(`[topology-check] ${(topologyError as Error).message}`);
+      }
       let updatedMemory: ChatMemory = memory;
       try {
         updatedMemory = updateChatMemory(memory, prompt, circuit);
@@ -205,6 +240,8 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
           reply: aiResponse.reply,
           code: aiResponse.code || '',
           memory: updatedMemory,
+          issues,
+          generation: aiResponse.generation,
           ...(process.env.OLLAMA_CONTEXT_DIAGNOSTICS === '1' ? { contextDiagnostics } : {}),
         },
       });

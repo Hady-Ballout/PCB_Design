@@ -56,14 +56,49 @@ export const chatTitleFromPrompt = (prompt) => {
   return title.length > 42 ? `${title.slice(0, 39).trimEnd()}...` : title;
 };
 
+export const NO_PREFERENCE_ANSWER = 'No preference (you decide)';
+
+const CLARIFICATION_STATUSES = ['pending', 'answered', 'skipped'];
+
+const sanitizeClarification = (clarification) => {
+  if (!clarification || typeof clarification !== 'object') return null;
+  const questions = (Array.isArray(clarification.questions) ? clarification.questions : [])
+    .filter((question) => question && typeof question === 'object')
+    .map((question) => ({
+      id: String(question.id || ''),
+      question: String(question.question || ''),
+      options: (Array.isArray(question.options) ? question.options : [])
+        .map((option) => String(option || '').trim())
+        .filter(Boolean),
+    }))
+    .filter((question) => question.id && question.question && question.options.length);
+  if (!questions.length) return null;
+
+  const rawAnswers = clarification.answers && typeof clarification.answers === 'object' ? clarification.answers : {};
+  const answers = {};
+  for (const question of questions) {
+    const answer = String(rawAnswers[question.id] || '').trim();
+    if (answer) answers[question.id] = answer;
+  }
+
+  return {
+    forPrompt: String(clarification.forPrompt || ''),
+    questions,
+    answers,
+    status: CLARIFICATION_STATUSES.includes(clarification.status) ? clarification.status : 'pending',
+  };
+};
+
 const normalizeMessage = (message) => {
   if (!message || !['user', 'assistant'].includes(message.role)) return null;
+  const clarification = message.role === 'assistant' ? sanitizeClarification(message.clarification) : null;
   return {
     id: String(message.id || createId()),
     role: message.role,
     content: String(message.content || ''),
     createdAt: Number(message.createdAt) || Date.now(),
     ...(message.circuit && typeof message.circuit === 'object' ? { circuit: message.circuit } : {}),
+    ...(clarification ? { clarification } : {}),
   };
 };
 
@@ -198,6 +233,23 @@ export const migrateChatDiagram = (chat) => {
 
   return changed ? { ...chat, result, editedDiagram } : chat;
 };
+
+const resolvedAnswer = (answers, questionId) =>
+  String(answers?.[questionId] || '').trim() || NO_PREFERENCE_ANSWER;
+
+// The full prompt sent to /api/generate-circuit after a clarification round.
+export const composeClarifiedPrompt = (forPrompt, questions, answers) => [
+  `Original request: ${forPrompt}`,
+  'User clarifications:',
+  ...questions.map((question) => `- ${question.question} -> ${resolvedAnswer(answers, question.id)}`),
+  'Design the circuit now honoring these clarifications.',
+].join('\n');
+
+// The compact user bubble shown in chat (and replayed as history context).
+export const formatClarificationSummary = (questions, answers) =>
+  `Clarifications: ${questions
+    .map((question) => `${question.question} -> ${resolvedAnswer(answers, question.id)}`)
+    .join('; ')}`;
 
 export const buildConversationContext = (messages) =>
   (Array.isArray(messages) ? messages : [])

@@ -197,6 +197,55 @@ describe('component library', () => {
     const labels = [...container.querySelectorAll('.realistic-library-item-label')].map((el) => el.textContent);
     expect(labels).toContain('Potentiometer');
     expect(labels).toContain('Arduino Uno');
+    // Every item previews its kind with the realistic artwork thumbnail.
+    expect(container.querySelectorAll('.realistic-library-item-icon svg.realistic-part-thumb'))
+      .toHaveLength(ALLOWED_KINDS.length);
+  });
+
+  it('adds the picked component with placeholder pins and closes when editable', () => {
+    const onCircuitChange = vi.fn();
+    const svg = mount({ onCircuitChange, onLayoutChange: vi.fn() });
+
+    fireDouble(svg, { clientX: 60, clientY: 40 });
+    const potentiometer = [...container.querySelectorAll('.realistic-library-item')]
+      .find((item) => item.textContent.includes('Potentiometer'));
+    expect(potentiometer.disabled).toBe(false);
+    act(() => { potentiometer.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    // Appends a fresh 3-pin R# component with unconnected NC placeholder nodes.
+    expect(onCircuitChange).toHaveBeenCalledTimes(1);
+    const next = onCircuitChange.mock.calls[0][0](dividerCircuit);
+    expect(next.components).toHaveLength(dividerCircuit.components.length + 1);
+    const added = next.components.at(-1);
+    expect(added).toMatchObject({ ref: 'R3', kind: 'potentiometer', value: '10k' });
+    expect(added.nodes).toEqual(['NC_R3_1', 'NC_R3_2', 'NC_R3_3']);
+    // The popover closes after the pick.
+    expect(container.querySelector('.realistic-library')).toBeNull();
+  });
+
+  it('adds a voltage regulator with IN, GND, and OUT pins', () => {
+    const onCircuitChange = vi.fn();
+    const svg = mount({ onCircuitChange, onLayoutChange: vi.fn() });
+
+    fireDouble(svg, { clientX: 60, clientY: 40 });
+    const regulator = [...container.querySelectorAll('.realistic-library-item')]
+      .find((item) => item.textContent.includes('Voltage regulator'));
+    act(() => { regulator.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+
+    const next = onCircuitChange.mock.calls[0][0](dividerCircuit);
+    const added = next.components.at(-1);
+    expect(added).toMatchObject({ kind: 'regulator', value: '5V' });
+    expect(added.nodes).toEqual([
+      `NC_${added.ref}_1`,
+      `NC_${added.ref}_2`,
+      `NC_${added.ref}_3`,
+    ]);
+  });
+
+  it('is browse-only (items disabled) with no onCircuitChange', () => {
+    const svg = mount({});
+    fireDouble(svg);
+    expect([...container.querySelectorAll('.realistic-library-item')].every((item) => item.disabled)).toBe(true);
   });
 
   it('filters the list by the search query', () => {
@@ -224,5 +273,36 @@ describe('component library', () => {
     expect(container.querySelector('.realistic-library')).not.toBeNull();
     firePointer(container.querySelector('.realistic-library-backdrop'), 'pointerdown', { clientX: 5, clientY: 5 });
     expect(container.querySelector('.realistic-library')).toBeNull();
+  });
+});
+
+describe('issues panel', () => {
+  it('renders design issues by severity with fixes, errors expanded', () => {
+    mount({
+      issues: [
+        { id: 'gpio_direct_load', severity: 'error', message: 'GPIO2 drives buzzer RBZ1 directly.', fix: 'Insert an NPN transistor.' },
+        { id: 'i2c_missing_pullups', severity: 'warning', message: 'SDA has no pull-up resistor.', fix: '' },
+        { id: 'mosfet_gate_no_pulldown', severity: 'warning', message: 'Gate pull-down added.', fix: '', autoFixed: true },
+      ],
+    });
+    const panel = container.querySelector('.rs-issues');
+    expect(panel).not.toBeNull();
+    expect(panel.open).toBe(true);
+    expect(panel.classList.contains('rs-issues-has-errors')).toBe(true);
+    expect(panel.querySelector('.rs-issues-summary').textContent).toContain('1 design issue');
+
+    const rows = [...panel.querySelectorAll('.rs-issue')];
+    expect(rows.map((row) => row.className)).toEqual([
+      'rs-issue rs-issue-error',
+      'rs-issue rs-issue-warning',
+      'rs-issue rs-issue-fixed',
+    ]);
+    expect(rows[0].textContent).toContain('Fix: Insert an NPN transistor.');
+  });
+
+  it('renders board integrity issues and model warnings without circuit issues', () => {
+    // The divider circuit itself is clean; the panel is absent.
+    mount({});
+    expect(container.querySelector('.rs-issues')).toBeNull();
   });
 });

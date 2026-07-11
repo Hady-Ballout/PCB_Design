@@ -3,7 +3,7 @@
 // stays unit-testable. Placement is a greedy, deterministic single pass over
 // `circuit.components` in array order.
 
-import { DEFAULT_COLUMNS, FULL_SIZE_COLUMNS, STRIP_ROWS, boardSize, isRailStrip, mcuSlotRect, tieGroupKey } from './breadboardGeometry.js';
+import { DEFAULT_COLUMNS, FULL_SIZE_COLUMNS, MCU_SLOT_GAP, MCU_SLOT_HEIGHT, PERIPHERAL_SLOT_HEIGHT, STRIP_ROWS, boardSize, isRailStrip, slotRect, tieGroupKey } from './breadboardGeometry.js';
 
 // A pin is unconnected when its net is a placeholder (NC_… or `${ref}_${pin}`).
 // Duplicated here to keep this chunk from importing another feature chunk — the
@@ -13,8 +13,6 @@ const isUnconnectedTerminal = (node, ref, pin) =>
 
 export const GROUND_NET = '0';
 const SUPPLY_NAME_PATTERN = /^(vcc|vdd|v\+|vin|vs|vsupply)$/i;
-
-const TO92_KINDS = new Set(['bjt_npn', 'bjt_pnp', 'mosfet_n', 'mosfet_p']);
 
 const GROUND_WIRE_COLOR = '#1f1f1f';
 const SUPPLY_WIRE_COLOR = '#c0392b';
@@ -29,21 +27,90 @@ const SIGNAL_WIRE_COLORS = ['#e6b422', '#3a9e4c', '#e07020', '#4a7fe0', '#9a5fd0
 const DIP_WIDTH_COLUMNS = 4;
 const OPAMP_LEG_LAYOUT = { bottom: [null, 1, 0, 4], top: [null, 3, 2, null] };
 
+// The 555's canonical pin order [GND, TRIG, OUT, RESET, CTRL, THRES, DISCH,
+// VCC] is exactly NE555 DIP pins 1-8, so the legs map straight onto the
+// counter-clockwise DIP numbering: pins 1-4 left-to-right on the bottom strip,
+// pins 8-5 left-to-right on the top strip.
+const TIMER_555_LEG_LAYOUT = { bottom: [0, 1, 2, 3], top: [7, 6, 5, 4] };
+
 // Canonical positional pin lists for the microcontroller boards. Order is the
 // contract the AI is taught (server/ai/ollamaProvider.ts) and what the
 // selection pin labels display; unused pins ride on NC_* placeholder nets.
 export const MCU_PINS = {
-  arduino_uno: ['5V', '3V3', 'GND', 'VIN', 'D2', 'D3', 'D5', 'D9', 'D13', 'A0', 'A1', 'A2'],
+  arduino_uno: ['5V', '3V3', 'GND', 'VIN', 'D0', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'D13', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5'],
   raspberry_pi: ['5V', '3V3', 'GND', 'GPIO2', 'GPIO3', 'GPIO4', 'GPIO17', 'GPIO18', 'GPIO27', 'GPIO22'],
   esp32: ['3V3', 'GND', 'VIN', 'EN', 'GPIO2', 'GPIO4', 'GPIO5', 'GPIO13', 'GPIO18', 'GPIO19', 'GPIO21', 'GPIO22'],
 };
 
-// Arduino Uno and Raspberry Pi cannot plug into a breadboard; they sit in
-// off-board slots below it with jumper wires up to the bottom strip/rails.
-// The ESP32 DevKit module straddles the trench like a wide DIP.
+// Parts that cannot plug into a breadboard — MCU boards (Arduino Uno,
+// Raspberry Pi) and wired peripherals (servo, DC motor, relay breakout) — sit
+// in off-board slots below it with jumper wires up to the bottom strip/rails.
+// The map value is each part's slot height; MCU boards get the tall slot,
+// peripherals a compact one. The ESP32 DevKit module instead straddles the
+// trench like a wide DIP.
+const OFFBOARD_SLOT_HEIGHTS = {
+  arduino_uno: MCU_SLOT_HEIGHT,
+  raspberry_pi: MCU_SLOT_HEIGHT,
+  servo: PERIPHERAL_SLOT_HEIGHT,
+  dc_motor: PERIPHERAL_SLOT_HEIGHT,
+  relay_module: PERIPHERAL_SLOT_HEIGHT,
+};
 const OFFBOARD_MCU_KINDS = new Set(['arduino_uno', 'raspberry_pi']);
 const ESP32_WIDTH_COLUMNS = 6;
 const ESP32_LEG_LAYOUT = { bottom: [0, 1, 4, 5, 6, 7], top: [2, 3, 11, 10, 9, 8] };
+
+// Kind-keyed placement tables shared by the greedy pass and placeAnchored so
+// the two dispatch sites can never drift apart. `requirePins` guards kinds
+// whose leg layout only makes sense for the canonical pin count (opamp and
+// comparator share the virtual 5-pin [IN+, IN-, OUT, V+, V-] contract on a
+// DIP-8; the comparator just wears LM393 silk).
+const STRADDLE_PACKAGES = {
+  opamp: { width: DIP_WIDTH_COLUMNS, legs: OPAMP_LEG_LAYOUT, body: 'dip', requirePins: 5 },
+  comparator: { width: DIP_WIDTH_COLUMNS, legs: OPAMP_LEG_LAYOUT, body: 'dip', requirePins: 5 },
+  timer_555: { width: DIP_WIDTH_COLUMNS, legs: TIMER_555_LEG_LAYOUT, body: 'dip', requirePins: 8 },
+  esp32: { width: ESP32_WIDTH_COLUMNS, legs: ESP32_LEG_LAYOUT, body: 'esp32' },
+  // Tactile pushbutton: both electrical pins land on the bottom strip (row f)
+  // like a real 4-leg tact switch bridging the trench; the top-strip legs are
+  // purely mechanical, so they reserve their columns but claim no holes.
+  pushbutton: { width: 2, legs: { bottom: [0, 1], top: [null, null] }, body: 'pushbutton', requirePins: 2 },
+  // 5161AS-style DIP-10, canonical pins [A,B,C,D,E,F,G,DP,COM]: physical pins
+  // 1-5 left-to-right on the bottom row are E,D,COM,C,DP and pins 10-6
+  // left-to-right on the top row are G,F,COM,A,B — the second COM leg is
+  // internally tied to the first and stays decorative (null).
+  seven_segment: { width: 5, legs: { bottom: [4, 3, 8, 2, 7], top: [6, 5, null, 0, 1] }, body: 'seven_segment', requirePins: 9 },
+};
+
+const straddleFor = (component) => {
+  const spec = STRADDLE_PACKAGES[component.kind];
+  if (!spec) return null;
+  if (spec.requirePins != null && (component.nodes?.length ?? 0) !== spec.requirePins) return null;
+  return spec;
+};
+
+// A straddle kind that failed requirePins falls back to a generic body whose
+// positional pin->hole mapping no longer matches the real package — an
+// integrity problem, not a cosmetic one.
+const straddleFallbackIssue = (component) => {
+  const spec = STRADDLE_PACKAGES[component.kind];
+  if (!spec || straddleFor(component)) return null;
+  return {
+    severity: 'error',
+    message: `${component.ref} (${component.kind}) lists ${component.nodes?.length ?? 0} nodes but the package needs ${spec.requirePins}; it is drawn as a generic part and its pin mapping is unreliable.`,
+  };
+};
+
+// Inline package bodies keyed by kind (checked before the two-lead branch, so
+// a 2-pin kind listed here keeps its package body). The TMP36-style
+// temp_sensor shares the TO-92 can: VCC/OUT/GND left-to-right matches the
+// flat-face pin order.
+const INLINE_BODY_BY_KIND = {
+  bjt_npn: 'to92',
+  bjt_pnp: 'to92',
+  mosfet_n: 'to92',
+  mosfet_p: 'to92',
+  temp_sensor: 'to92',
+  regulator: 'to220',
+};
 
 const LEAD_SPAN = 2; // default columns between a two-lead part's legs
 const MAX_DIRECT_SPAN = 8; // widest a part stretches to plug straight into home groups
@@ -60,6 +127,10 @@ export function circuitToBreadboard(circuit, overrides = {}) {
   const overrideParts = overrides?.parts ?? {};
   let columns = DEFAULT_COLUMNS;
   const warnings = [];
+  // Electrical-integrity problems (a break or unreliable pin mapping on the
+  // physical board), as {severity, message} — surfaced as errors in the UI,
+  // unlike cosmetic `warnings`.
+  const integrityIssues = [];
   const rails = { railTopPlus: null, railTopMinus: null, railBottomPlus: null, railBottomMinus: null };
   const jumpers = [];
   const parts = [];
@@ -129,7 +200,10 @@ export function circuitToBreadboard(circuit, overrides = {}) {
   const sources = components.filter((component) => component.kind === 'voltage_source');
   sources.forEach((source, index) => {
     if (index >= 2) {
-      warnings.push(`${source.ref}: only two supplies fit on the rails; this one is not drawn.`);
+      integrityIssues.push({
+        severity: 'error',
+        message: `${source.ref}: only two supplies fit on the rails; this one is not drawn, so its connections are missing from the board.`,
+      });
       return;
     }
     const [first, second] = source.nodes ?? [];
@@ -169,6 +243,23 @@ export function circuitToBreadboard(circuit, overrides = {}) {
     });
   });
 
+  // Rail promotion: a net tapped by five or more pins would exhaust its 5-hole
+  // home tie group and start dropping connections, so give it a whole rail —
+  // exactly what a human builder does with a busy net. A no-op for the common
+  // small nets, keeping auto-placement byte-identical for existing circuits.
+  const netTapCounts = new Map();
+  components.forEach((component) => {
+    (component.nodes ?? []).forEach((net, index) => {
+      if (net == null || isUnconnectedTerminal(net, component.ref, index + 1)) return;
+      netTapCounts.set(net, (netTapCounts.get(net) ?? 0) + 1);
+    });
+  });
+  netTapCounts.forEach((count, net) => {
+    if (count < 5 || isRailNet(net)) return;
+    const freeKey = ['railTopPlus', 'railBottomPlus', 'railBottomMinus'].find((key) => rails[key] == null);
+    if (freeKey) assignRail(freeKey, net);
+  });
+
   // --- net home groups ---
   const netHome = new Map(); // net -> group key currently open for new taps
   const netGroupKeys = new Map(); // net -> every group key carrying the net
@@ -188,6 +279,36 @@ export function circuitToBreadboard(circuit, overrides = {}) {
     if (rails[mirrorKey] == null) assignRail(mirrorKey, net);
   };
 
+  const groupFreeHoles = (key) => {
+    const group = groups.get(key);
+    return group ? group.rows.filter((used) => !used).length : STRIP_ROWS[key.split(':')[0]];
+  };
+
+  // Set by the column allocator below; ensureConnected uses it to open relay
+  // groups, and it is defined before any part placement runs.
+  let allocRelayColumn = null;
+
+  // Open a fresh, empty tie group for `net`, bridged from `anchorKey` (which
+  // must still have a free hole). Restores headroom on a nearly-saturated net
+  // so connections are never silently dropped.
+  const openRelayGroup = (net, anchorKey) => {
+    const anchorHole = takeHoleByKey(anchorKey);
+    if (!anchorHole || !allocRelayColumn) return null;
+    const spot = allocRelayColumn();
+    const relayKey = groupKey(spot.strip, spot.column);
+    const relayGroup = groupAt(spot.strip, spot.column);
+    relayGroup.net = net;
+    relayGroup.linked = true;
+    sharableGroups.add(relayKey);
+    const relayHole = takeHole(spot.strip, spot.column);
+    pushJumper(net, anchorHole, relayHole);
+    const keys = netGroupKeys.get(net) ?? [];
+    keys.push(relayKey);
+    netGroupKeys.set(net, keys);
+    netHome.set(net, relayKey);
+    return relayKey;
+  };
+
   const ensureConnected = (net, strip, column) => {
     const key = groupKey(strip, column);
     const group = groupAt(strip, column);
@@ -199,7 +320,12 @@ export function circuitToBreadboard(circuit, overrides = {}) {
       if (strip === 'bottom') mirrorRailToBottom(net);
       const hole = takeHole(strip, column);
       if (hole) pushJumper(net, hole, railHoleFor(net, column, strip));
-      else warnings.push(`Net ${net}: tie group at column ${column} is full; rail jumper dropped.`);
+      else {
+        integrityIssues.push({
+          severity: 'error',
+          message: `Net ${net}: tie group at column ${column} is full, so its rail connection is missing on the board.`,
+        });
+      }
       return;
     }
 
@@ -210,14 +336,26 @@ export function circuitToBreadboard(circuit, overrides = {}) {
       netHome.set(net, key);
       return;
     }
-    let targetKey = netHome.get(net);
-    if (!groupHasSpace(targetKey)) {
-      targetKey = keys.find((other) => other !== key && groupHasSpace(other)) ?? null;
+    // Prefer a target with at least two free holes (one for this jumper, one
+    // spare for future chaining); when only a last-hole group remains, spend
+    // that hole bridging to a fresh relay group first so the net never
+    // saturates and connections are never dropped.
+    let targetKey = [netHome.get(net), ...keys]
+      .find((other) => other && other !== key && groupFreeHoles(other) >= 2)
+      ?? keys.find((other) => other !== key && groupHasSpace(other))
+      ?? null;
+    if (targetKey && groupFreeHoles(targetKey) === 1) {
+      targetKey = openRelayGroup(net, targetKey) ?? targetKey;
     }
     const hole = takeHole(strip, column);
     const targetHole = targetKey ? takeHoleByKey(targetKey) : null;
     if (hole && targetHole) pushJumper(net, hole, targetHole);
-    else warnings.push(`Net ${net}: no free holes left to join all of its tie groups.`);
+    else {
+      integrityIssues.push({
+        severity: 'error',
+        message: `Net ${net}: no free holes left to join all of its tie groups — the board has a break in this net.`,
+      });
+    }
     // Keep the home pointing at a group that can still accept taps.
     if (!groupHasSpace(netHome.get(net)) && groupHasSpace(key)) netHome.set(net, key);
   };
@@ -264,6 +402,7 @@ export function circuitToBreadboard(circuit, overrides = {}) {
       growBoard();
     }
   };
+  allocRelayColumn = () => allocSpan(1);
   // peekStrip only needs to know which strip allocSpan would land a part on, so
   // two-lead placement can reason about home groups on the same strip.
   const peekStrip = (need) => (freeRun('top', need) != null ? 'top' : freeRun('bottom', need) != null ? 'bottom' : (growBoard(), peekStrip(need)));
@@ -382,14 +521,15 @@ export function circuitToBreadboard(circuit, overrides = {}) {
     });
   };
 
-  // Off-board MCU boards (Arduino Uno, Raspberry Pi) sit in slots below the
-  // board. Pins are processed in positional (= header left-to-right) order and
-  // each connected pin claims the next free bottom-strip column, so the wires
-  // leave the header left-to-right and land left-to-right without crossing.
-  let mcuSlotCount = 0;
-  const placeOffboardMcu = (component) => {
-    const slotIndex = mcuSlotCount;
-    mcuSlotCount += 1;
+  // Off-board parts (MCU boards, servos, motors, relay breakouts) sit in slots
+  // below the board. Pins are processed in positional (= header left-to-right)
+  // order and each connected pin claims the next free bottom-strip column, so
+  // the wires leave the header left-to-right and land left-to-right without
+  // crossing.
+  let offboardSlotCount = 0;
+  const placeOffboard = (component) => {
+    const slotIndex = offboardSlotCount;
+    offboardSlotCount += 1;
     const nets = component.nodes ?? [];
     let column = cursors.bottom;
     const nextColumn = () => {
@@ -440,26 +580,29 @@ export function circuitToBreadboard(circuit, overrides = {}) {
     const strip = anchor?.strip === 'bottom' ? 'bottom' : 'top';
     let column = Math.max(2, Math.round(Number(anchor?.column)));
     if (!Number.isFinite(column)) return false;
+    const fallbackIssue = straddleFallbackIssue(component);
+    if (fallbackIssue) integrityIssues.push(fallbackIssue);
     const fit = (need, strips) => {
       while (column + need - 1 > columns) growBoard();
       strips.forEach((s) => reserveSpan(s, column, need));
     };
-    if (component.kind === 'opamp' && pinCount === 5) {
-      fit(DIP_WIDTH_COLUMNS, ['top', 'bottom']);
-      placeStraddle(component, DIP_WIDTH_COLUMNS, OPAMP_LEG_LAYOUT, 'dip', column);
-    } else if (component.kind === 'esp32') {
-      fit(ESP32_WIDTH_COLUMNS, ['top', 'bottom']);
-      placeStraddle(component, ESP32_WIDTH_COLUMNS, ESP32_LEG_LAYOUT, 'esp32', column);
-    } else if (OFFBOARD_MCU_KINDS.has(component.kind)) {
+    const straddle = straddleFor(component);
+    if (straddle) {
+      fit(straddle.width, ['top', 'bottom']);
+      placeStraddle(component, straddle.width, straddle.legs, straddle.body, column);
+    } else if (OFFBOARD_SLOT_HEIGHTS[component.kind]) {
       return false;
+    } else if (INLINE_BODY_BY_KIND[component.kind]) {
+      const need = Math.max(pinCount, 1);
+      fit(need, [strip]);
+      finalizePart(component, strip, (component.nodes ?? []).map((_, index) => column + index), INLINE_BODY_BY_KIND[component.kind]);
     } else if (pinCount === 2) {
       fit(LEAD_SPAN + 1, [strip]);
       finalizePart(component, strip, [column, column + LEAD_SPAN], 'twoLead');
     } else {
       const need = Math.max(pinCount, 1);
-      const body = TO92_KINDS.has(component.kind) ? 'to92' : component.kind === 'regulator' ? 'to220' : 'module';
       fit(need, [strip]);
-      finalizePart(component, strip, (component.nodes ?? []).map((_, index) => column + index), body);
+      finalizePart(component, strip, (component.nodes ?? []).map((_, index) => column + index), 'module');
     }
     placedRefs.add(component.ref);
     return true;
@@ -472,34 +615,42 @@ export function circuitToBreadboard(circuit, overrides = {}) {
     const anchor = overrideParts[component.ref];
     if (anchor) placeAnchored(component, anchor);
   });
-  // Off-board MCU boards place after everything else: their jumper wires can
-  // fly to any strip, so waiting lets each pin tap the tie group its net
-  // already earned under a component lead instead of allocating a spare group.
-  const deferredMcus = [];
+  // Off-board parts place after everything else: their jumper wires can fly to
+  // any strip, so waiting lets each pin tap the tie group its net already
+  // earned under a component lead instead of allocating a spare group.
+  const deferredOffboard = [];
   components.forEach((component) => {
     if (component.kind === 'voltage_source') return; // handled in the rail pre-pass
     if (placedRefs.has(component.ref)) return; // pinned in Phase 1
     const pinCount = component.nodes?.length ?? 0;
-    if (component.kind === 'opamp' && pinCount === 5) {
-      return placeStraddle(component, DIP_WIDTH_COLUMNS, OPAMP_LEG_LAYOUT, 'dip');
-    }
-    if (component.kind === 'esp32') {
-      return placeStraddle(component, ESP32_WIDTH_COLUMNS, ESP32_LEG_LAYOUT, 'esp32');
-    }
-    if (OFFBOARD_MCU_KINDS.has(component.kind)) return deferredMcus.push(component);
-    if (TO92_KINDS.has(component.kind)) return placeInline(component, 'to92');
-    if (component.kind === 'regulator') return placeInline(component, 'to220');
+    const straddle = straddleFor(component);
+    const fallbackIssue = straddleFallbackIssue(component);
+    if (fallbackIssue) integrityIssues.push(fallbackIssue);
+    if (straddle) return placeStraddle(component, straddle.width, straddle.legs, straddle.body);
+    if (OFFBOARD_SLOT_HEIGHTS[component.kind]) return deferredOffboard.push(component);
+    if (INLINE_BODY_BY_KIND[component.kind]) return placeInline(component, INLINE_BODY_BY_KIND[component.kind]);
     if (pinCount === 2) return placeTwoLead(component);
     placeInline(component, 'module');
   });
-  deferredMcus.forEach(placeOffboardMcu);
+  // MCU boards claim the first slots so adding a peripheral never reshuffles
+  // an existing board's position (stable sort keeps circuit order per group).
+  deferredOffboard
+    .sort((a, b) => (OFFBOARD_MCU_KINDS.has(a.kind) ? 0 : 1) - (OFFBOARD_MCU_KINDS.has(b.kind) ? 0 : 1))
+    .forEach(placeOffboard);
 
   // Slot rectangles use the final column count, so they are stamped only after
   // every part has placed (placement can still grow the board).
-  parts.forEach((part) => {
-    if (part.meta?.slotIndex == null) return;
-    part.meta = { ...part.meta, slot: mcuSlotRect(part.meta.slotIndex, columns) };
-  });
+  const slotHeights = [];
+  let slotOffsetY = 0;
+  parts
+    .filter((part) => part.meta?.slotIndex != null)
+    .sort((a, b) => a.meta.slotIndex - b.meta.slotIndex)
+    .forEach((part) => {
+      const height = OFFBOARD_SLOT_HEIGHTS[part.kind] ?? MCU_SLOT_HEIGHT;
+      part.meta = { ...part.meta, slot: slotRect(slotOffsetY, height, columns) };
+      slotOffsetY += height + MCU_SLOT_GAP;
+      slotHeights.push(height);
+    });
 
   // Tie groups per net, for highlight overlays.
   const netGroups = {};
@@ -522,8 +673,8 @@ export function circuitToBreadboard(circuit, overrides = {}) {
   listNet(rails.railBottomMinus, rails.railBottomMinus === GROUND_NET ? 'ground' : 'supply');
   netGroupKeys.forEach((_, net) => listNet(net, 'signal'));
 
-  const size = boardSize(columns, mcuSlotCount);
-  return {
+  const size = boardSize(columns, slotHeights);
+  const model = {
     board: { columns, width: size.width, height: size.height },
     rails,
     parts,
@@ -533,6 +684,67 @@ export function circuitToBreadboard(circuit, overrides = {}) {
     nets,
     warnings,
   };
+  // Runtime invariant: rebuild connectivity from the physical board and merge
+  // any SPLIT/SHORT with the placement-time integrity problems, so an
+  // electrically broken board is always visibly flagged, never silent.
+  const verification = verifyBoardConnectivity(model);
+  model.integrity = {
+    ok: verification.ok && integrityIssues.length === 0,
+    issues: [...integrityIssues, ...verification.issues],
+  };
+  return model;
+}
+
+// Reconstruct the board's electrical nodes (tie groups + rails unioned by
+// jumpers) and diff them against the intended nets: a net landing on more
+// than one node is a SPLIT (a break), a node carrying more than one net is a
+// SHORT. This is the runtime guard the debug description also reports.
+export function verifyBoardConnectivity(model) {
+  const parent = new Map();
+  const find = (key) => {
+    if (!parent.has(key)) parent.set(key, key);
+    let root = key;
+    while (parent.get(root) !== root) root = parent.get(root);
+    return root;
+  };
+  const union = (a, b) => parent.set(find(a), find(b));
+  const keyOf = (hole) =>
+    hole.strip.startsWith('rail') ? `rail:${hole.strip}` : `${hole.strip}:${hole.column}`;
+  (model.jumpers ?? []).forEach((jumper) => union(keyOf(jumper.from), keyOf(jumper.to)));
+
+  const netToNodes = new Map();
+  const nodeToNets = new Map();
+  (model.parts ?? []).forEach((part) => {
+    (part.pinNets ?? []).forEach((net, index) => {
+      if (isUnconnectedTerminal(net, part.ref, index + 1)) return;
+      const hole = part.holes?.[index];
+      if (!hole) return;
+      const node = find(keyOf(hole));
+      if (!netToNodes.has(net)) netToNodes.set(net, new Set());
+      netToNodes.get(net).add(node);
+      if (!nodeToNets.has(node)) nodeToNets.set(node, new Set());
+      nodeToNets.get(node).add(net);
+    });
+  });
+
+  const issues = [];
+  netToNodes.forEach((nodes, net) => {
+    if (nodes.size > 1) {
+      issues.push({
+        severity: 'error',
+        message: `SPLIT: net ${net === GROUND_NET ? '0 (GND)' : net} lands on ${nodes.size} unconnected nodes on the board.`,
+      });
+    }
+  });
+  nodeToNets.forEach((nets) => {
+    if (nets.size > 1) {
+      issues.push({
+        severity: 'error',
+        message: `SHORT: one board node carries multiple nets: ${[...nets].map((net) => (net === GROUND_NET ? '0 (GND)' : net)).join(', ')}.`,
+      });
+    }
+  });
+  return { ok: issues.length === 0, issues };
 }
 
 // Drop persisted placement anchors whose part no longer exists in the circuit

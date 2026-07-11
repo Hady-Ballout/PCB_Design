@@ -4,8 +4,9 @@
 // browser.
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { ALLOWED_KINDS } from '../../core/componentKinds.js';
 import { circuitToBreadboard } from './breadboardModel.js';
-import { BatteryPack, JumperWire, PartDefs, PinLabels, RealisticPart } from './parts.jsx';
+import { BatteryPack, JumperWire, mcuPadPoint, PartDefs, PartThumbnail, PinLabels, RealisticPart } from './parts.jsx';
 
 const renderModel = (circuit) => {
   const model = circuitToBreadboard(circuit);
@@ -38,7 +39,7 @@ describe('realistic part rendering', () => {
           ref: 'U1',
           kind: 'arduino_uno',
           value: 'Uno R3',
-          nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'LED', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+          nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12', 'NC_U1_13', 'NC_U1_14', 'NC_U1_15', 'NC_U1_16', 'NC_U1_17', 'LED', 'NC_U1_19', 'NC_U1_20', 'NC_U1_21', 'NC_U1_22', 'NC_U1_23', 'NC_U1_24'],
         },
         { ref: 'RLED', kind: 'resistor', value: '330', nodes: ['LED', 'LEDK'] },
         { ref: 'DLED1', kind: 'led', value: 'red', nodes: ['LEDK', '0'] },
@@ -122,6 +123,163 @@ describe('realistic part rendering', () => {
     expect(markup).toContain('paint-order:stroke');
     // Electrolytic cap polarity glyphs.
     expect(markup).toContain('−');
+  });
+  it('renders the extended two-lead kinds with dedicated artwork', () => {
+    // No voltage source on purpose: the buzzer's "+" must be the only plus
+    // glyph in the markup (a battery pack would add its own).
+    const { markup } = renderModel({
+      title: 'Extended passives',
+      components: [
+        { ref: 'DZ1', kind: 'zener', value: '5.1V', nodes: ['VCC', 'A'] },
+        { ref: 'R1', kind: 'photoresistor', value: '10k', nodes: ['A', 'B'] },
+        { ref: 'R2', kind: 'thermistor', value: '10k', nodes: ['B', 'C'] },
+        { ref: 'R3', kind: 'buzzer', value: '8ohm', nodes: ['C', 'D'] },
+        { ref: 'C1', kind: 'crystal', value: '8MHz', nodes: ['D', 'E'] },
+      ],
+    });
+    expect(markup).toContain('rsPartZener'); // blue-tinted diode glass
+    expect(markup).toContain('rsPartLdr'); // LDR ceramic disc
+    expect(markup).toContain('NTC'); // thermistor silk
+    expect(markup).toContain('>+</text>'); // buzzer polarity mark
+    expect(markup).toContain('8MHz'); // crystal prints its own frequency
+    expect(markup).not.toContain('url(#rsPartModule)'); // nothing fell back to the gray box
+  });
+
+  it('renders 555 and comparator DIPs with part-number silk', () => {
+    const { model, markup } = renderModel({
+      title: 'DIP kinds',
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '9V', nodes: ['VCC', '0'] },
+        // Empty value exercises the LM393/NE555 fallback silk.
+        { ref: 'XU1', kind: 'timer_555', value: '', nodes: ['0', 'TRIG', 'OUT', 'VCC', 'CTRL', 'TRIG', 'DIS', 'VCC'] },
+        { ref: 'XU2', kind: 'comparator', value: '', nodes: ['A', 'B', 'O', 'VCC', '0'] },
+        { ref: 'U1', kind: 'temp_sensor', value: 'TMP36', nodes: ['VCC', 'A', '0'] },
+        { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['B', '0'] },
+        { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['TRIG', 'DIS'] },
+        { ref: 'R3', kind: 'resistor', value: '10k', nodes: ['O', 'VCC'] },
+      ],
+    });
+    expect(model.parts.find((part) => part.ref === 'XU1').body).toBe('dip');
+    expect(model.parts.find((part) => part.ref === 'XU2').body).toBe('dip');
+    expect(model.parts.find((part) => part.ref === 'U1').body).toBe('to92');
+    expect(markup).toContain('NE555');
+    expect(markup).toContain('LM393');
+    expect(markup).toContain('TMP36');
+  });
+
+  it('renders the phase-2 kinds with dedicated artwork', () => {
+    const { model, markup } = renderModel({
+      title: 'Phase 2 kinds',
+      components: [
+        { ref: 'RBTN', kind: 'pushbutton', value: '', nodes: ['A', 'B'] },
+        { ref: 'RPOT', kind: 'potentiometer', value: '10k', nodes: ['B', 'W', 'C'] },
+        { ref: 'RSW', kind: 'switch_spdt', value: '', nodes: ['C', 'D', 'E'] },
+        { ref: 'DRGB', kind: 'rgb_led', value: '', nodes: ['E', 'F', 'G', 'H'] },
+        { ref: 'D1', kind: 'seven_segment', value: '5161AS', nodes: ['SA', 'SB', 'SC', 'SD', 'SE', 'SF', 'SG', 'SDP', 'H'] },
+      ],
+    });
+    expect(model.parts.find((part) => part.ref === 'RBTN').body).toBe('pushbutton');
+    expect(model.parts.find((part) => part.ref === 'D1').body).toBe('seven_segment');
+    expect(model.parts.find((part) => part.ref === 'RPOT').body).toBe('module');
+    expect(markup).toContain('url(#rsBluePlastic)'); // potentiometer trimmer body
+    expect(markup).toContain('#565b52'); // unlit 7-segment bars
+    expect(markup).toContain('skewX(-6)'); // italic digit
+    expect(markup).toContain('#3fae5a'); // RGB LED green die
+    expect(markup).not.toContain('url(#rsPartModule)'); // nothing fell back to the gray box
+  });
+
+  it('renders the on-board sensor modules with dedicated artwork', () => {
+    const { markup } = renderModel({
+      title: 'Sensor modules',
+      components: [
+        { ref: 'U1', kind: 'ultrasonic_sensor', value: 'HC-SR04', nodes: ['VCC', 'TRIG', 'ECHO', 'GNDX'] },
+        { ref: 'U2', kind: 'dht_sensor', value: 'DHT22', nodes: ['VCC', 'DATA', 'GNDX'] },
+        { ref: 'U3', kind: 'oled_display', value: '', nodes: ['VCC', 'GNDX', 'SCL', 'SDA'] },
+        { ref: 'U4', kind: 'pir_sensor', value: '', nodes: ['VCC', 'PIROUT', 'GNDX'] },
+      ],
+    });
+    expect(markup).toContain('url(#rsPcbBlue)'); // HC-SR04 PCB
+    expect(markup).toContain('HC-SR04');
+    expect(markup).toContain('DHT22');
+    expect(markup).toContain('SSD1306'); // OLED fallback silk
+    expect(markup).toContain('url(#rsPirDome)'); // PIR Fresnel dome
+    expect(markup).not.toContain('url(#rsPartModule)'); // nothing fell back to the gray box
+  });
+
+  it('renders the off-board peripherals in slots with header pads and wires', () => {
+    const { model, markup } = renderModel({
+      title: 'Peripherals',
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'U1', kind: 'servo', value: 'SG90', nodes: ['VCC', '0', 'SIG'] },
+        { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['SIG', 'M'] },
+        { ref: 'RM1', kind: 'dc_motor', value: '', nodes: ['M', '0'] },
+        { ref: 'U2', kind: 'relay_module', value: '', nodes: ['VCC', '0', 'SIG', 'COMX', 'NOX', 'NC_U2_6'] },
+      ],
+    });
+    ['servo', 'dc_motor', 'relay_module'].forEach((kind) => {
+      expect(model.parts.find((part) => part.kind === kind).meta.slot).toBeTruthy();
+    });
+    expect(markup).toContain('Micro Servo');
+    expect(markup).toContain('SONGLE');
+    expect(markup).toContain('rs-mcu-wires'); // pin wires fan up to the board
+    // Terminals are integrated into each body: servo 3-pin connector, motor tab
+    // polarity, relay input header + screw-terminal names.
+    ['>VCC</text>', '>GND</text>', '>SIG</text>'].forEach((label) => expect(markup).toContain(label));
+    expect(markup).toContain('>+</text>'); // motor + tab
+    ['>IN</text>', '>COM</text>', '>NO</text>', '>NC</text>'].forEach((label) => expect(markup).toContain(label));
+  });
+
+  it('anchors peripheral pads on their body terminals but keeps MCU pads collinear', () => {
+    const slot = { x: 0, y: 0, width: 448, height: 120 };
+    // Peripherals: pads sit on the body (servo top-edge connector at y=58,
+    // motor tabs flanking the can center, relay input header vs. screw block).
+    expect(mcuPadPoint(slot, 0, 'servo')).toEqual({ x: 74, y: 58 });
+    expect(mcuPadPoint(slot, 0, 'dc_motor').y).toBeLessThan(mcuPadPoint(slot, 1, 'dc_motor').y);
+    expect(mcuPadPoint(slot, 2, 'relay_module').y).toBe(40); // IN on the top edge
+    expect(mcuPadPoint(slot, 3, 'relay_module').x).toBeGreaterThan(mcuPadPoint(slot, 2, 'relay_module').x); // COM on the screw side
+    // MCU boards are untouched: every pad stays on the collinear y=18 row their
+    // board rect is drawn around.
+    ['arduino_uno', 'raspberry_pi', 'esp32'].forEach((kind) => {
+      expect(mcuPadPoint(slot, 0, kind).y).toBe(18);
+      expect(mcuPadPoint(slot, 5, kind).y).toBe(18);
+    });
+  });
+
+  it('falls back to the labeled module box for unknown kinds', () => {
+    const { markup } = renderModel({
+      title: 'Mystery',
+      components: [{ ref: 'U9', kind: 'mystery_widget', value: '???', nodes: ['A', 'B', 'C'] }],
+    });
+    expect(markup).toContain('url(#rsPartModule)');
+    expect(markup).toContain('U9');
+  });
+});
+
+describe('library part thumbnails', () => {
+  it('renders a non-empty artwork SVG for every registry kind', () => {
+    ALLOWED_KINDS.forEach((kind) => {
+      const markup = renderToStaticMarkup(<PartThumbnail kind={kind} />);
+      expect(markup, kind).toContain('realistic-part-thumb');
+      expect(markup, kind).toMatch(/viewBox="[^"]+"/);
+      // More than just the defs block: the body artwork actually rendered.
+      expect(markup.split('</defs>')[1].length, kind).toBeGreaterThan(50);
+    });
+  });
+
+  it('shows the real artwork, not generic glyphs', () => {
+    expect(renderToStaticMarkup(<PartThumbnail kind="resistor" />)).toContain('url(#rsPartResistor)');
+    expect(renderToStaticMarkup(<PartThumbnail kind="arduino_uno" />)).toContain('ARDUINO');
+    expect(renderToStaticMarkup(<PartThumbnail kind="timer_555" />)).toContain('NE555');
+    expect(renderToStaticMarkup(<PartThumbnail kind="pir_sensor" />)).toContain('url(#rsPirDome)');
+    expect(renderToStaticMarkup(<PartThumbnail kind="voltage_source" />)).toContain('url(#rsPartBattery)');
+  });
+
+  it('renders the regulator thumbnail with three TO-220 leads', () => {
+    const markup = renderToStaticMarkup(<PartThumbnail kind="regulator" />);
+    const body = markup.split('</defs>')[1];
+    expect(body.match(/<path /g)).toHaveLength(3);
+    expect(body).toContain('7805');
   });
 });
 

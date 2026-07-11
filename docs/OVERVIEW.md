@@ -8,9 +8,15 @@ KiCad-style netlist, and (optionally) simulated waveform data.
 
 ```text
 User prompt (chat UI)
-  -> POST /api/generate-circuit (streamed NDJSON)
+  -> POST /api/clarify-circuit (plain JSON) — AI asks up to 3 multiple-choice
+     clarifying questions; user answers via chips (falls through on failure)
+  -> POST /api/generate-circuit (streamed NDJSON, prompt + clarification answers)
   -> Ollama (or an OpenAI-compatible provider) generates circuit JSON + SPICE
-  -> server validates/normalizes the circuit and reconciles it against the prior design
+  -> server validates schema/SPICE AND gates on the topology rule engine
+     (src/core/topologyRules.js): functional errors (e.g. a GPIO driving a buzzer
+     with no transistor) are fed back for up to 3 corrective attempts; the best
+     candidate always ships, with surviving issues surfaced in the UI
+  -> server normalizes the circuit and reconciles it against the prior design
   -> frontend synchronizes SPICE <-> canvas schematic <-> KiCad netlist
      (plus read-only block-schematic and realistic-breadboard views of the same circuit)
   -> POST /api/simulate-circuit runs Ngspice on the current SPICE deck

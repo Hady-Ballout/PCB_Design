@@ -4,6 +4,7 @@
 // anchored under the cursor), two-finger trackpad to pan. Clicking a part or
 // wire highlights its electrical neighborhood (dim-others); hover previews it.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { DEFAULT_PIN_COUNT_BY_KIND, SPICE_PREFIX_BY_KIND } from '../../core/componentKinds.js';
 import { downloadText } from '../../core/download.js';
 import { circuitToBreadboard, netAtHole, reconcileOverrides, GROUND_NET } from './breadboardModel.js';
 import { describeBreadboard } from './breadboardDescription.js';
@@ -12,6 +13,7 @@ import { HOLE_PITCH, clientToViewBox, holeAt, holeCenter, viewBoxToBoard } from 
 import { Breadboard, HighlightOverlay } from './Breadboard.jsx';
 import { BatteryPack, JumperWire, PartDefs, PinLabels, RealisticPart } from './parts.jsx';
 import { ComponentLibrary } from './ComponentLibrary.jsx';
+import { IssuesPanel } from './IssuesPanel.jsx';
 import './RealisticSchematic.css';
 
 // Zoom scale bounds. s = 1 is "board fitted to the viewport" (viewBox + meet);
@@ -22,13 +24,49 @@ const IDENTITY_VIEW = { tx: 0, ty: 0, s: 1 };
 const WHEEL_ZOOM_INTENSITY = 0.0015; // per wheel deltaY unit
 const CLICK_MOVE_THRESHOLD = 3; // viewBox px of drag below which a press is a click
 
+// Starter values for parts dropped in from the component library, so a freshly
+// added part is still a runnable SPICE element (and matches the canvas palette's
+// defaults). Kinds without an obvious default come in valueless — the netlist
+// editor can fill them in. Opamps/comparators must be LM358 (the app injects
+// that model); see docs/AI_AND_CIRCUIT_MODEL.md.
+const DEFAULT_VALUE_BY_KIND = {
+  resistor: '1k', load: '1k', photoresistor: '10k', thermistor: '10k', potentiometer: '10k',
+  capacitor: '100nF', inductor: '10mH', crystal: '16MHz',
+  diode: '1N4148', zener: '5.1V', led: 'red',
+  bjt_npn: '2N2222', bjt_pnp: '2N2907',
+  opamp: 'LM358', comparator: 'LM358',
+  voltage_source: '5V', signal_source: 'SINE(0 1 1k)', regulator: '5V',
+  arduino_uno: 'Uno R3', raspberry_pi: 'Pi 5', esp32: 'DevKit V1',
+};
+
+// Build a fresh circuit component for `kind` with a unique SPICE-safe ref and
+// all pins left as `NC_<REF>_<pin>` placeholders (unconnected). This mirrors the
+// canvas add flow (schematic/geometry.js addedComponent) so both editors grow
+// the netlist the same way; the breadboard then greedy-places it and its pins
+// become drag-to-wire handles once selected.
+const newComponentForKind = (kind, components) => {
+  const existingRefs = new Set(components.map((component) => component.ref));
+  const prefix = SPICE_PREFIX_BY_KIND[kind] || 'U';
+  let number = 1;
+  while (existingRefs.has(`${prefix}${number}`)) number += 1;
+  const ref = `${prefix}${number}`;
+  const pinCount = DEFAULT_PIN_COUNT_BY_KIND[kind] ?? 2;
+  return {
+    ref,
+    kind,
+    value: DEFAULT_VALUE_BY_KIND[kind] ?? '',
+    footprint: '',
+    nodes: Array.from({ length: pinCount }, (_, index) => `NC_${ref}_${index + 1}`),
+  };
+};
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) || 1;
 const midpoint = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
 const netDisplayName = (net) => (net === GROUND_NET ? 'GND' : net);
 
-export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayoutChange }) {
+export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayoutChange, issues }) {
   const model = useMemo(
     () => circuitToBreadboard(circuit, reconcileOverrides(overrides, circuit) ?? {}),
     [circuit, overrides],
@@ -351,6 +389,18 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
     }
   };
 
+  // Add a part picked from the double-click component library. Appended with
+  // unconnected placeholder pins; the board auto-places it and the user wires it
+  // by selecting it and dragging its pin handles onto tie groups.
+  const addComponent = (kind) => {
+    if (!editable) return;
+    onCircuitChange((current) => ({
+      ...current,
+      components: [...(current.components ?? []), newComponentForKind(kind, current.components ?? [])],
+    }));
+    setLibraryAt(null);
+  };
+
   const toggleSelection = (next) => {
     setSelection((current) =>
       current && current.type === next.type && (current.ref ?? current.net) === (next.ref ?? next.net)
@@ -422,13 +472,10 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
           })}
         </div>
       )}
-      {model.warnings.length > 0 && (
-        <ul className="realistic-warnings">
-          {model.warnings.map((warning) => (
-            <li key={warning}>{warning}</li>
-          ))}
-        </ul>
-      )}
+      <IssuesPanel
+        issues={issues}
+        boardIssues={[...(model.integrity?.issues ?? []), ...model.warnings]}
+      />
       <div className="realistic-scroll">
         <svg
           ref={svgRef}
@@ -528,7 +575,11 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
         </svg>
       </div>
       {libraryAt && (
-        <ComponentLibrary position={libraryAt} onClose={() => setLibraryAt(null)} />
+        <ComponentLibrary
+          position={libraryAt}
+          onClose={() => setLibraryAt(null)}
+          onSelect={editable ? addComponent : undefined}
+        />
       )}
     </div>
   );

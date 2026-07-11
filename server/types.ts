@@ -82,6 +82,18 @@ export interface CurrentDesign {
   kicadNetlist?: string;
 }
 
+// ── Clarifying questions ──
+
+export interface ClarifyQuestion {
+  id: string;
+  question: string;
+  options: string[];
+}
+
+export interface ClarifyResult {
+  questions: ClarifyQuestion[];
+}
+
 // ── AI provider ──
 
 export interface ProviderConfig {
@@ -91,12 +103,39 @@ export interface ProviderConfig {
   apiKey: string;
 }
 
+// A functional design-rule finding from the shared topology checker
+// (src/core/topologyRules.js). Error-severity violations gate the generation
+// retry loop; whatever survives is surfaced in the UI, never fatal.
+export interface RuleViolation {
+  id: string;
+  severity: 'error' | 'warning';
+  refs: string[];
+  nets: string[];
+  message: string;
+  fix: string;
+  autoFixed?: boolean;
+}
+
+export interface GenerationMeta {
+  attempts: number;
+  // True when the retry budget ran out with error-severity violations left:
+  // the best-scoring candidate was accepted and its issues surfaced.
+  degraded: boolean;
+}
+
 export interface ParsedCircuitResponse {
   reply: string;
   circuit: Circuit;
   spice: string;
   // Firmware source for the circuit's MCU board; '' when the circuit has none.
   code: string;
+}
+
+// What the generation retry loop resolves to: the parsed response plus the
+// topology-rule findings and retry metadata.
+export interface GeneratedCircuit extends ParsedCircuitResponse {
+  issues: RuleViolation[];
+  generation: GenerationMeta;
 }
 
 export interface StreamState {
@@ -157,6 +196,8 @@ export interface CircuitResponse {
   reply?: string;
   code?: string;
   memory?: ChatMemory;
+  issues?: RuleViolation[];
+  generation?: GenerationMeta;
   contextDiagnostics?: Record<string, unknown>;
 }
 

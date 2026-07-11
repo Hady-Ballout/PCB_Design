@@ -1,20 +1,20 @@
-/* Realistic-schematic view: workbench background, zoom toolbar, warnings. */
+/* Realistic-schematic view: brutalist chrome around the breadboard photo. */
 .realistic-schematic {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 480px;
   min-width: 0;
-  border-radius: 7px;
+  border-radius: 8px;
   overflow: hidden;
-  border: 1px solid #cfd2ca;
-  background: #e8e6df;
+  border: 2px solid #111111;
+  background: var(--color-canvas);
 }
 
 .realistic-toolbar {
   align-items: center;
-  background: #f3f1ea;
-  border-bottom: 1px solid #d8d5ca;
+  background: var(--color-surface);
+  border-bottom: 2px solid #111111;
   display: flex;
   flex: 0 0 auto;
   gap: 6px;
@@ -22,29 +22,37 @@
 }
 
 .realistic-toolbar button {
-  background: #fff;
-  border: 1px solid #c3c6bd;
-  border-radius: 5px;
-  color: #33413a;
+  background: #ffffff;
+  border: 2px solid #111111;
+  border-radius: 6px;
+  box-shadow: 2px 2px 0 #111111;
+  color: #111111;
   cursor: pointer;
   font-size: 12px;
   line-height: 1;
+  min-height: 0;
   min-width: 26px;
   padding: 5px 8px;
 }
 
-.realistic-toolbar button:hover {
-  background: #eef1e9;
+.realistic-toolbar button:hover:not(:disabled) {
+  box-shadow: 3px 3px 0 #111111;
+  transform: translate(-1px, -1px);
+}
+
+.realistic-toolbar button:active:not(:disabled) {
+  box-shadow: 1px 1px 0 #111111;
+  transform: translate(1px, 1px);
 }
 
 .realistic-zoom-readout {
-  color: #6b7568;
+  color: var(--color-text-muted);
   font-size: 11px;
   margin-left: 4px;
 }
 
 .realistic-readout {
-  color: #33413a;
+  color: var(--color-text-muted);
   flex: 1;
   font-size: 12px;
   margin-left: 10px;
@@ -60,40 +68,41 @@
 
 /* Net legend: one clickable chip per net, swatch matches the wire color. */
 .realistic-legend {
-  background: #f3f1ea;
-  border-bottom: 1px solid #d8d5ca;
+  background: var(--color-surface);
+  border-bottom: 2px solid #111111;
   display: flex;
   flex: 0 0 auto;
   flex-wrap: wrap;
   gap: 5px;
-  padding: 5px 10px;
+  padding: 6px 10px;
 }
 
 .realistic-legend-chip {
   align-items: center;
-  background: #fff;
-  border: 1px solid #c3c6bd;
+  background: #ffffff;
+  border: 2px solid #111111;
   border-radius: 999px;
-  color: #33413a;
+  color: #111111;
   cursor: pointer;
   display: inline-flex;
   font-size: 11px;
+  font-weight: 600;
   gap: 5px;
   line-height: 1;
+  min-height: 0;
   padding: 4px 9px;
 }
 
 .realistic-legend-chip:hover {
-  background: #eef1e9;
+  background: var(--nb-yellow-soft);
 }
 
 .realistic-legend-chip.active {
-  background: #33413a;
-  border-color: #33413a;
-  color: #f3f1ea;
+  background: var(--nb-yellow);
 }
 
 .realistic-legend-swatch {
+  border: 1px solid #111111;
   border-radius: 50%;
   display: inline-block;
   height: 8px;
@@ -121,32 +130,89 @@
 }
 
 .realistic-scroll .rs-item:focus-visible {
-  outline: 2px solid #d97742;
+  outline: 3px solid var(--nb-blue);
   outline-offset: 2px;
 }
 
-.realistic-warnings {
-  background: #fdf6dd;
-  border-bottom: 1px solid #e8dba6;
-  color: #7a6414;
+.rs-issues {
+  background: var(--color-surface);
+  border-bottom: 2px solid #111111;
   flex: 0 0 auto;
   font-size: 12px;
-  list-style: disc inside;
-  margin: 0;
+}
+
+.rs-issues-summary {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  cursor: pointer;
+  font-weight: 700;
   padding: 6px 12px;
 }
 
-.realistic-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-  padding: 12px;
-  position: relative;
+.rs-issues-has-errors > .rs-issues-summary {
+  background: var(--color-error-bg);
+  color: var(--color-error-text);
 }
 
-/* The board is a pan/zoom canvas: it fills the stage and the world <g> is
-   translated/scaled in place. touch-action:none is required so the browser
-   hands us pinch/two-finger gestures instead of scrolling the page. */
+.rs-issues-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 12px 8px;
+}
+
+.rs-issue {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.rs-issue-tag {
+  border: 2px solid #111111;
+  border-radius: 6px;
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  text-transform: uppercase;
+}
+
+.rs-issue-error .rs-issue-tag {
+  background: var(--color-error-bg);
+  color: var(--color-error-text);
+}
+
+.rs-issue-warning .rs-issue-tag {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+
+.rs-issue-fixed .rs-issue-tag {
+  background: var(--color-success-bg);
+  color: #111111;
+}
+
+.rs-issue-body {
+  color: #111111;
+  font-weight: 600;
+}
+
+.rs-issue-fix {
+  color: #444444;
+  font-weight: 500;
+}
+
+/* Neutral bench mat so the realistic component colors read clearly. */
+.realistic-scroll {
+  background: #efe9dc;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+/* The board is a pan/zoom canvas: it fills the stage; touch-action:none hands
+   us pinch/two-finger gestures instead of scrolling the page. */
 .realistic-canvas {
   display: block;
   width: 100%;
@@ -159,29 +225,29 @@
   cursor: pointer;
 }
 
-/* Rewiring: the selected part's pins become draggable handles; dragging one
-   trails a rubber-band line to the hole it will connect to. */
+/* Rewiring: the selected part's pins become draggable handles trailing a
+   rubber-band line to the hole they will connect to. */
 .rs-pin-handle {
-  fill: rgba(217, 119, 66, 0.9);
-  stroke: #fff;
-  stroke-width: 1;
+  fill: var(--nb-blue);
+  stroke: #ffffff;
+  stroke-width: 1.5;
   cursor: crosshair;
 }
 
 .rs-pin-handle:hover {
-  fill: #d97742;
+  fill: var(--nb-pink);
   r: 6;
 }
 
 .rs-wire-drag {
-  stroke: #d97742;
+  stroke: var(--nb-blue);
   stroke-width: 2;
   stroke-dasharray: 4 3;
   stroke-linecap: round;
 }
 
 /* Component library: browse-only popover opened by double-clicking the board.
-   Flat workbench styling (borders over shadows) to match the rest of the view. */
+   Neo-brutalism: black 2px borders, hard offset shadows, flat accents. */
 .realistic-library-backdrop {
   position: fixed;
   inset: 0;
@@ -193,31 +259,32 @@
   z-index: 100;
   display: flex;
   flex-direction: column;
-  background: #fff;
-  border: 1px solid #c3c6bd;
+  background: var(--color-panel);
+  border: 2px solid #111111;
   border-radius: 8px;
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
-  color: #33413a;
+  color: var(--color-text);
   font-size: 12px;
 }
 
 .realistic-library-header {
   align-items: center;
-  background: #f3f1ea;
-  border-bottom: 1px solid #d8d5ca;
+  background: var(--color-surface);
+  border-bottom: 2px solid #111111;
   display: flex;
   justify-content: space-between;
   padding: 8px 10px;
 }
 
 .realistic-library-title {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .realistic-library-close {
   background: transparent;
   border: 0;
-  color: #6b7568;
+  color: var(--color-text-muted);
   cursor: pointer;
   font-size: 18px;
   line-height: 1;
@@ -225,13 +292,13 @@
 }
 
 .realistic-library-close:hover {
-  color: #33413a;
+  color: var(--color-text);
 }
 
 .realistic-library-search {
   border: 0;
-  border-bottom: 1px solid #e2e0d7;
-  color: #33413a;
+  border-bottom: 2px solid #111111;
+  color: var(--color-text);
   flex: 0 0 auto;
   font-size: 12px;
   outline: none;
@@ -239,7 +306,7 @@
 }
 
 .realistic-library-search:focus-visible {
-  border-bottom-color: #d97742;
+  background: var(--nb-yellow-soft);
 }
 
 .realistic-library-body {
@@ -254,9 +321,9 @@
 }
 
 .realistic-library-group-title {
-  color: #6b7568;
+  color: var(--color-text-subtle);
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.06em;
   margin: 0 0 6px;
   text-transform: uppercase;
@@ -265,59 +332,72 @@
 .realistic-library-grid {
   display: grid;
   gap: 6px;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: 1fr;
 }
 
 .realistic-library-item {
   align-items: center;
-  background: #faf9f5;
-  border: 1px solid #dad5c9;
+  background: #ffffff;
+  border: 2px solid #111111;
   border-radius: 6px;
-  color: #33413a;
+  box-shadow: 2px 2px 0 #111111;
+  color: var(--color-text);
   cursor: pointer;
   display: flex;
   gap: 8px;
+  /* Let the item shrink to its grid track so long labels ellipsize instead
+     of pushing the popover wider and forcing horizontal scrolling. */
+  min-width: 0;
   padding: 6px 8px;
   text-align: left;
 }
 
 .realistic-library-item:hover {
-  background: #fbe9e0;
-  border-color: #e7ac8d;
+  background: var(--nb-yellow-soft);
+  box-shadow: 3px 3px 0 #111111;
+  transform: translate(-1px, -1px);
+}
+
+.realistic-library-item:active {
+  box-shadow: 1px 1px 0 #111111;
+  transform: translate(1px, 1px);
 }
 
 .realistic-library-item:focus-visible {
-  outline: 2px solid #d97742;
+  outline: 3px solid var(--nb-blue);
   outline-offset: 1px;
+}
+
+.realistic-library-item:disabled {
+  box-shadow: 2px 2px 0 #111111;
+  cursor: default;
+  transform: none;
 }
 
 .realistic-library-item-icon {
   align-items: center;
-  color: #33413a;
   display: flex;
   flex: 0 0 auto;
   justify-content: center;
-  width: 28px;
+  width: 44px;
 }
 
+/* Realistic part-artwork thumbnails carry their own fills and strokes — no
+   line-art overrides here. */
 .realistic-library-item-icon svg {
-  width: 28px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  width: 44px;
+  height: 30px;
 }
 
 .realistic-library-item-label {
   line-height: 1.2;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .realistic-library-empty {
-  color: #6b7568;
+  color: var(--color-text-muted);
   margin: 4px 0;
 }

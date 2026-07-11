@@ -77,8 +77,24 @@ describe('pinLabelsFor', () => {
     expect(pinLabelsFor({ kind: 'resistor', value: '1k' })).toBeNull();
   });
 
+  it('labels the extended kinds from the registry and the SPICE contracts', () => {
+    // fixedPins kinds come straight from the componentKinds registry…
+    expect(pinLabelsFor({ kind: 'timer_555' })).toEqual(['GND', 'TRIG', 'OUT', 'RESET', 'CTRL', 'THRES', 'DISCH', 'VCC']);
+    expect(pinLabelsFor({ kind: 'temp_sensor' })).toEqual(['VCC', 'OUT', 'GND']);
+    expect(pinLabelsFor({ kind: 'regulator' })).toEqual(['IN', 'GND', 'OUT']);
+    expect(pinLabelsFor({ kind: 'relay_module' })).toEqual(['VCC', 'GND', 'IN', 'COM', 'NO', 'NC']);
+    // …the rest mirror the canonical orders in the SPICE exporter.
+    expect(pinLabelsFor({ kind: 'zener' })).toEqual(['A', 'K']);
+    expect(pinLabelsFor({ kind: 'comparator' })).toEqual(['IN+', 'IN-', 'OUT', 'V+', 'V-']);
+    expect(pinLabelsFor({ kind: 'potentiometer' })).toEqual(['A', 'W', 'B']);
+    expect(pinLabelsFor({ kind: 'switch_spdt' })).toEqual(['A', 'COM', 'B']);
+    expect(pinLabelsFor({ kind: 'rgb_led' })).toEqual(['R', 'G', 'B', 'K']);
+    expect(pinLabelsFor({ kind: 'buzzer' })).toEqual(['+', '−']);
+    expect(pinLabelsFor({ kind: 'dc_motor' })).toEqual(['+', '−']);
+  });
+
   it('labels microcontroller boards with their canonical header pins', () => {
-    expect(pinLabelsFor({ kind: 'arduino_uno' })).toEqual(['5V', '3V3', 'GND', 'VIN', 'D2', 'D3', 'D5', 'D9', 'D13', 'A0', 'A1', 'A2']);
+    expect(pinLabelsFor({ kind: 'arduino_uno' })).toEqual(['5V', '3V3', 'GND', 'VIN', 'D0', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'D13', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5']);
     expect(pinLabelsFor({ kind: 'raspberry_pi' })).toEqual(['5V', '3V3', 'GND', 'GPIO2', 'GPIO3', 'GPIO4', 'GPIO17', 'GPIO18', 'GPIO27', 'GPIO22']);
     expect(pinLabelsFor({ kind: 'esp32' })).toEqual(['3V3', 'GND', 'VIN', 'EN', 'GPIO2', 'GPIO4', 'GPIO5', 'GPIO13', 'GPIO18', 'GPIO19', 'GPIO21', 'GPIO22']);
   });

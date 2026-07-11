@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   CHAT_STORAGE_KEY,
+  NO_PREFERENCE_ANSWER,
   buildConversationContext,
   chatTitleFromPrompt,
+  composeClarifiedPrompt,
   createChat,
+  formatClarificationSummary,
   loadChatStore,
   migrateChatDiagram,
   saveChatStore,
@@ -113,6 +116,72 @@ describe('chat store', () => {
     }));
 
     expect(buildConversationContext(messages)).toHaveLength(8);
+  });
+
+  it('persists clarification rounds on assistant messages and drops malformed ones', () => {
+    const storage = memoryStorage();
+    const clarification = {
+      forPrompt: 'blink an LED',
+      questions: [{ id: 'q1', question: 'Supply?', options: ['USB 5V', NO_PREFERENCE_ANSWER] }],
+      answers: { q1: 'USB 5V', ghost: 'dropped' },
+    };
+    const chat = {
+      ...createChat({ id: 'clarify-chat', now: 10 }),
+      messages: [
+        { id: 'm1', role: 'assistant', content: 'Questions:', createdAt: 10, clarification },
+        { id: 'm2', role: 'assistant', content: 'Bad round', createdAt: 11, clarification: { questions: 'nope' } },
+        { id: 'm3', role: 'user', content: 'Ignored on user turns', createdAt: 12, clarification },
+      ],
+    };
+    storage.setItem(CHAT_STORAGE_KEY, JSON.stringify({ chats: [chat], activeChatId: chat.id }));
+
+    const [pending, malformed, userTurn] = loadChatStore(storage).chats[0].messages;
+    // Status defaults to pending; answers for unknown question ids are dropped.
+    expect(pending.clarification).toEqual({
+      forPrompt: 'blink an LED',
+      questions: clarification.questions,
+      answers: { q1: 'USB 5V' },
+      status: 'pending',
+    });
+    expect(malformed.clarification).toBeUndefined();
+    expect(userTurn.clarification).toBeUndefined();
+  });
+
+  it('excludes clarification-only assistant messages from AI context', () => {
+    const messages = [
+      { role: 'user', content: 'blink an LED' },
+      {
+        role: 'assistant',
+        content: 'Questions:',
+        clarification: { questions: [{ id: 'q1', question: 'Supply?', options: ['5V'] }] },
+      },
+      { role: 'assistant', content: 'Done', circuit: { title: 'Blinker' } },
+    ];
+
+    expect(buildConversationContext(messages)).toEqual([
+      { role: 'user', content: 'blink an LED' },
+      { role: 'assistant', content: 'Done', circuit: { title: 'Blinker' } },
+    ]);
+  });
+
+  it('composes the clarified generation prompt and the compact chat summary', () => {
+    const questions = [
+      { id: 'q1', question: 'What supply?', options: ['USB 5V', NO_PREFERENCE_ANSWER] },
+      { id: 'q2', question: 'Blink rate?', options: ['1 Hz', NO_PREFERENCE_ANSWER] },
+    ];
+    const answers = { q1: 'USB 5V' };
+
+    expect(composeClarifiedPrompt('blink an LED', questions, answers)).toBe([
+      'Original request: blink an LED',
+      'User clarifications:',
+      '- What supply? -> USB 5V',
+      `- Blink rate? -> ${NO_PREFERENCE_ANSWER}`,
+      'Design the circuit now honoring these clarifications.',
+    ].join('\n'));
+
+    expect(formatClarificationSummary(questions, answers)).toBe(
+      `Clarifications: What supply? -> USB 5V; Blink rate? -> ${NO_PREFERENCE_ANSWER}`,
+    );
   });
 
   it('migrates and repairs saved diagrams without changing the circuit model', () => {

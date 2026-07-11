@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildConversationContext,
   chatTitleFromPrompt,
+  composeClarifiedPrompt,
   createChat,
+  formatClarificationSummary,
   loadChatStore,
   migrateChatDiagram,
   saveChatStore,
@@ -61,6 +63,7 @@ function App() {
   const [newChatPrompt, setNewChatPrompt] = useState('');
   const [page, setPage] = useState(pageFromHash);
   const [generatingChatId, setGeneratingChatId] = useState(null);
+  const [clarifyingChatId, setClarifyingChatId] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const messagesEndRef = useRef(null);
   const spiceEditorRef = useRef(null);
@@ -83,7 +86,8 @@ function App() {
   const kicadSyncError = activeChat?.kicadSyncError || '';
   const circuitJsonSyncError = activeChat?.circuitJsonSyncError || '';
   const isGenerating = generatingChatId === activeChat?.id;
-  const generationBusy = Boolean(generatingChatId);
+  const isClarifying = clarifyingChatId === activeChat?.id;
+  const generationBusy = Boolean(generatingChatId || clarifyingChatId);
   const sortedChats = useMemo(
     () => [...chatStore.chats].sort((a, b) => b.updatedAt - a.updatedAt),
     [chatStore.chats],
@@ -504,10 +508,14 @@ function App() {
       setError('Enter a circuit prompt before sending.');
       return;
     }
-    await submitToChat(activeChat, submittedPrompt);
+    await beginPrompt(activeChat, submittedPrompt);
   };
 
-  const submitToChat = async (chat, submittedPrompt) => {
+  // Phase 1 of every prompt: append the user message, then ask the AI for a
+  // round of clarifying questions. Generation only starts after the user
+  // answers (or skips) — unless the clarify call fails, in which case we fall
+  // back to direct generation so the feature can never block a prompt.
+  const beginPrompt = async (chat, submittedPrompt) => {
     const chatId = chat.id;
     const priorMessages = chat.messages;
     const currentDesign = chat.result
@@ -518,8 +526,8 @@ function App() {
           code: chat.editableCode,
         }
       : null;
-    const isRevision = Boolean(currentDesign);
     const previousSpice = chat.editableSpice;
+    const memory = chat.memory;
     const userMessage = {
       id: messageId(),
       role: 'user',
@@ -527,8 +535,6 @@ function App() {
       createdAt: Date.now(),
     };
 
-    setGeneratingChatId(chatId);
-    openEditorView('spice');
     window.location.hash = '';
     setPage('workspace');
     updateChat(chatId, (chat) => ({
@@ -536,6 +542,147 @@ function App() {
       title: chat.messages.length ? chat.title : chatTitleFromPrompt(submittedPrompt),
       updatedAt: Date.now(),
       draft: '',
+      error: '',
+      // A new prompt supersedes any question round still waiting for answers.
+      messages: [
+        ...chat.messages.map((message) => (
+          message.clarification?.status === 'pending'
+            ? { ...message, clarification: { ...message.clarification, status: 'skipped' } }
+            : message
+        )),
+        userMessage,
+      ],
+    }));
+
+    setClarifyingChatId(chatId);
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
+      let questions = [];
+      try {
+        const response = await fetch(`${API_BASE}/api/clarify-circuit`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({
+            prompt: submittedPrompt,
+            messages: buildConversationContext(priorMessages),
+            currentDesign,
+            memory,
+          }),
+          signal: controller.signal,
+        });
+        if (response.ok) {
+          const data = await response.json();
+          questions = Array.isArray(data.questions) ? data.questions : [];
+        }
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      if (questions.length) {
+        updateChat(chatId, (chat) => ({
+          ...chat,
+          updatedAt: Date.now(),
+          messages: [
+            ...chat.messages,
+            {
+              id: messageId(),
+              role: 'assistant',
+              content: 'A few quick questions before I design this:',
+              createdAt: Date.now(),
+              clarification: { forPrompt: submittedPrompt, questions, answers: {}, status: 'pending' },
+            },
+          ],
+        }));
+        return;
+      }
+    } catch (clarifyError) {
+      console.error(`Clarify round failed, generating directly: ${clarifyError.message}`);
+    } finally {
+      setClarifyingChatId(null);
+    }
+
+    await runGeneration(chatId, submittedPrompt, priorMessages, currentDesign, previousSpice, memory);
+  };
+
+  const answerClarification = (clarificationMessageId, questionId, answer) => {
+    updateActiveChat((chat) => ({
+      ...chat,
+      messages: chat.messages.map((message) => (
+        message.id === clarificationMessageId && message.clarification?.status === 'pending'
+          ? {
+              ...message,
+              clarification: {
+                ...message.clarification,
+                answers: {
+                  ...message.clarification.answers,
+                  [questionId]: String(answer || '').slice(0, 200),
+                },
+              },
+            }
+          : message
+      )),
+    }));
+  };
+
+  // Phase 2: fold the answers into the generation prompt and run the normal
+  // circuit pipeline. Skipping submits every question as "No preference".
+  const submitClarificationAnswers = async (clarificationMessageId, skip = false) => {
+    const chat = activeChat;
+    if (!chat || generationBusy) return;
+    const message = chat.messages.find((entry) => entry.id === clarificationMessageId);
+    const clarification = message?.clarification;
+    if (!clarification || clarification.status !== 'pending') return;
+
+    const answers = skip ? {} : clarification.answers;
+    const priorMessages = chat.messages;
+    const currentDesign = chat.result
+      ? {
+          circuit: chat.result.circuit,
+          spice: chat.editableSpice,
+          kicadNetlist: chat.editableKicadNetlist,
+          code: chat.editableCode,
+        }
+      : null;
+    const previousSpice = chat.editableSpice;
+    const memory = chat.memory;
+
+    updateChat(chat.id, (current) => ({
+      ...current,
+      updatedAt: Date.now(),
+      messages: [
+        ...current.messages.map((entry) => (
+          entry.id === clarificationMessageId
+            ? { ...entry, clarification: { ...entry.clarification, answers, status: skip ? 'skipped' : 'answered' } }
+            : entry
+        )),
+        {
+          id: messageId(),
+          role: 'user',
+          content: formatClarificationSummary(clarification.questions, answers),
+          createdAt: Date.now(),
+        },
+      ],
+    }));
+
+    await runGeneration(
+      chat.id,
+      composeClarifiedPrompt(clarification.forPrompt, clarification.questions, answers),
+      priorMessages,
+      currentDesign,
+      previousSpice,
+      memory,
+    );
+  };
+
+  const runGeneration = async (chatId, generationPrompt, priorMessages, currentDesign, previousSpice, memory) => {
+    const isRevision = Boolean(currentDesign);
+
+    setGeneratingChatId(chatId);
+    openEditorView('spice');
+    updateChat(chatId, (chat) => ({
+      ...chat,
+      updatedAt: Date.now(),
       error: '',
       editableSpice: isRevision
         ? chat.editableSpice
@@ -546,7 +693,6 @@ function App() {
       simulationRun: null,
       simulationError: '',
       circuitJsonSyncError: '',
-      messages: [...chat.messages, userMessage],
     }));
 
     try {
@@ -554,10 +700,10 @@ function App() {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({
-          prompt: submittedPrompt,
+          prompt: generationPrompt,
           messages: buildConversationContext(priorMessages),
           currentDesign,
-          memory: chat.memory,
+          memory,
         }),
       });
 
@@ -580,11 +726,16 @@ function App() {
         : await response.json();
       if (data.error) throw new Error(data.error);
       const fallbackReply = `${isRevision ? 'Updated' : 'Generated'} ${data.circuit.title} with ${data.circuit.components.length} components. The latest circuit package is open in the workspace.`;
+      const issueErrors = (data.issues || []).filter((issue) => issue.severity === 'error');
+      const issueNote = issueErrors.length
+        ? `\n\nNote: ${issueErrors.length} design issue${issueErrors.length === 1 ? '' : 's'} remain${issueErrors.length === 1 ? 's' : ''} — open the breadboard view for details and suggested fixes.`
+        : '';
       const assistantMessage = {
         id: messageId(),
         role: 'assistant',
-        content: String(data.reply || '').trim() || fallbackReply,
+        content: (String(data.reply || '').trim() || fallbackReply) + issueNote,
         circuit: data.circuit,
+        issues: data.issues || [],
         createdAt: Date.now(),
       };
       updateChat(chatId, (chat) => ({
@@ -630,7 +781,7 @@ function App() {
           {
             id: messageId(),
             role: 'assistant',
-            content: `I could not generate the circuit: ${requestError.message}`,
+            content: `I couldn't produce a valid version of that request, so nothing was changed. Try rephrasing or simplifying the request. (${requestError.message})`,
             createdAt: Date.now(),
           },
         ],
@@ -755,7 +906,7 @@ function App() {
     setNewChatPrompt('');
     setChatPanelView('conversation');
     openEditorView('spice');
-    await submitToChat(chat, submittedPrompt);
+    await beginPrompt(chat, submittedPrompt);
   };
 
   const handleComposerKeyDown = (event) => {
@@ -1119,7 +1270,7 @@ function App() {
           renderChangedCode(editableCode, pendingCodeChangedLines, 'firmware')
         ) : (
           <textarea
-            className="code-editor editor-window-code"
+            className={`code-editor editor-window-code ${isGenerating ? 'live-code-editor' : ''}`}
             value={editableCode}
             readOnly={isGenerating || !result}
             onChange={(event) => setEditableCode(event.target.value)}
@@ -1146,6 +1297,15 @@ function App() {
     </div>
   );
 
+  // Everything the generation pass learned about circuit quality: topology
+  // rule findings plus the server-side ERC, which was previously computed and
+  // then discarded without ever reaching the UI.
+  const circuitQualityIssues = (generation) => [
+    ...(generation?.issues || []),
+    ...(generation?.validation?.errors || []).map((message) => ({ id: 'erc', severity: 'error', message, fix: '' })),
+    ...(generation?.validation?.warnings || []).map((message) => ({ id: 'erc', severity: 'warning', message, fix: '' })),
+  ];
+
   const renderRealisticSchematicView = () => (
     <div className="editor-window-body canvas-window-body">
       {!result ? (
@@ -1159,6 +1319,7 @@ function App() {
           overrides={activeChat?.editedBreadboard}
           onCircuitChange={applyCircuitChange}
           onLayoutChange={(value) => setChatField('editedBreadboard', value)}
+          issues={circuitQualityIssues(result)}
         />
       )}
     </div>
@@ -1365,6 +1526,10 @@ function App() {
           activeChat={activeChat}
           openChat={openChat}
           isGenerating={isGenerating}
+          isClarifying={isClarifying}
+          answerClarification={answerClarification}
+          submitClarification={(clarificationMessageId) => submitClarificationAnswers(clarificationMessageId, false)}
+          skipClarification={(clarificationMessageId) => submitClarificationAnswers(clarificationMessageId, true)}
           messagesEndRef={messagesEndRef}
           prompt={prompt}
           setPrompt={setPrompt}

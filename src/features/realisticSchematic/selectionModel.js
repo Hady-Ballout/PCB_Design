@@ -3,7 +3,8 @@
 // {type:'net', net}), computes everything the renderer should light up.
 // No React imports so it stays unit-testable.
 
-import { GROUND_NET, MCU_PINS } from './breadboardModel.js';
+import { FIXED_PIN_NAMES } from '../../core/componentKinds.js';
+import { GROUND_NET } from './breadboardModel.js';
 import { capStyle } from './partVisuals.js';
 
 // A pin is unconnected when its net is a placeholder (NC_… or `${ref}_${pin}`).
@@ -12,18 +13,30 @@ import { capStyle } from './partVisuals.js';
 const isUnconnectedTerminal = (node, ref, pin) =>
   /^NC_/i.test(String(node)) || String(node) === `${ref}_${pin}`;
 
-// Positional pin labels shown while a part is selected. BJT order matches the
-// canonical [C, B, E]; MOSFET matches the SPICE M-line [D, G, S]
-// (src/core/circuitSync.js parses "drain, gate, source").
+// Positional pin labels shown while a part is selected. Kinds with a fixedPins
+// contract (sensor modules, MCU boards, DIP ICs, 7-segment) come straight from
+// the registry; the manual entries below cover kinds whose canonical order is
+// only spelled out in the SPICE exporter (src/core/pcbGenerator.js). BJT order
+// matches the canonical [C, B, E]; MOSFET matches the SPICE M-line [D, G, S]
+// (src/core/circuitSync.js parses "drain, gate, source"); potentiometer pin 2
+// is the wiper and switch_spdt pin 2 the common, per their compound SPICE
+// images.
 const PIN_LABELS = {
+  ...FIXED_PIN_NAMES,
   opamp: ['IN+', 'IN-', 'OUT', 'V+', 'V-'],
+  comparator: ['IN+', 'IN-', 'OUT', 'V+', 'V-'],
   bjt_npn: ['C', 'B', 'E'],
   bjt_pnp: ['C', 'B', 'E'],
   mosfet_n: ['D', 'G', 'S'],
   mosfet_p: ['D', 'G', 'S'],
   led: ['A', 'K'],
   diode: ['A', 'K'],
-  ...MCU_PINS,
+  zener: ['A', 'K'],
+  buzzer: ['+', '−'],
+  dc_motor: ['+', '−'],
+  potentiometer: ['A', 'W', 'B'],
+  switch_spdt: ['A', 'COM', 'B'],
+  rgb_led: ['R', 'G', 'B', 'K'],
 };
 
 // Labels for a part's pins, or null when labels would add nothing (plain
