@@ -54,6 +54,31 @@ describe('createAvrRunner', () => {
     expect(target[1]).toBe(0x94);
   });
 
+  it('routes SPI transfers to the device whose CS is low', async () => {
+    const { buildSpiProgram } = await import('./avrRunner.js');
+    const runner = createAvrRunner({ program: buildSpiProgram([0xa5]) });
+    runner.registerSpiDevice('D10', { onByte: (mosi) => mosi ^ 0xff });
+    runner.run(20000); // SPI at fosc/128: ~1024 cycles per byte + polling
+    expect(runner.cpu.data[0x0100]).toBe(0x5a);
+  });
+
+  it('answers 0xFF when no device is selected', async () => {
+    const { buildSpiProgram } = await import('./avrRunner.js');
+    const runner = createAvrRunner({ program: buildSpiProgram([0xa5], { selectCs: false }) });
+    runner.registerSpiDevice('D10', { onByte: (mosi) => mosi ^ 0xff });
+    runner.run(20000);
+    expect(runner.cpu.data[0x0100]).toBe(0xff);
+  });
+
+  it('accepts serial RX bytes once the sketch enables reception', async () => {
+    const { TEST_PROGRAM_RX_ENABLE } = await import('./avrRunner.js');
+    const runner = createAvrRunner({ program: TEST_PROGRAM_RX_ENABLE });
+    runner.run(50); // execute the RXEN write
+    expect(runner.sendSerialByte(0x41)).toBe(true);
+    runner.run(2000); // cyclesPerChar at UBRR=0 ≈ 160
+    expect(runner.cpu.data[0xc0] & 0x80).toBe(0x80); // UCSR0A RXC set
+  });
+
   it('routes I2C traffic to registered slaves and NACKs unknown addresses', () => {
     const runner = createAvrRunner({ program: TEST_PROGRAM_D13_HIGH });
     const received = [];

@@ -177,6 +177,8 @@ const liveSuffixFor = (selection, simFrame) => {
   const parts = [];
   if (typeof observable.volts === 'number') parts.push(formatSI(observable.volts, 'V'));
   if (typeof observable.amps === 'number') parts.push(formatSI(observable.amps, 'A'));
+  // Free-text observables (e.g. the RTC's rolling clock).
+  if (typeof observable.text === 'string' && observable.text) parts.push(observable.text);
   return parts.length ? ` · ${parts.join(' · ')}` : '';
 };
 

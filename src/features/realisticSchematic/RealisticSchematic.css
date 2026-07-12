@@ -553,3 +553,31 @@
   box-shadow: 1px 1px 0 #111111;
   transform: translate(1px, 1px);
 }
+
+.realistic-serial-input {
+  display: flex;
+  gap: 6px;
+  padding: 0 10px 8px;
+}
+
+.realistic-serial-input input {
+  background: #ffffff;
+  border: 2px solid #111111;
+  border-radius: 6px;
+  flex: 1;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  min-height: 0;
+  padding: 4px 8px;
+}
+
+.realistic-serial-input button {
+  background: #ffffff;
+  border: 2px solid #111111;
+  border-radius: 6px;
+  box-shadow: 2px 2px 0 #111111;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 10px;
+}

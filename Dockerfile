@@ -11,7 +11,8 @@ RUN curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/inst
     arduino-cli core install arduino:avr && \
     arduino-cli lib install "LiquidCrystal I2C" "Keypad" "Adafruit SSD1306" \
       "Adafruit GFX Library" "Adafruit BusIO" "Servo" \
-      "DHT sensor library" "Adafruit Unified Sensor"
+      "DHT sensor library" "Adafruit Unified Sensor" \
+      "RTClib" "Adafruit MPU6050" "Adafruit BMP280 Library" "Adafruit NeoPixel"
 
 WORKDIR /app
 

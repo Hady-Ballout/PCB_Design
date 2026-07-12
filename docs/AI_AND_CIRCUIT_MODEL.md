@@ -373,8 +373,29 @@ one at a time, rows INPUT_PULLUP): artwork keys are clickable in run mode
 (`data-keypad-key` press-and-hold), and row input levels are recomputed from pressed keys
 × driven columns. I2C displays attach only when wired to the hardware TWI pins (SDA↔A4,
 SCL↔A5). Compilation of display/keypad sketches needs the curated `arduino-cli lib
-install` set (docs/OPERATIONS.md; baked into the Dockerfile). Still deferred: SPI/I2C
-register sensors (RTC/IMU/BMP280/MCP3008/SD/RFID), serial input, NeoPixel.
+install` set (docs/OPERATIONS.md; baked into the Dockerfile).
+
+**Slice 3 — register sensors, SPI ADC, serial input, NeoPixel.** `registerModels.js`
+adds the pointer-write-then-burst-read I2C register-slave pattern carrying the **MPU6050**
+(WHO_AM_I 0x68; pitch/roll sliders orient the gravity vector into the 14-byte big-endian
+accel burst at ±2g scale), the **DS3231** (BCD time rolled forward from a fixed 2026-01-01
+base by AVR cycles — never wall clock; `adjust()` writes become the new base; the rolling
+clock shows in the part readout), and the **BMP280** with a **deliberately degenerate
+calibration** (dig_T1=dig_T2=16384, dig_P1=6250, rest zero) that collapses Bosch's integer
+compensation to exact linear maps — `adc_T = 5120·T + 262144`, `adc_P = 1048576 − Pa` — so
+temperature/pressure sliders invert exactly (verified in tests against the verbatim Bosch
+formulas). The runner gains an **SPI layer**: AVRSPI plus a CS-keyed device router
+(chip-select is plain GPIO; the device whose CS reads output-low gets each byte, completion
+scheduled at the true `transferCycles`). The **MCP3008** rides it with the standard 3-byte
+frame, and its CH0–CH7 pins read **live circuit nets** through the lockstep feedback — an
+Uno can now `SPI.transfer` its way to real divider voltages. SPI discovery requires the
+hardware pins (DIN↔D11, DOUT↔D12, CLK↔D13; CS anywhere). One simulated device per I2C
+address (`i2c_address_conflict` warning — IMU and RTC both live at 0x68, first wins).
+**Serial input**: the monitor strip gains a Send field; bytes queue engine-side and drain
+one per accepted UART window into `usart.writeByte` (no `Serial.begin` → the queue waits).
+**WS2812 strip**: DIN port-writes are decoded at cycle resolution (pulse >10 cycles = 1,
+≥640-cycle gap latches, GRB order) into up to 30 live pixels on the strip artwork.
+Still deferred: `sd_card` (FAT), `rfid_reader` (RC522).
 
 Solver notes: junction limiting (pnjlim) must veto NR convergence — with an LED off-seed,
 node voltages sit nearly still for ~10 iterations while the junction linearization climbs

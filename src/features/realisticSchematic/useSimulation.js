@@ -112,5 +112,9 @@ export function useSimulation(circuit, running, mcu = null) {
     engineRef.current?.setControl(ref, name, value);
   }, []);
 
-  return { simFrame, setControl, controls };
+  const sendSerial = useCallback((text) => {
+    engineRef.current?.sendSerial?.(text);
+  }, []);
+
+  return { simFrame, setControl, controls, sendSerial };
 }

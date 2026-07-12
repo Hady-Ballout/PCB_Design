@@ -6,7 +6,7 @@ import { clearMatrix, makeMatrix, solveDense } from './linalg.js';
 import { buildSimNetlist, GROUND } from './simNetlist.js';
 import { evalBjt, evalDiode, evalMosfet, evalOpamp, junctionCriticalVoltage, limitDiode, limitJunction, THERMAL_VOLTAGE, variableOhms } from './simDevices.js';
 import { AVR_CLOCK_HZ, createAvrRunner } from './avrRunner.js';
-import { createPeripheral } from './avrPeripherals.js';
+import { I2C_ADDRESS_BY_KIND, createPeripheral } from './avrPeripherals.js';
 import { observablesFor } from './simObservables.js';
 
 const GMIN = 1e-12;
@@ -159,13 +159,35 @@ export const createSimulation = (circuit, options = {}) => {
       if (serialBuffer.length > 4096) serialBuffer = serialBuffer.slice(-4096);
     });
     // Protocol modules attach at cycle resolution (listeners + clock events
-    // fire inside mcuRunner.run() during the lockstep).
+    // fire inside mcuRunner.run() during the lockstep). One device per I2C
+    // address: later claimants are skipped with a named warning (IMU and RTC
+    // both live at 0x68).
+    const claimedI2c = new Map();
     for (const record of devices.filter((device) => device.type === 'avr_peripheral')) {
+      const address = I2C_ADDRESS_BY_KIND[record.kind];
+      if (address != null) {
+        const holder = claimedI2c.get(address);
+        if (holder) {
+          warnings.push({
+            code: 'i2c_address_conflict',
+            message: `${holder} and ${record.owner} both claim I2C address 0x${address.toString(16)} — only ${holder} is simulated`,
+          });
+          continue;
+        }
+        claimedI2c.set(address, record.owner);
+      }
       const peripheral = createPeripheral(record, mcuRunner, controlState);
       if (peripheral) peripheralsByOwner.set(record.owner, peripheral);
       for (const unoPin of record.ownedPins ?? []) digitallyOwnedPins.add(unoPin);
     }
   }
+  const adcFeeds = devices
+    .filter((device) => device.type === 'avr_peripheral' && device.channelNets && peripheralsByOwner.has(device.owner))
+    .map((device) => ({ peripheral: peripheralsByOwner.get(device.owner), channelNets: device.channelNets }));
+
+  // Serial input to the sketch: queued and drained one byte per accepted
+  // UART window (no Serial.begin → rxEnable false → the queue just waits).
+  let serialInQueue = [];
 
   const isDynamic = reactives.length > 0
     || mcuRunner != null
@@ -625,6 +647,9 @@ export const createSimulation = (circuit, options = {}) => {
   const stepOnce = () => {
     time += h;
     if (mcuRunner) {
+      if (serialInQueue.length && mcuRunner.sendSerialByte(serialInQueue[0])) {
+        serialInQueue.shift();
+      }
       // Lockstep: run the firmware for this timestep's worth of cycles, then
       // latch each bridged pin's mode/level for the solve below.
       mcuRunner.run(mcuCyclesPerStep);
@@ -654,6 +679,12 @@ export const createSimulation = (circuit, options = {}) => {
           if (pin.adcChannel != null) {
             mcuRunner.setAnalogVolts(pin.adcChannel, Math.min(5, Math.max(0, volts)));
           }
+        }
+        // MCP3008 channels read live circuit nets (arbitrary nets, not pins).
+        for (const { peripheral, channelNets } of adcFeeds) {
+          channelNets.forEach((net, channel) => {
+            if (net != null) peripheral.setChannelVolts(channel, atX(net));
+          });
         }
       }
       // Buzzer frequency detection: rising crossings of 1 V, sim-timestamped.
@@ -756,6 +787,13 @@ export const createSimulation = (circuit, options = {}) => {
     status: () => ({ converged: lastConverged, lastSpeed, iterations: lastIterations }),
     mcuRunner,
     serialText: () => serialBuffer,
+    sendSerial: (text) => {
+      if (!mcuRunner) return;
+      for (const char of String(text)) {
+        if (serialInQueue.length >= 1024) break;
+        serialInQueue.push(char.charCodeAt(0) & 0xff);
+      }
+    },
   };
   return engine;
 };

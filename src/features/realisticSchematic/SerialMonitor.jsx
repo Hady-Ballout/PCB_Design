@@ -1,12 +1,13 @@
-// Read-only serial monitor for the live simulation: streams the emulated
-// Uno's Serial.print output. Collapsible, auto-scrolling, with a local Clear
-// (the engine's ring buffer keeps at most 4 KB; Clear just hides what came
-// before). Serial input to the sketch is a future milestone.
+// Serial monitor for the live simulation: streams the emulated Uno's
+// Serial.print output, and — when the engine offers sending — feeds typed
+// lines back into the sketch's Serial (a trailing newline is appended, like
+// the Arduino IDE's monitor). Collapsible, auto-scrolling, local Clear.
 import { useEffect, useRef, useState } from 'react';
 
-export function SerialMonitor({ text }) {
+export function SerialMonitor({ text, onSendSerial }) {
   const [open, setOpen] = useState(true);
   const [clearedAt, setClearedAt] = useState(0);
+  const [draft, setDraft] = useState('');
   const bodyRef = useRef(null);
   const visible = text.length >= clearedAt ? text.slice(clearedAt) : text;
 
@@ -14,6 +15,12 @@ export function SerialMonitor({ text }) {
     const body = bodyRef.current;
     if (body) body.scrollTop = body.scrollHeight;
   }, [visible]);
+
+  const send = () => {
+    if (!draft) return;
+    onSendSerial?.(`${draft}\n`);
+    setDraft('');
+  };
 
   return (
     <div className="realistic-serial">
@@ -29,6 +36,20 @@ export function SerialMonitor({ text }) {
         <pre ref={bodyRef} className="realistic-serial-body">
           {visible || '(no output yet)'}
         </pre>
+      )}
+      {open && typeof onSendSerial === 'function' && (
+        <div className="realistic-serial-input">
+          <input
+            type="text"
+            value={draft}
+            placeholder="Send to the sketch…"
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') send();
+            }}
+          />
+          <button type="button" onClick={send}>Send</button>
+        </div>
       )}
     </div>
   );

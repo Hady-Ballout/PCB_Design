@@ -504,6 +504,27 @@ describe('live simulation (Run mode)', () => {
     expect(container.querySelector('.realistic-run').textContent).toContain('Run');
   });
 
+  it('sends typed serial input to the engine', async () => {
+    const hex = ':06000000259A2D9AFFCFA6\n:00000001FF\n';
+    mountFirmware(unoBlinkCircuit, () => Promise.resolve({ ok: true, hex, errors: [] }));
+    await act(async () => {
+      container.querySelector('.realistic-run').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    flushFrames(4);
+    const input = container.querySelector('.realistic-serial-input input');
+    expect(input).not.toBeNull();
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(input, 'hi');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    act(() => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    // The engine queued the bytes (RX not enabled by this program — it waits).
+    expect(input.value).toBe(''); // draft cleared after send
+  });
+
   it('runs compiled firmware and shows the serial monitor', async () => {
     // The "hex" path is exercised via a real Intel HEX for the hand-assembled
     // D13-high program: SBI DDRB,5; SBI PORTB,5; RJMP .-2 (little-endian).

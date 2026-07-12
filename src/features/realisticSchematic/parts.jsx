@@ -1330,6 +1330,46 @@ function OffboardModuleBody({ part }) {
   );
 }
 
+// WS2812 NeoPixel strip: the generic slot PCB plus a row of pixel windows.
+// With firmware running, each dot shows the decoded strip color live.
+function LedStripBody({ part, sim }) {
+  const slot = part.meta.slot;
+  if (!slot) return null;
+  const names = FIXED_PIN_NAMES[part.kind] ?? [];
+  const pinCount = part.pinNets?.length ?? names.length;
+  const lastPad = mcuPadPoint(slot, Math.max(pinCount - 1, 0), part.kind);
+  const x0 = slot.x + 10;
+  const w = Math.max(lastPad.x + 24 - x0, 168);
+  const y0 = slot.y + 24;
+  const h = 80;
+  const pixels = sim?.pixels ?? [];
+  const dotCount = Math.max(Math.floor((w - 24) / 14), 8);
+  return (
+    <g>
+      <rect x={x0} y={y0} width={w} height={h} rx={3} fill="url(#rsPcbBlue)" stroke="#123a63" strokeWidth="0.7" />
+      <MountHole cx={x0 + 6} cy={y0 + h - 6} r={2.6} />
+      <MountHole cx={x0 + w - 6} cy={y0 + h - 6} r={2.6} />
+      <Silk x={x0 + w / 2} y={y0 + 18} text={part.value || 'WS2812'} size={6} weight={700} fill="#dbe7f2" />
+      <Silk x={x0 + w / 2} y={y0 + 27} text="NeoPixel strip" size={4} fill="#a9c3dc" />
+      {Array.from({ length: dotCount }, (_, index) => {
+        const [r, g, b] = pixels[index] ?? [0, 0, 0];
+        const lit = r + g + b > 20;
+        const cx = x0 + 18 + index * 14;
+        return (
+          <g key={index}>
+            <rect x={cx - 6} y={y0 + 36} width={12} height={12} rx={1.5} fill="#f5f7f4" stroke="#c3ccc4" strokeWidth="0.5" />
+            {lit && <circle cx={cx} cy={y0 + 42} r={8} fill={`rgb(${r} ${g} ${b})`} opacity="0.6" filter="url(#rsGlow)" />}
+            <circle cx={cx} cy={y0 + 42} r={3.4} fill={lit ? `rgb(${r} ${g} ${b})` : '#20262b'} stroke="#565e56" strokeWidth="0.4" />
+          </g>
+        );
+      })}
+      <Silk x={x0 + 8} y={y0 + h - 5} text={part.ref} size={4.6} fill="#dbe7f2" anchor="start" />
+      <McuHeader part={part} />
+      <McuPinWires part={part} />
+    </g>
+  );
+}
+
 // 4x4 membrane keypad: matte-black pad with the standard 1-9/*0#/A-D legend,
 // 8-pin ribbon header (R1-R4, C1-C4) on the top edge.
 const KEYPAD_LEGEND = [
@@ -2129,7 +2169,8 @@ export function RealisticPart({ part, sim }) {
   if (part.body === 'stepper_motor') return <StepperMotorBody part={part} />;
   if (part.body === 'keypad') return <KeypadBody part={part} sim={sim} />;
   if (part.body === 'joystick') return <JoystickBody part={part} />;
-  if (part.body === 'stepper_driver' || part.body === 'led_strip' || part.body === 'rfid_reader' || part.body === 'current_sensor') return <OffboardModuleBody part={part} />;
+  if (part.body === 'led_strip') return <LedStripBody part={part} sim={sim} />;
+  if (part.body === 'stepper_driver' || part.body === 'rfid_reader' || part.body === 'current_sensor') return <OffboardModuleBody part={part} />;
   const points = part.holes.map((hole) => (hole ? holeCenter(hole) : null)).filter(Boolean);
   if (points.length === 0) return null;
   if (part.body === 'esp32') return <Esp32Body part={part} />;

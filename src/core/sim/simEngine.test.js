@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { COMPONENT_KINDS, DEFAULT_PIN_COUNT_BY_KIND } from '../componentKinds.js';
-import { TEST_PROGRAM_D13_BLINK, TEST_PROGRAM_D13_HIGH, TEST_PROGRAM_SERVO_1750, TEST_PROGRAM_TRIG_PULSE, buildShiftOutProgram } from './avrRunner.js';
+import { TEST_PROGRAM_D13_BLINK, TEST_PROGRAM_D13_HIGH, TEST_PROGRAM_RX_ENABLE, TEST_PROGRAM_SERVO_1750, TEST_PROGRAM_TRIG_PULSE, buildShiftOutProgram, buildSpiProgram, buildWs2812Program } from './avrRunner.js';
 import { createSimulation } from './simEngine.js';
 
 const circuitOf = (components, extra = {}) => ({
@@ -610,6 +610,94 @@ describe('createSimulation — protocol peripherals (Tier 2b)', () => {
     expect(wired.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
     wired.advance(0.001, 50);
     expect(wired.observables().get('O1').fb).toBeInstanceOf(Uint8Array);
+  });
+
+  it('attaches I2C register sensors on the TWI pins and warns on address conflicts', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodesForPins({ A4: 'VSDA', A5: 'VSCL' }) },
+      // [VCC, GND, SCL, SDA]
+      { ref: 'B1', kind: 'baro_sensor', value: 'BMP280', nodes: ['NC_B1_1', '0', 'VSCL', 'VSDA'] },
+      { ref: 'M1', kind: 'imu_sensor', value: 'MPU6050', nodes: ['NC_M1_1', '0', 'VSCL', 'VSDA'] },
+      // [GND, VCC, SDA, SCL] — RTC collides with the IMU at 0x68.
+      { ref: 'K1', kind: 'rtc_module', value: 'DS3231', nodes: ['0', 'NC_K1_2', 'VSDA', 'VSCL'] },
+    ]), { mcu: { program: TEST_PROGRAM_D13_HIGH } });
+    expect(engine.ok).toBe(true);
+    expect(engine.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
+    expect(engine.warnings.some((w) => w.code === 'i2c_address_conflict' && w.message.includes('M1') && w.message.includes('K1'))).toBe(true);
+    // The baro's slave answers its chip ID through the live TWI bus.
+    const handler = engine.mcuRunner.twi.eventHandler;
+    handler.start(false);
+    handler.connectToSlave(0x76, true);
+    handler.writeByte(0xd0);
+    handler.stop();
+    handler.start(false);
+    handler.connectToSlave(0x76, false);
+    let chipId = null;
+    const original = engine.mcuRunner.twi.completeRead.bind(engine.mcuRunner.twi);
+    engine.mcuRunner.twi.completeRead = (value) => { chipId = value; original(value); };
+    handler.readByte(false);
+    handler.stop();
+    expect(chipId).toBe(0x58);
+  });
+
+  it('reads a live divider through the MCP3008 over hardware SPI', () => {
+    // 595-style DIP nodes: [CH0..CH7, DGND, CS, DIN, DOUT, CLK, AGND, VREF, VDD]
+    const adcNodes = Array.from({ length: 16 }, (_, i) => `NC_A1_${i + 1}`);
+    adcNodes[0] = 'VMID'; // CH0 on the divider midpoint
+    adcNodes[8] = '0';
+    adcNodes[9] = 'VCS';
+    adcNodes[10] = 'VMOSI';
+    adcNodes[11] = 'VMISO';
+    adcNodes[12] = 'VSCK';
+    const engine = createSimulation(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodesForPins({ D10: 'VCS', D11: 'VMOSI', D12: 'VMISO', D13: 'VSCK' }) },
+      { ref: 'A1', kind: 'adc_module', value: 'MCP3008', nodes: adcNodes },
+      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VCC5', 'VMID'] },
+      { ref: 'R2', kind: 'resistor', value: '1k', nodes: ['VMID', '0'] },
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC5', '0'] },
+    ]), { mcu: { program: buildSpiProgram([0x01, 0x80, 0x00]) } });
+    expect(engine.ok).toBe(true);
+    expect(engine.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
+    for (let i = 0; i < 10; i += 1) engine.advance(0.001, 50);
+    const data = engine.mcuRunner.cpu.data;
+    const value = ((data[0x0101] & 0x03) << 8) | data[0x0102];
+    expect(Math.abs(value - 512)).toBeLessThanOrEqual(8);
+  });
+
+  it('rejects an MCP3008 not wired to the hardware SPI pins', () => {
+    const adcNodes = Array.from({ length: 16 }, (_, i) => `NC_A1_${i + 1}`);
+    adcNodes[9] = 'VCS';
+    adcNodes[10] = 'VA';
+    adcNodes[11] = 'VB';
+    adcNodes[12] = 'VC';
+    const engine = createSimulation(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodesForPins({ D10: 'VCS', D5: 'VA', D6: 'VB', D7: 'VC' }) },
+      { ref: 'A1', kind: 'adc_module', value: 'MCP3008', nodes: adcNodes },
+      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VCS', '0'] },
+    ]), { mcu: { program: TEST_PROGRAM_D13_HIGH } });
+    expect(engine.warnings.some((w) => w.code === 'module_not_simulated' && w.message.startsWith('A1'))).toBe(true);
+  });
+
+  it('decodes a bit-banged WS2812 frame into strip pixels', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodesForPins({ D6: 'VDIN' }) },
+      // [VCC, DIN, GND]
+      { ref: 'LS1', kind: 'led_strip', value: 'WS2812', nodes: ['NC_LS1_1', 'VDIN', '0'] },
+    ]), { mcu: { program: buildWs2812Program([0x30, 0xff, 0x00, 0x00, 0x40, 0x80]) } });
+    expect(engine.ok).toBe(true);
+    for (let i = 0; i < 5; i += 1) engine.advance(0.001, 50);
+    const { pixels } = engine.observables().get('LS1');
+    expect(pixels).toEqual([[0xff, 0x30, 0x00], [0x40, 0x00, 0x80]]); // GRB → RGB
+  });
+
+  it('queues serial input and delivers it once RX is enabled', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodesForPins({ D13: 'VPIN' }) },
+      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VPIN', '0'] },
+    ]), { mcu: { program: TEST_PROGRAM_RX_ENABLE } });
+    engine.sendSerial('A');
+    engine.advance(0.001, 50);
+    expect(engine.mcuRunner.cpu.data[0xc0] & 0x80).toBe(0x80); // RXC set
   });
 
   it('keeps unwired protocol modules on the warning path', () => {

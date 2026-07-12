@@ -5,6 +5,7 @@
 import {
   AVRADC,
   AVRIOPort,
+  AVRSPI,
   AVRTWI,
   AVRTimer,
   AVRUSART,
@@ -15,6 +16,7 @@ import {
   portBConfig,
   portCConfig,
   portDConfig,
+  spiConfig,
   timer0Config,
   timer1Config,
   timer2Config,
@@ -106,6 +108,63 @@ export const TEST_PROGRAM_DHT_START = Uint16Array.from([
   0xcfff, // spin
 ]);
 
+// SPI master fixture: CS=D10/PB2, transfers the given bytes over hardware
+// SPI (SPE|MSTR, fosc/128), storing each response at SRAM 0x0100+i.
+// Opcodes: OUT SPCR(0x2C) = 0xBD8C for r24; IN r25,SPSR(0x2D) = 0xB59D;
+// SBRS r25,7 = 0xFF97; IN r24,SPDR(0x2E) = 0xB58E; STS = 0x9380 + address.
+export const buildSpiProgram = (bytes, { selectCs = true } = {}) => {
+  const words = [
+    0x9a22, // SBI DDRB,2 (CS)
+    0x9a23, // SBI DDRB,3 (MOSI)
+    0x9a25, // SBI DDRB,5 (SCK)
+    0x9a2a, // SBI PORTB,2 (CS idle high)
+    0xe583, // LDI r24, 0x53 (SPE|MSTR|fosc/128)
+    0xbd8c, // OUT SPCR, r24
+  ];
+  if (selectCs) words.push(0x982a); // CBI PORTB,2 (select)
+  bytes.forEach((byte, index) => {
+    words.push(
+      0xe000 | ((byte & 0xf0) << 4) | 0x80 | (byte & 0x0f), // LDI r24, byte
+      0xbd8e, // OUT SPDR, r24
+      0xb59d, // poll: IN r25, SPSR
+      0xff97, // SBRS r25, 7 (skip next when SPIF set)
+      0xcffd, // RJMP .-3 (back to the IN)
+      0xb58e, // IN r24, SPDR
+      0x9380, 0x0100 + index, // STS 0x0100+i, r24
+    );
+  });
+  if (selectCs) words.push(0x9a2a); // SBI PORTB,2 (deselect)
+  words.push(0xcfff); // spin
+  return Uint16Array.from(words);
+};
+
+// WS2812 frame on DIN=D6/PD6, bit-banged like the NeoPixel library: a short
+// (~2-cycle) high is a 0 bit, a long (~14-cycle, via a NOP sled) high is a 1.
+// Bytes are GRB order, MSB-first; the trailing spin provides the latch gap.
+export const buildWs2812Program = (grbBytes) => {
+  const words = [0x9a56]; // SBI DDRD,6
+  for (const byte of grbBytes) {
+    for (let bit = 7; bit >= 0; bit -= 1) {
+      words.push(0x9a5e); // SBI PORTD,6 (rising edge)
+      if ((byte >> bit) & 1) {
+        for (let i = 0; i < 12; i += 1) words.push(0x0000); // NOP sled → ~14-cycle high
+      }
+      words.push(0x985e); // CBI PORTD,6 (falling edge)
+      words.push(0x0000, 0x0000); // inter-bit low
+    }
+  }
+  words.push(0xcfff); // spin (the idle gap latches the frame)
+  return Uint16Array.from(words);
+};
+
+// Enable UART reception (UCSR0B = RXEN0) then spin — lets tests inject
+// serial bytes and observe the RXC flag in UCSR0A.
+export const TEST_PROGRAM_RX_ENABLE = Uint16Array.from([
+  0xe180, // LDI r24, 0x10 (RXEN0)
+  0x9380, 0x00c1, // STS UCSR0B, r24
+  0xcfff, // spin
+]);
+
 // shiftOut(SER=D2/PD2, SRCLK=D3/PD3, MSBFIRST, byte) + RCLK(D4/PD4) latch
 // pulse, unrolled: per bit, set/clear SER then pulse SRCLK.
 export const buildShiftOutProgram = (byte) => {
@@ -140,10 +199,32 @@ export const createAvrRunner = ({ hex, program }) => {
   const usart = new AVRUSART(cpu, usart0Config, AVR_CLOCK_HZ);
   const adc = new AVRADC(cpu, adcConfig);
   const twi = new AVRTWI(cpu, twiConfig, AVR_CLOCK_HZ);
+  const spi = new AVRSPI(cpu, spiConfig, AVR_CLOCK_HZ);
 
   let serialListener = null;
   usart.onByteTransmit = (value) => {
     serialListener?.(value);
+  };
+
+  // SPI router: chip-select is plain GPIO, so each registered device is keyed
+  // by its CS pin — the device whose CS reads output-low gets the byte, and a
+  // CS rising edge resets its frame state. Completion is scheduled at the
+  // real transfer length (transferCycles tracks the SPCR clock divider).
+  const spiDevices = [];
+  const pinStateOf = (unoPin) => {
+    const map = UNO_PIN_MAP[unoPin];
+    const state = ports[map.port].pinState(map.bit);
+    if (state === PinState.High) return { mode: 'output', high: true };
+    if (state === PinState.Low) return { mode: 'output', high: false };
+    return { mode: 'input', high: false };
+  };
+  spi.onByte = (mosi) => {
+    const selected = spiDevices.find(({ csUnoPin }) => {
+      const state = pinStateOf(csUnoPin);
+      return state.mode === 'output' && !state.high;
+    });
+    const miso = selected ? selected.device.onByte(mosi) & 0xff : 0xff;
+    cpu.addClockEvent(() => spi.completeTransfer(miso), spi.transferCycles);
   };
 
   // I2C bus router: ACK only registered slave addresses and forward bytes.
@@ -180,8 +261,23 @@ export const createAvrRunner = ({ hex, program }) => {
     ports,
     adc,
     twi,
+    spi,
     registerI2cSlave(address, slave) {
       i2cSlaves.set(address, slave);
+    },
+    registerSpiDevice(csUnoPin, device) {
+      spiDevices.push({ csUnoPin, device });
+      const map = UNO_PIN_MAP[csUnoPin];
+      ports[map.port].addListener(() => {
+        const state = pinStateOf(csUnoPin);
+        if (!(state.mode === 'output' && !state.high)) device.onDeselect?.();
+      });
+    },
+    // Feed a byte INTO the sketch's Serial (RX). Returns false when the UART
+    // is mid-character or RX is disabled (no Serial.begin yet) — callers
+    // queue and retry.
+    sendSerialByte(byte) {
+      return usart.writeByte(byte) !== false;
     },
     run(cycles) {
       const target = cpu.cycles + cycles;

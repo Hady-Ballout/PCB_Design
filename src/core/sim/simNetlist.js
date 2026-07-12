@@ -49,6 +49,7 @@ const SIMULATED_MODULE_KINDS = new Set([
 const AVR_PERIPHERAL_KINDS = new Set([
   'servo', 'ultrasonic_sensor', 'dht_sensor', 'rotary_encoder',
   'oled_display', 'lcd_display', 'shift_register', 'keypad',
+  'imu_sensor', 'rtc_module', 'baro_sensor', 'adc_module', 'led_strip',
 ]);
 
 // Protocol pins per kind: which the MCU drives vs the module drives, which
@@ -82,6 +83,16 @@ const PERIPHERAL_PIN_SPECS = {
     moduleDriven: [],
     ownsInputs: ['R1', 'R2', 'R3', 'R4'],
   },
+  // Register-map I2C sensors (hardware TWI pins only, like the displays).
+  imu_sensor: { required: ['SDA', 'SCL'], moduleDriven: ['SDA', 'SCL'], i2c: true },
+  rtc_module: { required: ['SDA', 'SCL'], moduleDriven: ['SDA', 'SCL'], i2c: true },
+  baro_sensor: { required: ['SDA', 'SCL'], moduleDriven: ['SDA', 'SCL'], i2c: true },
+  // MCP3008 rides hardware SPI: DIN↔MOSI(D11), DOUT↔MISO(D12), CLK↔SCK(D13);
+  // CS may be any Uno pin. CH0-7 read live circuit nets (no branches).
+  adc_module: { required: ['CS', 'DIN', 'DOUT', 'CLK'], moduleDriven: [], spi: true },
+  // WS2812 strip: the MCU bit-bangs DIN; no display branch needed (the
+  // mcu_pin branch already drives the net electrically).
+  led_strip: { required: ['DIN'], moduleDriven: [] },
 };
 
 // Module pin-name → fixedPins index (protocol pins only).
@@ -98,6 +109,12 @@ const PERIPHERAL_PIN_INDEX = {
     QA: 14, QB: 0, QC: 1, QD: 2, QE: 3, QF: 4, QG: 5, QH: 6, QH2: 8,
   },
   keypad: { R1: 0, R2: 1, R3: 2, R4: 3, C1: 4, C2: 5, C3: 6, C4: 7 },
+  imu_sensor: { SCL: 2, SDA: 3 }, // [VCC, GND, SCL, SDA]
+  rtc_module: { SDA: 2, SCL: 3 }, // [GND, VCC, SDA, SCL]
+  baro_sensor: { SCL: 2, SDA: 3 }, // [VCC, GND, SCL, SDA]
+  // MCP3008 DIP-16: [CH0..CH7, DGND, CS, DIN, DOUT, CLK, AGND, VREF, VDD]
+  adc_module: { CS: 9, DIN: 10, DOUT: 11, CLK: 12 },
+  led_strip: { DIN: 1 }, // [VCC, DIN, GND]
 };
 
 const KEYPAD_KEYS = ['1', '2', '3', 'A', '4', '5', '6', 'B', '7', '8', '9', 'C', '*', '0', '#', 'D'];
@@ -564,17 +581,28 @@ export const buildSimNetlist = (circuit, options = {}) => {
       if (unoPin) pins[name] = unoPin;
       else if (spec.required.includes(name)) wired = false;
     }
-    // I2C displays ride the hardware TWI pins only: SDA must land on A4 and
+    // I2C devices ride the hardware TWI pins only: SDA must land on A4 and
     // SCL on A5 (Wire owns those; software-I2C wirings stay warned).
     if (wired && spec.i2c && !(pins.SDA === 'A4' && pins.SCL === 'A5')) wired = false;
+    // SPI devices likewise need the hardware pins: DIN↔MOSI(D11),
+    // DOUT↔MISO(D12), CLK↔SCK(D13); CS is any discovered Uno pin.
+    if (wired && spec.spi && !(pins.DIN === 'D11' && pins.DOUT === 'D12' && pins.CLK === 'D13')) wired = false;
     if (!wired) {
       warnOnce('module_not_simulated', `${part.ref} (${kindLabel(part.kind)}) is a wiring-only module — not simulated`);
       continue;
     }
-    devices.push({
+    const record = {
       type: 'avr_peripheral', id: part.ref, owner: part.ref, kind: part.kind, pins,
       ownedPins: (spec.ownsInputs ?? []).map((name) => pins[name]).filter(Boolean),
-    });
+    };
+    if (part.kind === 'adc_module') {
+      // CH0-7 (fixedPins 0-7) read live circuit nets — inputs, no branches.
+      record.channelNets = Array.from({ length: 8 }, (_, channel) => {
+        const node = part.nodes?.[channel];
+        return node == null || isUnconnectedTerminal(node, part.ref, channel + 1) ? null : indexOf(node);
+      });
+    }
+    devices.push(record);
     if (part.kind === 'ultrasonic_sensor') {
       controls.push({ ref: part.ref, kind: part.kind, type: 'slider', name: 'distanceCm', min: 2, max: 400, step: 1, value: 50, label: 'Distance (cm)' });
     } else if (part.kind === 'dht_sensor') {
@@ -589,6 +617,12 @@ export const buildSimNetlist = (circuit, options = {}) => {
       for (const key of KEYPAD_KEYS) {
         controls.push({ ref: part.ref, kind: part.kind, type: 'matrix-key', name: `key_${key}`, value: 0 });
       }
+    } else if (part.kind === 'imu_sensor') {
+      controls.push({ ref: part.ref, kind: part.kind, type: 'slider', name: 'pitch', min: -90, max: 90, step: 1, value: 0, label: 'Pitch (°)' });
+      controls.push({ ref: part.ref, kind: part.kind, type: 'slider', name: 'roll', min: -90, max: 90, step: 1, value: 0, label: 'Roll (°)' });
+    } else if (part.kind === 'baro_sensor') {
+      controls.push({ ref: part.ref, kind: part.kind, type: 'slider', name: 'tempC', min: -40, max: 85, step: 1, value: 25, label: 'Temperature (°C)' });
+      controls.push({ ref: part.ref, kind: part.kind, type: 'slider', name: 'pressureHpa', min: 300, max: 1100, step: 1, value: 1013, label: 'Pressure (hPa)' });
     }
     // Display-only presence for module-driven pins: a weak (1 kΩ) Thevenin so
     // the legend/V-map track the digital level while the MCU's 40 Ω driver

@@ -91,7 +91,7 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
   const [compiling, setCompiling] = useState(false);
   const [compileError, setCompileError] = useState(null);
   const [mcu, setMcu] = useState(null); // { hex } | { program } for the Uno bridge
-  const { simFrame, setControl, controls } = useSimulation(circuit, running, mcu);
+  const { simFrame, setControl, controls, sendSerial } = useSimulation(circuit, running, mcu);
 
   // Run with firmware: compile first (cached per chat by code hash), then
   // start the engine with the avr8js bridge attached.
@@ -631,7 +631,7 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
         <div className="realistic-sim-banner" role="note">{simWarnings.join(' · ')}</div>
       )}
       {running && simFrame?.hasMcu && (
-        <SerialMonitor text={simFrame.serial} />
+        <SerialMonitor text={simFrame.serial} onSendSerial={sendSerial} />
       )}
       {running && selection?.type === 'part' && (
         <SimStimulusPanel

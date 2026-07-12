@@ -6,6 +6,13 @@
 // engine reads each module's current output level for display-only branches.
 import { UNO_PIN_MAP, AVR_CLOCK_HZ } from './avrRunner.js';
 import { createHd44780, createSsd1306 } from './displayModels.js';
+import {
+  createBmp280,
+  createDs3231,
+  createMcp3008,
+  createMpu6050,
+  createWs2812Decoder,
+} from './registerModels.js';
 
 const usToCycles = (us) => Math.round((us * AVR_CLOCK_HZ) / 1e6);
 
@@ -297,6 +304,75 @@ const createKeypad = (record, runner) => {
   };
 };
 
+// One simulated device per I2C address: the engine warns and skips later
+// claimants (IMU and RTC both live at 0x68 in the real world too).
+export const I2C_ADDRESS_BY_KIND = {
+  oled_display: 0x3c,
+  lcd_display: 0x27,
+  imu_sensor: 0x68,
+  rtc_module: 0x68,
+  baro_sensor: 0x76,
+};
+
+// MPU6050 register slave; pitch/roll sliders orient the gravity vector.
+const createImu = (record, runner, controlState) => {
+  const mpu = createMpu6050(new Proxy({}, {
+    get: (_, key) => controlState.get(record.owner)?.[key],
+  }));
+  runner.registerI2cSlave(0x68, mpu.i2cSlave);
+  return { observe: () => ({}), level: () => 1, dispose: () => {} };
+};
+
+// DS3231 register slave; time rolls forward with the AVR cycle clock.
+const createRtc = (record, runner) => {
+  const rtc = createDs3231(() => runner.cpu.cycles);
+  runner.registerI2cSlave(0x68, rtc.i2cSlave);
+  return { observe: () => ({ text: rtc.text() }), level: () => 1, dispose: () => {} };
+};
+
+// BMP280 register slave; temperature/pressure sliders drive the raw ADC
+// registers through the degenerate-calibration linear maps.
+const createBaro = (record, runner, controlState) => {
+  const bmp = createBmp280(new Proxy({}, {
+    get: (_, key) => controlState.get(record.owner)?.[key],
+  }));
+  runner.registerI2cSlave(0x76, bmp.i2cSlave);
+  return { observe: () => ({}), level: () => 1, dispose: () => {} };
+};
+
+// MCP3008 on the SPI bus; channel voltages arrive from the engine's lockstep
+// feedback (the module's CH0-7 pins read live circuit nets).
+const createAdcModule = (record, runner) => {
+  const channelVolts = new Array(8).fill(0);
+  const mcp = createMcp3008((channel) => channelVolts[channel]);
+  runner.registerSpiDevice(record.pins.CS, mcp.spiDevice);
+  return {
+    observe: () => ({}),
+    level: () => 1,
+    setChannelVolts: (channel, volts) => {
+      channelVolts[channel] = volts;
+    },
+    dispose: () => {},
+  };
+};
+
+// WS2812 strip: decode the bit-banged DIN stream from cycle-timestamped
+// port writes into RGB pixels.
+const createLedStrip = (record, runner) => {
+  const decoder = createWs2812Decoder({ maxPixels: 30 });
+  const unwatch = pinWatch(runner, record.pins.DIN, ({ mode, high }, cycles) => {
+    if (mode === 'output') decoder.edge(high, cycles);
+  });
+  return {
+    observe: () => {
+      decoder.commitIfIdle(runner.cpu.cycles);
+      return { pixels: decoder.state.pixels, pixelVersion: decoder.state.version };
+    },
+    level: () => 0,
+    dispose: unwatch,
+  };
+};
+
 const FACTORIES = {
   servo: createServo,
   ultrasonic_sensor: createUltrasonic,
@@ -306,6 +382,11 @@ const FACTORIES = {
   lcd_display: createLcd,
   shift_register: createShiftRegister,
   keypad: createKeypad,
+  imu_sensor: createImu,
+  rtc_module: createRtc,
+  baro_sensor: createBaro,
+  adc_module: createAdcModule,
+  led_strip: createLedStrip,
 };
 
 export const createPeripheral = (record, runner, controlState) =>
