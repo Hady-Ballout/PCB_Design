@@ -160,6 +160,69 @@ const createDht = (record, runner, controlState) => {
   };
 };
 
+// NEC command bytes for keys 1-9 on the ubiquitous HX1838/Elegoo "car MP3"
+// remote (address 0x00) — the codes IRremote tutorial sketches print.
+export const NEC_KEY_COMMANDS = {
+  1: 0x0c, 2: 0x18, 3: 0x5e, 4: 0x08, 5: 0x1c, 6: 0x5a, 7: 0x42, 8: 0x52, 9: 0x4a,
+};
+
+// One NEC frame as [µs offset, level] edges from a TSOP-style demodulating
+// receiver: idle HIGH, mark LOW. 9 ms AGC mark, 4.5 ms space, then 32 bits
+// (560 µs mark + 560/1690 µs space) sent LSB-first as addr/~addr/cmd/~cmd,
+// closed by a 560 µs stop mark.
+export const buildNecEdges = (address, command) => {
+  const bytes = [address & 0xff, ~address & 0xff, command & 0xff, ~command & 0xff];
+  const bits = bytes.flatMap((byte) => Array.from({ length: 8 }, (_, i) => (byte >> i) & 1));
+  const edges = [[0, 0]];
+  let t = 9000;
+  edges.push([t, 1]);
+  t += 4500;
+  for (const bit of bits) {
+    edges.push([t, 0]);
+    t += 560;
+    edges.push([t, 1]);
+    t += bit ? 1690 : 560;
+  }
+  edges.push([t, 0]);
+  t += 560;
+  edges.push([t, 1]);
+  return { edges, totalUs: t };
+};
+
+// TSOP38xx IR receiver: a remote-key press drives OUT with the demodulated
+// NEC frame via scheduled clock events (the DHT respond pattern). Presses
+// mid-frame are ignored.
+const createIrReceiver = (record, runner) => {
+  let outLevel = 1;
+  let sending = false;
+  let lastKey = null;
+  const setOut = (high) => {
+    outLevel = high ? 1 : 0;
+    runner.setDigitalInput(record.pins.OUT, high);
+  };
+  setOut(true); // idle high
+  return {
+    observe: () => ({ lastKey, sending }),
+    level: (pin) => (pin === 'OUT' ? outLevel : 0),
+    onControl: (name, value) => {
+      if (!name.startsWith('key_') || !value || sending) return;
+      const key = name.slice(4);
+      const command = NEC_KEY_COMMANDS[key];
+      if (command == null) return;
+      sending = true;
+      lastKey = key;
+      const { edges, totalUs } = buildNecEdges(0x00, command);
+      for (const [atUs, level] of edges) {
+        at(runner, usToCycles(atUs) || 1, () => setOut(level === 1));
+      }
+      at(runner, usToCycles(totalUs) + 1, () => {
+        sending = false;
+      });
+    },
+    dispose: () => {},
+  };
+};
+
 // KY-040 encoder: stepper control emits one quadrature detent (4 edges, 1 ms
 // apart); the SW button pulses low for 50 ms. All pins are module-driven.
 const createEncoder = (record, runner, controlState) => {
@@ -377,6 +440,7 @@ const FACTORIES = {
   servo: createServo,
   ultrasonic_sensor: createUltrasonic,
   dht_sensor: createDht,
+  ir_receiver: createIrReceiver,
   rotary_encoder: createEncoder,
   oled_display: createOled,
   lcd_display: createLcd,

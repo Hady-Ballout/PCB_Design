@@ -9,6 +9,10 @@ import { createSimAudio } from './simAudio.js';
 
 const FRAME_BUDGET_MS = 4;
 
+// Event-style controls (encoder detents, button presses, IR keys) fire once;
+// remembering them would replay the last press on every engine rebuild.
+const EVENT_CONTROL_TYPES = new Set(['stepper', 'button', 'ir-key']);
+
 export function useSimulation(circuit, running, mcu = null) {
   const engineRef = useRef(null);
   // Control values survive engine rebuilds (circuit edits while running): the
@@ -108,7 +112,10 @@ export function useSimulation(circuit, running, mcu = null) {
   }, [circuit, running, mcu, snapshot]);
 
   const setControl = useCallback((ref, name, value) => {
-    controlMemoryRef.current.set(`${ref}:${name}`, value);
+    const type = engineRef.current?.controls?.find(
+      (control) => control.ref === ref && control.name === name,
+    )?.type;
+    if (!EVENT_CONTROL_TYPES.has(type)) controlMemoryRef.current.set(`${ref}:${name}`, value);
     engineRef.current?.setControl(ref, name, value);
   }, []);
 

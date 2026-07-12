@@ -52,6 +52,7 @@ const AVR_PERIPHERAL_KINDS = new Set([
   'servo', 'ultrasonic_sensor', 'dht_sensor', 'rotary_encoder',
   'oled_display', 'lcd_display', 'shift_register', 'keypad',
   'imu_sensor', 'rtc_module', 'baro_sensor', 'adc_module', 'led_strip',
+  'ir_receiver',
 ]);
 
 // Protocol pins per kind: which the MCU drives vs the module drives, which
@@ -95,6 +96,8 @@ const PERIPHERAL_PIN_SPECS = {
   // WS2812 strip: the MCU bit-bangs DIN; no display branch needed (the
   // mcu_pin branch already drives the net electrically).
   led_strip: { required: ['DIN'], moduleDriven: [] },
+  // TSOP38xx: the module owns OUT (idle high, NEC marks low).
+  ir_receiver: { required: ['OUT'], moduleDriven: ['OUT'], ownsInputs: ['OUT'] },
 };
 
 // Module pin-name → fixedPins index (protocol pins only).
@@ -117,6 +120,7 @@ const PERIPHERAL_PIN_INDEX = {
   // MCP3008 DIP-16: [CH0..CH7, DGND, CS, DIN, DOUT, CLK, AGND, VREF, VDD]
   adc_module: { CS: 9, DIN: 10, DOUT: 11, CLK: 12 },
   led_strip: { DIN: 1 }, // [VCC, DIN, GND]
+  ir_receiver: { OUT: 0 }, // [OUT, GND, VCC]
 };
 
 const KEYPAD_KEYS = ['1', '2', '3', 'A', '4', '5', '6', 'B', '7', '8', '9', 'C', '*', '0', '#', 'D'];
@@ -714,6 +718,11 @@ export const buildSimNetlist = (circuit, options = {}) => {
       // route through setControl/controlState into the crossbar.
       for (const key of KEYPAD_KEYS) {
         controls.push({ ref: part.ref, kind: part.kind, type: 'matrix-key', name: `key_${key}`, value: 0 });
+      }
+    } else if (part.kind === 'ir_receiver') {
+      // Rendered as one remote widget by the stimulus panel (grouped by ref).
+      for (let key = 1; key <= 9; key += 1) {
+        controls.push({ ref: part.ref, kind: part.kind, type: 'ir-key', name: `key_${key}`, value: 0, label: String(key) });
       }
     } else if (part.kind === 'imu_sensor') {
       controls.push({ ref: part.ref, kind: part.kind, type: 'slider', name: 'pitch', min: -90, max: 90, step: 1, value: 0, label: 'Pitch (°)' });

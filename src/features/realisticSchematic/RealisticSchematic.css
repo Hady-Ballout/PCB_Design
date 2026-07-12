@@ -464,6 +464,13 @@
   font-weight: 600;
 }
 
+/* IR remote widget: a 3x3 key grid per ir_receiver ref. */
+.rs-ir-remote {
+  display: grid;
+  gap: 2px;
+  grid-template-columns: repeat(3, minmax(22px, auto));
+}
+
 .rs-stimulus-row input[type='range'] {
   width: 140px;
 }

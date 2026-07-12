@@ -8,7 +8,7 @@ import {
   buildShiftOutProgram,
   createAvrRunner,
 } from './avrRunner.js';
-import { createPeripheral } from './avrPeripherals.js';
+import { buildNecEdges, createPeripheral } from './avrPeripherals.js';
 
 const controlsWith = (owner, state) => new Map([[owner, state]]);
 
@@ -81,6 +81,62 @@ describe('DHT peripheral', () => {
     const afterPreamble = text.slice(preambleLow.index + preambleLow[0].length);
     const fallingEdges = (afterPreamble.match(/10/g) ?? []).length;
     expect(fallingEdges).toBeGreaterThanOrEqual(40);
+  });
+});
+
+describe('IR receiver peripheral', () => {
+  it('builds NEC edge lists with 32 bit cells framed by AGC and stop marks', () => {
+    const { edges, totalUs } = buildNecEdges(0x00, 0x1c);
+    // AGC mark/space + 32 × (mark + space) + stop mark/release = 68 edges.
+    expect(edges).toHaveLength(68);
+    expect(edges[0]).toEqual([0, 0]);
+    expect(edges[1]).toEqual([9000, 1]);
+    // 0x00/0xFF/0x1C/0xE3 has 16 ones → 16×2250 + 16×1120 + framing.
+    expect(totalUs).toBe(9000 + 4500 + 16 * 2250 + 16 * 1120 + 560);
+  });
+
+  it('drives OUT with a decodable NEC frame for a key press', () => {
+    const runner = createAvrRunner({ program: TEST_PROGRAM_D13_HIGH });
+    const ir = createPeripheral(
+      { kind: 'ir_receiver', owner: 'IR1', pins: { OUT: 'D2' } },
+      runner,
+      new Map(),
+    );
+    expect(ir.level('OUT')).toBe(1); // idle high
+    ir.onControl('key_5', 1);
+    // Sample PIND bit 2 every 10 µs across the whole ~68 ms frame.
+    const samples = [];
+    for (let i = 0; i < 9000; i += 1) {
+      runner.run(160);
+      samples.push((runner.cpu.data[0x29] >> 2) & 1);
+    }
+    // Run-length encode the timeline (drop the leading idle-high stretch).
+    const runs = [];
+    for (const sample of samples) {
+      if (runs.length && runs.at(-1).level === sample) runs.at(-1).length += 1;
+      else runs.push({ level: sample, length: 1 });
+    }
+    if (runs[0]?.level === 1) runs.shift();
+    // AGC: ~9 ms low (900 samples), ~4.5 ms high (450).
+    expect(runs[0].level).toBe(0);
+    expect(runs[0].length).toBeGreaterThan(850);
+    expect(runs[0].length).toBeLessThan(950);
+    expect(runs[1].length).toBeGreaterThan(420);
+    expect(runs[1].length).toBeLessThan(480);
+    // 32 data bits: mark, then a space whose length encodes the bit.
+    const bits = [];
+    for (let i = 0; i < 32; i += 1) {
+      const mark = runs[2 + i * 2];
+      const space = runs[3 + i * 2];
+      expect(mark.level).toBe(0);
+      bits.push(space.length > 100 ? 1 : 0); // 560 µs ≈ 56, 1690 µs ≈ 169
+    }
+    // LSB-first bytes: addr 0x00, ~addr 0xFF, cmd 0x1C, ~cmd 0xE3.
+    const bytes = [0, 1, 2, 3].map((byteIndex) =>
+      bits.slice(byteIndex * 8, byteIndex * 8 + 8).reduce((value, bit, i) => value | (bit << i), 0));
+    expect(bytes).toEqual([0x00, 0xff, 0x1c, 0xe3]);
+    expect(ir.observe().lastKey).toBe('5');
+    expect(ir.level('OUT')).toBe(1); // released back to idle
   });
 });
 

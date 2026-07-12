@@ -8,11 +8,30 @@ const SLIDER_PRESENTATION = {
 };
 
 export function SimStimulusPanel({ controls, onChange }) {
-  const interactive = controls.filter((control) => ['slider', 'stepper', 'button'].includes(control.type));
+  const interactive = controls.filter((control) => ['slider', 'stepper', 'button', 'ir-key'].includes(control.type));
   if (interactive.length === 0) return null;
+  // ir-key controls collapse into one remote widget per ref (a 3×3 key grid).
+  const remotes = new Map();
+  for (const control of interactive) {
+    if (control.type !== 'ir-key') continue;
+    if (!remotes.has(control.ref)) remotes.set(control.ref, []);
+    remotes.get(control.ref).push(control);
+  }
   return (
     <div className="rs-stimulus-panel">
-      {interactive.map((control) => {
+      {[...remotes.entries()].map(([ref, keys]) => (
+        <span key={`${ref}:remote`} className="rs-stimulus-row">
+          <span className="rs-stimulus-label">{ref} · IR remote</span>
+          <span className="rs-ir-remote">
+            {keys.map((control) => (
+              <button key={control.name} type="button" onClick={() => onChange(ref, control.name, 1)}>
+                {control.label ?? control.name}
+              </button>
+            ))}
+          </span>
+        </span>
+      ))}
+      {interactive.filter((control) => control.type !== 'ir-key').map((control) => {
         const key = `${control.ref}:${control.name}`;
         if (control.type === 'stepper') {
           // Event-style control: each click emits ±1 (encoder detents).

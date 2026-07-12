@@ -154,6 +154,30 @@ describe('buildSimNetlist', () => {
     expect(netlist.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
   });
 
+  it('attaches the IR receiver to a firmware Uno with remote-key controls', () => {
+    const unoNodes = ['NC_U1_1', 'NC_U1_2', '0', ...Array.from({ length: 21 }, (_, i) => `NC_U1_${i + 4}`)];
+    unoNodes[6] = 'VIR'; // D2
+    const netlist = buildSimNetlist(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodes },
+      // [OUT, GND, VCC]
+      { ref: 'IR1', kind: 'ir_receiver', value: '', nodes: ['VIR', '0', 'NC_IR1_3'] },
+    ]), { mcuRef: 'U1' });
+    expect(netlist.ok).toBe(true);
+    const record = netlist.devices.find((device) => device.id === 'IR1');
+    expect(record).toMatchObject({ type: 'avr_peripheral', pins: { OUT: 'D2' }, ownedPins: ['D2'] });
+    // 9 remote keys + the display branch for the module-driven OUT.
+    expect(netlist.controls.filter((c) => c.ref === 'IR1' && c.type === 'ir-key')).toHaveLength(9);
+    expect(netlist.devices.some((device) => device.id === 'IR1_OUT')).toBe(true);
+    expect(netlist.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
+  });
+
+  it('keeps the IR receiver wiring-only without a firmware Uno', () => {
+    const netlist = buildSimNetlist(circuitOf(withSupply([
+      { ref: 'IR1', kind: 'ir_receiver', value: '', nodes: ['VIR', '0', 'VCC'] },
+    ])));
+    expect(netlist.warnings.some((w) => w.code === 'module_not_simulated')).toBe(true);
+  });
+
   it('maps the zener breakdown voltage from its value', () => {
     const netlist = buildSimNetlist(circuitOf(withSupply([
       { ref: 'D1', kind: 'zener', value: '9.1V', nodes: ['VCC', '0'] },

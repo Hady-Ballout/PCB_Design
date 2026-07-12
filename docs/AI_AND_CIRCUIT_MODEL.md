@@ -399,6 +399,17 @@ address (`i2c_address_conflict` warning — IMU and RTC both live at 0x68, first
 one per accepted UART window into `usart.writeByte` (no `Serial.begin` → the queue waits).
 **WS2812 strip**: DIN port-writes are decoded at cycle resolution (pulse >10 cycles = 1,
 ≥640-cycle gap latches, GRB order) into up to 30 live pixels on the strip artwork.
+**Tier 2c — IR receiver.** `ir_receiver` (TSOP38xx) joins the bridge: the stimulus panel
+shows a **3×3 IR remote widget** (one per receiver, keys 1-9 with the HX1838/Elegoo NEC
+command bytes IRremote tutorials print — `1:0x0C … 9:0x4A`, address 0x00). A key press
+schedules the full demodulated NEC frame on OUT via clock events (the DHT respond
+pattern): idle HIGH, 9 ms AGC mark LOW, 4.5 ms space, 32 LSB-first bits
+(addr/~addr/cmd/~cmd, 560 µs marks, 560/1690 µs spaces), 560 µs stop. Presses mid-frame
+are ignored. `ir-key` controls are event-style — they (and `stepper`/`button`) are
+excluded from the rebuild replay memory in `useSimulation.js` so a mid-run circuit edit
+doesn't ghost-repeat the last press. Compiling IRremote sketches needs the `IRremote`
+library (Dockerfile / docs/OPERATIONS.md).
+
 Still deferred: `sd_card` (FAT), `rfid_reader` (RC522).
 
 Solver notes: junction limiting (pnjlim) must veto NR convergence — with an LED off-seed,
