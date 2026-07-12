@@ -36,10 +36,12 @@ const DIODE_MODELS = {
 const SEVEN_SEGMENT_SEGMENTS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'DP'];
 
 // Wiring-only registry kinds that nevertheless get behavioral models: the
-// relay, plus the Tier-2a stimulus-driven analog sensors (their outputs are
-// plain voltages/switches, so they work without MCU firmware).
+// relay, the Tier-2a stimulus-driven analog sensors (their outputs are
+// plain voltages/switches, so they work without MCU firmware), and the
+// Tier-2c driver/motion modules (their pins are switched by node voltages).
 const SIMULATED_MODULE_KINDS = new Set([
   'relay_module', 'temp_sensor', 'pir_sensor', 'soil_moisture', 'gas_sensor', 'sound_sensor', 'hall_sensor',
+  'stepper_driver',
 ]);
 
 // Protocol modules that ride the Arduino firmware bridge at cycle resolution
@@ -445,6 +447,29 @@ export const buildSimNetlist = (circuit, options = {}) => {
           vcc: indexOf(a), gnd: indexOf(b), in: indexOf(c),
           com: indexOf(nodes[3]), no: indexOf(nodes[4]), nc: indexOf(nodes[5]),
           state: { energized: false },
+        });
+        break;
+      }
+      case 'stepper_driver': {
+        // ULN2003: four independent open-collector Darlington switches. Each
+        // OUT is pulled to GND (~10 Ω, ≈0.9 V sat across a 50 Ω coil) while
+        // its IN reads high; the event update in simEngine flips the state
+        // from the solved IN node voltages (2.5 V on / 2.3 V off hysteresis).
+        // fixedPins: [IN1, IN2, IN3, IN4, VCC, GND, OUTA, OUTB, OUTC, OUTD].
+        const gndNode = indexOf(nodes[5]);
+        const ins = [0, 1, 2, 3].map((i) =>
+          (isUnconnectedTerminal(nodes[i], ref, i + 1) ? null : indexOf(nodes[i])));
+        const outs = [6, 7, 8, 9].map((i) =>
+          (isUnconnectedTerminal(nodes[i], ref, i + 1) ? null : indexOf(nodes[i])));
+        // High-value input ties (the timer_555 tie pattern) so floating or
+        // input-mode-GPIO INs solve cleanly instead of drifting.
+        ins.forEach((node, i) => {
+          if (node != null) addResistor(`${ref}__tin${i + 1}`, ref, 'stepper_driver_tie', node, gndNode, 10e3);
+        });
+        devices.push({
+          type: 'stepper_driver', id: ref, owner: ref, kind,
+          in: ins, gnd: gndNode, out: outs,
+          state: { on: [false, false, false, false] },
         });
         break;
       }

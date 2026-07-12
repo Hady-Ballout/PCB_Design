@@ -86,6 +86,27 @@ describe('buildSimNetlist', () => {
     expect(netlist.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
   });
 
+  it('emits the ULN2003 as a four-channel event switch with input ties', () => {
+    const netlist = buildSimNetlist(circuitOf(withSupply([
+      // [IN1..IN4, VCC, GND, OUTA..OUTD] — only channel 1 wired.
+      {
+        ref: 'U2', kind: 'stepper_driver', value: '',
+        nodes: ['VIN1', 'NC_U2_2', 'NC_U2_3', 'NC_U2_4', 'VCC', '0', 'VOUTA', 'NC_U2_8', 'NC_U2_9', 'NC_U2_10'],
+      },
+    ])));
+    expect(netlist.ok).toBe(true);
+    const record = netlist.devices.find((device) => device.id === 'U2');
+    expect(record).toMatchObject({ type: 'stepper_driver', state: { on: [false, false, false, false] } });
+    expect(record.in[0]).not.toBeNull();
+    expect(record.in[1]).toBeNull();
+    expect(record.out[0]).not.toBeNull();
+    expect(record.out[1]).toBeNull();
+    // Input tie only on the connected IN.
+    expect(netlist.devices.some((device) => device.id === 'U2__tin1')).toBe(true);
+    expect(netlist.devices.some((device) => device.id === 'U2__tin2')).toBe(false);
+    expect(netlist.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
+  });
+
   it('maps the zener breakdown voltage from its value', () => {
     const netlist = buildSimNetlist(circuitOf(withSupply([
       { ref: 'D1', kind: 'zener', value: '9.1V', nodes: ['VCC', '0'] },

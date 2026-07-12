@@ -422,6 +422,26 @@ describe('createSimulation — polish devices (M4)', () => {
     expect(idle.observables().get('K1').energized).toBe(false);
   });
 
+  it('pulls a ULN2003 output low only while its input reads high', () => {
+    const build = (driveVolts) => createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'V2', kind: 'voltage_source', value: `${driveVolts}V`, nodes: ['VIN', '0'] },
+      // [IN1..IN4, VCC, GND, OUTA..OUTD]: channel 1 switches a 50 Ω coil load.
+      {
+        ref: 'U2', kind: 'stepper_driver', value: '',
+        nodes: ['VIN', 'NC_U2_2', 'NC_U2_3', 'NC_U2_4', 'VCC', '0', 'VOUTA', 'NC_U2_8', 'NC_U2_9', 'NC_U2_10'],
+      },
+      { ref: 'R1', kind: 'resistor', value: '50', nodes: ['VCC', 'VOUTA'] },
+    ]));
+    const driven = build(5);
+    expect(driven.solveDC()).toBe(true);
+    // 5 V across 50 Ω + 10 Ω sat: OUTA sits near the saturation voltage.
+    expect(volts(driven, 'VOUTA')).toBeLessThan(1.1);
+    const idle = build(0);
+    expect(idle.solveDC()).toBe(true);
+    expect(volts(idle, 'VOUTA')).toBeGreaterThan(4.9);
+  });
+
   it('drives the current-sensor OUT at 2.5 V + 185 mV/A', () => {
     const engine = createSimulation(circuitOf([
       { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },

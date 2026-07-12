@@ -99,7 +99,7 @@ export const createSimulation = (circuit, options = {}) => {
   }
 
   const NR_TYPES = new Set(['diode', 'bjt', 'mosfet', 'opamp']);
-  const EVENT_TYPES = new Set(['comparator', 'timer_555', 'opto_out']);
+  const EVENT_TYPES = new Set(['comparator', 'timer_555', 'opto_out', 'stepper_driver']);
   const nrDevices = devices.filter((device) => NR_TYPES.has(device.type));
   for (const device of nrDevices) {
     if (device.type === 'diode') {
@@ -423,6 +423,16 @@ export const createSimulation = (circuit, options = {}) => {
           }
           break;
         }
+        case 'stepper_driver': {
+          // ULN2003 channels: open-collector switch per OUT, keyed to the
+          // event state latched from the IN node voltages.
+          for (let i = 0; i < 4; i += 1) {
+            const out = device.out[i];
+            if (out == null) continue;
+            stampConductance(out, device.gnd, 1 / (device.state.on[i] ? 10 : 10e6));
+          }
+          break;
+        }
         case 'relay': {
           const energized = device.state.energized;
           stampConductance(device.com, device.no, 1 / (energized ? 0.05 : 10e6));
@@ -594,6 +604,18 @@ export const createSimulation = (circuit, options = {}) => {
         if (Math.abs(device.overrideVolts - next) > 1e-3) {
           device.overrideVolts = next;
           changed = true;
+        }
+      } else if (device.type === 'stepper_driver') {
+        // Per-channel Darlington switch with hysteresis (2.5 V on / 2.3 V
+        // off) against the solved IN voltages — the relay pattern, ×4.
+        for (let i = 0; i < 4; i += 1) {
+          if (device.in[i] == null) continue;
+          const drive = atX(device.in[i]) - atX(device.gnd);
+          const on = device.state.on[i] ? drive > 2.3 : drive > 2.5;
+          if (on !== device.state.on[i]) {
+            device.state.on[i] = on;
+            changed = true;
+          }
         }
       } else if (device.type === 'comparator') {
         // ±5 mV hysteresis prevents chatter at the trip point.
