@@ -260,6 +260,26 @@ describe('realistic part rendering', () => {
     expect(markup).toContain('translate(8 -8)');
   });
 
+  it('shows the RFID card overlay only while a tap is active', () => {
+    const model = circuitToBreadboard({
+      title: 'rfid',
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        {
+          ref: 'RF1', kind: 'rfid_reader', value: '',
+          nodes: ['VCC', 'NC_RF1_2', '0', 'NC_RF1_4', 'VMISO', 'VMOSI', 'VSCK', 'VSDA'],
+        },
+      ],
+    });
+    const part = model.parts.find((p) => p.kind === 'rfid_reader');
+    const idle = renderToStaticMarkup(<svg><PartDefs /><RealisticPart part={part} /></svg>);
+    expect(idle).not.toContain('DE AD BE EF');
+    const tapped = renderToStaticMarkup(
+      <svg><PartDefs /><RealisticPart part={part} sim={{ cardPresent: true, uid: 'DE AD BE EF' }} /></svg>,
+    );
+    expect(tapped).toContain('DE AD BE EF');
+  });
+
   it('anchors peripheral pads on their body terminals but keeps MCU pads collinear', () => {
     const slot = { x: 0, y: 0, width: 448, height: 120 };
     // Peripherals: pads sit on the body (servo top-edge connector at y=58,

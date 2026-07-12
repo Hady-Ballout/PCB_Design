@@ -10,6 +10,7 @@ import {
   createBmp280,
   createDs3231,
   createMcp3008,
+  createMfrc522,
   createMpu6050,
   createWs2812Decoder,
 } from './registerModels.js';
@@ -419,6 +420,28 @@ const createAdcModule = (record, runner) => {
   };
 };
 
+// RC522 RFID reader on the SPI bus (the SDA pin doubles as chip select).
+// "Tap card" presents a fixed-UID MIFARE Classic 1K for ~1.5 s of sim time —
+// long enough for a polling read-UID sketch, short enough to tap again.
+const createRfid = (record, runner) => {
+  const uid = [0xde, 0xad, 0xbe, 0xef];
+  const rfid = createMfrc522(() => uid);
+  runner.registerSpiDevice(record.pins.SDA, rfid.spiDevice);
+  return {
+    observe: () => ({
+      cardPresent: rfid.isCardPresent(),
+      uid: uid.map((byte) => byte.toString(16).padStart(2, '0').toUpperCase()).join(' '),
+    }),
+    level: () => 1,
+    onControl: (name, value) => {
+      if (name !== 'tap' || !value) return;
+      rfid.setCardPresent(true);
+      at(runner, Math.round(1.5 * AVR_CLOCK_HZ), () => rfid.setCardPresent(false));
+    },
+    dispose: () => {},
+  };
+};
+
 // WS2812 strip: decode the bit-banged DIN stream from cycle-timestamped
 // port writes into RGB pixels.
 const createLedStrip = (record, runner) => {
@@ -451,6 +474,7 @@ const FACTORIES = {
   baro_sensor: createBaro,
   adc_module: createAdcModule,
   led_strip: createLedStrip,
+  rfid_reader: createRfid,
 };
 
 export const createPeripheral = (record, runner, controlState) =>

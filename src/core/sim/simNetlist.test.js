@@ -178,6 +178,35 @@ describe('buildSimNetlist', () => {
     expect(netlist.warnings.some((w) => w.code === 'module_not_simulated')).toBe(true);
   });
 
+  it('attaches the RC522 only on the hardware SPI pins (SDA as CS)', () => {
+    const unoNodes = (assignments) => {
+      const nodes = ['NC_U1_1', 'NC_U1_2', '0', ...Array.from({ length: 21 }, (_, i) => `NC_U1_${i + 4}`)];
+      for (const [pin, net] of Object.entries(assignments)) {
+        nodes[4 + Number(pin.slice(1))] = net;
+      }
+      return nodes;
+    };
+    // [3V3, RST, GND, IRQ, MISO, MOSI, SCK, SDA]
+    const rfidNodes = ['NC_RF1_1', 'NC_RF1_2', '0', 'NC_RF1_4', 'VMISO', 'VMOSI', 'VSCK', 'VSDA'];
+    const wired = buildSimNetlist(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodes({ D10: 'VSDA', D11: 'VMOSI', D12: 'VMISO', D13: 'VSCK' }) },
+      { ref: 'RF1', kind: 'rfid_reader', value: '', nodes: rfidNodes },
+    ]), { mcuRef: 'U1' });
+    expect(wired.devices.find((d) => d.id === 'RF1')).toMatchObject({
+      type: 'avr_peripheral',
+      pins: { SDA: 'D10', MOSI: 'D11', MISO: 'D12', SCK: 'D13' },
+    });
+    expect(wired.controls).toContainEqual(expect.objectContaining({ ref: 'RF1', type: 'button', name: 'tap' }));
+    expect(wired.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
+
+    // MOSI landing anywhere but D11 breaks the hardware-SPI gate.
+    const scrambled = buildSimNetlist(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodes({ D10: 'VSDA', D9: 'VMOSI', D12: 'VMISO', D13: 'VSCK' }) },
+      { ref: 'RF1', kind: 'rfid_reader', value: '', nodes: rfidNodes },
+    ]), { mcuRef: 'U1' });
+    expect(scrambled.warnings.some((w) => w.code === 'module_not_simulated')).toBe(true);
+  });
+
   it('maps the zener breakdown voltage from its value', () => {
     const netlist = buildSimNetlist(circuitOf(withSupply([
       { ref: 'D1', kind: 'zener', value: '9.1V', nodes: ['VCC', '0'] },

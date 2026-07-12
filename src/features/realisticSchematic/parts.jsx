@@ -1330,6 +1330,29 @@ function OffboardModuleBody({ part }) {
   );
 }
 
+// RC522 breakout: the generic slot PCB, plus a white card hovering over the
+// antenna (with its UID) while the sim's tap-card stimulus is active.
+function RfidReaderBody({ part, sim }) {
+  const slot = part.meta.slot;
+  if (!slot) return null;
+  const x0 = slot.x + 10;
+  const y0 = slot.y + 24;
+  return (
+    <g>
+      <OffboardModuleBody part={part} />
+      {sim?.cardPresent && (
+        <g transform={`rotate(-8 ${x0 + 118} ${y0 + 30})`}>
+          <rect x={x0 + 92} y={y0 + 12} width={52} height={34} rx={4} fill="#f5f7f9" stroke="#b9c2cc" strokeWidth="0.8" />
+          <rect x={x0 + 96} y={y0 + 18} width={10} height={8} rx={1.5} fill="#d9b64c" stroke="#b28f37" strokeWidth="0.4" />
+          <text x={x0 + 118} y={y0 + 38} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 4.4, fill: '#4a5560' }}>
+            {sim.uid}
+          </text>
+        </g>
+      )}
+    </g>
+  );
+}
+
 // WS2812 NeoPixel strip: the generic slot PCB plus a row of pixel windows.
 // With firmware running, each dot shows the decoded strip color live.
 function LedStripBody({ part, sim }) {
@@ -2180,7 +2203,8 @@ export function RealisticPart({ part, sim }) {
   if (part.body === 'keypad') return <KeypadBody part={part} sim={sim} />;
   if (part.body === 'joystick') return <JoystickBody part={part} sim={sim} />;
   if (part.body === 'led_strip') return <LedStripBody part={part} sim={sim} />;
-  if (part.body === 'stepper_driver' || part.body === 'rfid_reader' || part.body === 'current_sensor') return <OffboardModuleBody part={part} />;
+  if (part.body === 'rfid_reader') return <RfidReaderBody part={part} sim={sim} />;
+  if (part.body === 'stepper_driver' || part.body === 'current_sensor') return <OffboardModuleBody part={part} />;
   const points = part.holes.map((hole) => (hole ? holeCenter(hole) : null)).filter(Boolean);
   if (points.length === 0) return null;
   if (part.body === 'esp32') return <Esp32Body part={part} />;

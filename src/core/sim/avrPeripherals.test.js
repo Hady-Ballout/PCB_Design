@@ -6,6 +6,7 @@ import {
   TEST_PROGRAM_SERVO_1750,
   TEST_PROGRAM_TRIG_PULSE,
   buildShiftOutProgram,
+  buildSpiProgram,
   createAvrRunner,
 } from './avrRunner.js';
 import { buildNecEdges, createPeripheral } from './avrPeripherals.js';
@@ -137,6 +138,36 @@ describe('IR receiver peripheral', () => {
     expect(bytes).toEqual([0x00, 0xff, 0x1c, 0xe3]);
     expect(ir.observe().lastKey).toBe('5');
     expect(ir.level('OUT')).toBe(1); // released back to idle
+  });
+});
+
+describe('RFID reader peripheral', () => {
+  it('routes SPI frames to the MFRC522 model through the SDA chip select', () => {
+    // Read VersionReg over hardware SPI with CS on D10 (buildSpiProgram's CS).
+    const runner = createAvrRunner({ program: buildSpiProgram([0x80 | (0x37 << 1), 0x00]) });
+    const rfid = createPeripheral(
+      { kind: 'rfid_reader', owner: 'RF1', pins: { SDA: 'D10', MOSI: 'D11', MISO: 'D12', SCK: 'D13' } },
+      runner,
+      new Map(),
+    );
+    runner.run(20_000);
+    expect(runner.cpu.data[0x0101]).toBe(0x92); // second transfer returned the version
+    expect(rfid.observe()).toMatchObject({ cardPresent: false, uid: 'DE AD BE EF' });
+  });
+
+  it('presents the card for ~1.5 s after a tap', () => {
+    const runner = createAvrRunner({ program: TEST_PROGRAM_D13_HIGH });
+    const rfid = createPeripheral(
+      { kind: 'rfid_reader', owner: 'RF1', pins: { SDA: 'D10', MOSI: 'D11', MISO: 'D12', SCK: 'D13' } },
+      runner,
+      new Map(),
+    );
+    rfid.onControl('tap', 1);
+    expect(rfid.observe().cardPresent).toBe(true);
+    runner.run(1.4 * 16e6);
+    expect(rfid.observe().cardPresent).toBe(true);
+    runner.run(0.2 * 16e6);
+    expect(rfid.observe().cardPresent).toBe(false);
   });
 });
 

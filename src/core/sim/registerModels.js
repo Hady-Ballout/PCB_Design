@@ -215,6 +215,161 @@ export const createMcp3008 = (readChannelVolts) => {
   };
 };
 
+// ISO 14443-A CRC_A: reflected CRC-16 (poly 0x8408, init 0x6363, no final
+// XOR). Used by both the RC522's CalcCRC coprocessor and the PICC's SAK
+// response; low byte goes on the wire first. CRC_A([0x50,0x00]) = 0xCD57.
+export const crcA = (bytes) => {
+  let crc = 0x6363;
+  for (const byte of bytes) {
+    let b = (byte ^ crc) & 0xff;
+    b = (b ^ ((b << 4) & 0xff)) & 0xff;
+    crc = ((crc >> 8) ^ (b << 8) ^ (b << 3) ^ (b >> 4)) & 0xffff;
+  }
+  return crc;
+};
+
+// MFRC522 (RC522) over SPI: just enough register machine for the MFRC522
+// library's PCD_Init + PICC_IsNewCardPresent + PICC_ReadCardSerial +
+// PICC_HaltA. Wire framing: first byte after CS-low is ((addr<<1)|0x80) for
+// read / (addr<<1) for write; burst reads resend the address byte, burst
+// writes stream values to the same register (how FIFO reads/writes work).
+// Unmodelled registers read back their written value (a Map), which absorbs
+// the library's init writes (TxMode/RxMode/ModWidth/TMode/TxASK/antenna
+// read-modify-writes) without special cases.
+export const createMfrc522 = (getUid) => {
+  const regs = new Map();
+  let fifo = [];
+  let comIrq = 0; // 0x04 ComIrqReg: RxIRq 0x20, IdleIRq 0x10, TimerIRq 0x01
+  let divIrq = 0; // 0x05 DivIrqReg: CRCIRq 0x04
+  let command = 0;
+  let cardPresent = false;
+  let halted = false;
+  let frame = null; // { addr, isRead } latched from the first frame byte
+
+  const respond = (bytes) => {
+    fifo = [...bytes];
+    comIrq |= 0x30; // RxIRq | IdleIRq — transceive complete
+  };
+  const timeout = () => {
+    fifo = [];
+    comIrq |= 0x01; // TimerIRq — the library maps this to STATUS_TIMEOUT
+  };
+
+  const transceive = (data) => {
+    const uid = getUid();
+    if (data[0] === 0x26 || data[0] === 0x52) {
+      // REQA answers only idle cards; WUPA also wakes a halted one.
+      if (cardPresent && (data[0] === 0x52 || !halted)) {
+        if (data[0] === 0x52) halted = false;
+        respond([0x04, 0x00]); // ATQA: 4-byte UID, MIFARE Classic 1K
+      } else timeout();
+      return;
+    }
+    if (!cardPresent || halted) {
+      timeout();
+      return;
+    }
+    if (data[0] === 0x93 && data[1] === 0x20) {
+      // ANTICOLLISION CL1: UID + BCC.
+      respond([...uid, uid[0] ^ uid[1] ^ uid[2] ^ uid[3]]);
+      return;
+    }
+    if (data[0] === 0x93 && data[1] === 0x70) {
+      // SELECT: SAK 0x08 (MIFARE Classic 1K, UID complete) + its CRC_A.
+      const crc = crcA([0x08]);
+      respond([0x08, crc & 0xff, (crc >> 8) & 0xff]);
+      return;
+    }
+    if (data[0] === 0x50 && data[1] === 0x00) {
+      // HaltA: no response — the library treats the timeout as success.
+      halted = true;
+      timeout();
+      return;
+    }
+    timeout();
+  };
+
+  const readReg = (addr) => {
+    switch (addr) {
+      case 0x04: return comIrq;
+      case 0x05: return divIrq;
+      case 0x06: return 0; // ErrorReg: never a protocol/collision error
+      case 0x09: return fifo.shift() ?? 0;
+      case 0x0a: return fifo.length; // FIFOLevelReg
+      case 0x0c: return 0; // ControlReg: RxLastBits 0 = whole bytes
+      case 0x37: return 0x92; // VersionReg: RC522 v2
+      default: return regs.get(addr) ?? 0;
+    }
+  };
+
+  const writeReg = (addr, value) => {
+    switch (addr) {
+      case 0x01: // CommandReg
+        command = value & 0x0f;
+        if (command === 0x0f) { // SoftReset
+          fifo = [];
+          comIrq = 0;
+          divIrq = 0;
+          regs.clear();
+          command = 0;
+        } else if (command === 0x03) { // CalcCRC over the FIFO content
+          const crc = crcA(fifo);
+          regs.set(0x22, crc & 0xff); // CRCResultRegL
+          regs.set(0x21, (crc >> 8) & 0xff); // CRCResultRegH
+          fifo = [];
+          divIrq |= 0x04; // CRCIRq
+        }
+        break;
+      case 0x04: // Irq regs: bit 7 set = set bits, clear = clear bits
+        if (value & 0x80) comIrq |= value & 0x7f;
+        else comIrq &= ~value;
+        break;
+      case 0x05:
+        if (value & 0x80) divIrq |= value & 0x7f;
+        else divIrq &= ~value;
+        break;
+      case 0x09:
+        fifo.push(value);
+        break;
+      case 0x0a:
+        if (value & 0x80) fifo = []; // FlushBuffer
+        break;
+      case 0x0d: // BitFramingReg: StartSend fires a pending Transceive
+        regs.set(addr, value & 0x7f);
+        if ((value & 0x80) && command === 0x0c) {
+          const data = fifo;
+          fifo = [];
+          transceive(data);
+        }
+        break;
+      default:
+        regs.set(addr, value);
+    }
+  };
+
+  return {
+    spiDevice: {
+      onByte(mosi) {
+        if (frame == null) {
+          frame = { addr: (mosi >> 1) & 0x3f, isRead: Boolean(mosi & 0x80) };
+          return 0;
+        }
+        if (frame.isRead) return readReg(frame.addr);
+        writeReg(frame.addr, mosi);
+        return 0;
+      },
+      onDeselect() {
+        frame = null;
+      },
+    },
+    setCardPresent(present) {
+      cardPresent = present;
+      if (present) halted = false;
+    },
+    isCardPresent: () => cardPresent,
+  };
+};
+
 // WS2812 bitstream decoder: Adafruit's 16 MHz bit-bang emits ~5-cycle highs
 // for 0 and ~13-cycle highs for 1 (20 cycles per bit); a low gap ≥ 40 µs
 // (640 cycles) latches the frame. Bytes are MSB-first in GRB order.

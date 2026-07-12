@@ -52,7 +52,7 @@ const AVR_PERIPHERAL_KINDS = new Set([
   'servo', 'ultrasonic_sensor', 'dht_sensor', 'rotary_encoder',
   'oled_display', 'lcd_display', 'shift_register', 'keypad',
   'imu_sensor', 'rtc_module', 'baro_sensor', 'adc_module', 'led_strip',
-  'ir_receiver',
+  'ir_receiver', 'rfid_reader',
 ]);
 
 // Protocol pins per kind: which the MCU drives vs the module drives, which
@@ -90,14 +90,25 @@ const PERIPHERAL_PIN_SPECS = {
   imu_sensor: { required: ['SDA', 'SCL'], moduleDriven: ['SDA', 'SCL'], i2c: true },
   rtc_module: { required: ['SDA', 'SCL'], moduleDriven: ['SDA', 'SCL'], i2c: true },
   baro_sensor: { required: ['SDA', 'SCL'], moduleDriven: ['SDA', 'SCL'], i2c: true },
-  // MCP3008 rides hardware SPI: DIN↔MOSI(D11), DOUT↔MISO(D12), CLK↔SCK(D13);
-  // CS may be any Uno pin. CH0-7 read live circuit nets (no branches).
-  adc_module: { required: ['CS', 'DIN', 'DOUT', 'CLK'], moduleDriven: [], spi: true },
+  // SPI devices ride the hardware pins: the spec's `spi` map names which
+  // module pin plays each SPI role (MOSI↔D11, MISO↔D12, SCK↔D13; the CS role
+  // may land on any Uno pin). MCP3008: CH0-7 read live circuit nets.
+  adc_module: {
+    required: ['CS', 'DIN', 'DOUT', 'CLK'], moduleDriven: [],
+    spi: { mosi: 'DIN', miso: 'DOUT', sck: 'CLK', cs: 'CS' },
+  },
   // WS2812 strip: the MCU bit-bangs DIN; no display branch needed (the
   // mcu_pin branch already drives the net electrically).
   led_strip: { required: ['DIN'], moduleDriven: [] },
   // TSOP38xx: the module owns OUT (idle high, NEC marks low).
   ir_receiver: { required: ['OUT'], moduleDriven: ['OUT'], ownsInputs: ['OUT'] },
+  // RC522: SDA doubles as the SPI chip select. RST/IRQ are deliberately not
+  // required — RST toggling is plain GPIO the model ignores (SoftReset is the
+  // real reset) and the standard read-UID sketch never uses IRQ.
+  rfid_reader: {
+    required: ['SDA', 'MOSI', 'MISO', 'SCK'], moduleDriven: [],
+    spi: { mosi: 'MOSI', miso: 'MISO', sck: 'SCK', cs: 'SDA' },
+  },
 };
 
 // Module pin-name → fixedPins index (protocol pins only).
@@ -121,6 +132,7 @@ const PERIPHERAL_PIN_INDEX = {
   adc_module: { CS: 9, DIN: 10, DOUT: 11, CLK: 12 },
   led_strip: { DIN: 1 }, // [VCC, DIN, GND]
   ir_receiver: { OUT: 0 }, // [OUT, GND, VCC]
+  rfid_reader: { MISO: 4, MOSI: 5, SCK: 6, SDA: 7 }, // [3V3, RST, GND, IRQ, MISO, MOSI, SCK, SDA]
 };
 
 const KEYPAD_KEYS = ['1', '2', '3', 'A', '4', '5', '6', 'B', '7', '8', '9', 'C', '*', '0', '#', 'D'];
@@ -686,9 +698,11 @@ export const buildSimNetlist = (circuit, options = {}) => {
     // I2C devices ride the hardware TWI pins only: SDA must land on A4 and
     // SCL on A5 (Wire owns those; software-I2C wirings stay warned).
     if (wired && spec.i2c && !(pins.SDA === 'A4' && pins.SCL === 'A5')) wired = false;
-    // SPI devices likewise need the hardware pins: DIN↔MOSI(D11),
-    // DOUT↔MISO(D12), CLK↔SCK(D13); CS is any discovered Uno pin.
-    if (wired && spec.spi && !(pins.DIN === 'D11' && pins.DOUT === 'D12' && pins.CLK === 'D13')) wired = false;
+    // SPI devices likewise need the hardware pins — the spec's role map names
+    // which module pin must land on MOSI(D11)/MISO(D12)/SCK(D13); the CS-role
+    // pin is any discovered Uno pin.
+    if (wired && spec.spi && !(
+      pins[spec.spi.mosi] === 'D11' && pins[spec.spi.miso] === 'D12' && pins[spec.spi.sck] === 'D13')) wired = false;
     if (!wired) {
       warnOnce('module_not_simulated', `${part.ref} (${kindLabel(part.kind)}) is a wiring-only module — not simulated`);
       continue;
@@ -719,6 +733,8 @@ export const buildSimNetlist = (circuit, options = {}) => {
       for (const key of KEYPAD_KEYS) {
         controls.push({ ref: part.ref, kind: part.kind, type: 'matrix-key', name: `key_${key}`, value: 0 });
       }
+    } else if (part.kind === 'rfid_reader') {
+      controls.push({ ref: part.ref, kind: part.kind, type: 'button', name: 'tap', value: 0, label: 'Tap card' });
     } else if (part.kind === 'ir_receiver') {
       // Rendered as one remote widget by the stimulus panel (grouped by ref).
       for (let key = 1; key <= 9; key += 1) {

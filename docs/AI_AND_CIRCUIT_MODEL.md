@@ -399,6 +399,21 @@ address (`i2c_address_conflict` warning — IMU and RTC both live at 0x68, first
 one per accepted UART window into `usart.writeByte` (no `Serial.begin` → the queue waits).
 **WS2812 strip**: DIN port-writes are decoded at cycle resolution (pulse >10 cycles = 1,
 ≥640-cycle gap latches, GRB order) into up to 30 live pixels on the strip artwork.
+**Tier 2c — RFID reader.** `rfid_reader` (RC522) rides the SPI router with **SDA as the
+chip select** — the hardware-SPI gate is now role-mapped per kind (`spi: {mosi, miso,
+sck, cs}` in `PERIPHERAL_PIN_SPECS`; MOSI↔D11, MISO↔D12, SCK↔D13, the CS-role pin
+anywhere). `createMfrc522` (registerModels.js) models just enough of the register map for
+the MFRC522 library's read-UID flow: VersionReg 0x92, FIFO + FlushBuffer, Com/DivIrq
+set/clear semantics, a synchronous CalcCRC coprocessor (real ISO 14443-A CRC_A,
+poly 0x8408 init 0x6363), and a Transceive dispatcher answering REQA/WUPA → ATQA
+`04 00`, ANTICOLL CL1 → UID+BCC, SELECT → SAK `08`+CRC, HaltA → halted (timeout =
+success; WUPA re-wakes). Unknown registers read back their written values, absorbing
+library init writes across versions. A **"Tap card"** button presents the fixed UID
+`DE AD BE EF` for ~1.5 s of sim time (a white card overlays the breakout artwork).
+RST/IRQ are electrically ordinary GPIO nets the model ignores; the module is not
+power-gated (consistent with all bridge peripherals — documented limitation). Needs the
+`MFRC522` library installed.
+
 **Tier 2c — IR receiver.** `ir_receiver` (TSOP38xx) joins the bridge: the stimulus panel
 shows a **3×3 IR remote widget** (one per receiver, keys 1-9 with the HX1838/Elegoo NEC
 command bytes IRremote tutorials print — `1:0x0C … 9:0x4A`, address 0x00). A key press
@@ -410,7 +425,7 @@ excluded from the rebuild replay memory in `useSimulation.js` so a mid-run circu
 doesn't ghost-repeat the last press. Compiling IRremote sketches needs the `IRremote`
 library (Dockerfile / docs/OPERATIONS.md).
 
-Still deferred: `sd_card` (FAT), `rfid_reader` (RC522).
+Still deferred: `sd_card` (FAT).
 
 Solver notes: junction limiting (pnjlim) must veto NR convergence — with an LED off-seed,
 node voltages sit nearly still for ~10 iterations while the junction linearization climbs

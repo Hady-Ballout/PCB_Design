@@ -3,9 +3,11 @@ import {
   createBmp280,
   createDs3231,
   createMcp3008,
+  createMfrc522,
   createMpu6050,
   createRegisterSlave,
   createWs2812Decoder,
+  crcA,
 } from './registerModels.js';
 
 // Wire-style access: pointer write, then an N-byte burst read.
@@ -85,6 +87,100 @@ describe('createDs3231', () => {
     expect(rtc.text()).toBe('2027-06-15 12:34:56');
     // lostPower() reads OSF clear.
     expect(burstRead(rtc.i2cSlave, 0x0f, 1)).toEqual([0x00]);
+  });
+});
+
+describe('createMfrc522', () => {
+  // CS-framed SPI access, mirroring MFRC522.cpp's PCD_Read/WriteRegister.
+  const spiRead = (device, reg) => {
+    device.onByte(0x80 | ((reg << 1) & 0x7e));
+    const value = device.onByte(0x00);
+    device.onDeselect();
+    return value;
+  };
+  const spiWrite = (device, reg, ...values) => {
+    device.onByte((reg << 1) & 0x7e);
+    for (const value of values) device.onByte(value);
+    device.onDeselect();
+  };
+  // The library's PCD_CommunicateWithPICC write sequence.
+  const transceive = (device, bytes) => {
+    spiWrite(device, 0x01, 0x00); // Idle
+    spiWrite(device, 0x04, 0x7f); // clear ComIrq
+    spiWrite(device, 0x0a, 0x80); // flush FIFO
+    spiWrite(device, 0x09, ...bytes);
+    spiWrite(device, 0x0d, 0x00); // bit framing
+    spiWrite(device, 0x01, 0x0c); // Transceive
+    spiWrite(device, 0x0d, 0x80); // StartSend
+    const irq = spiRead(device, 0x04);
+    const level = spiRead(device, 0x0a);
+    const data = Array.from({ length: level }, () => spiRead(device, 0x09));
+    return { irq, data };
+  };
+  const UID = [0xde, 0xad, 0xbe, 0xef];
+  const freshReader = () => createMfrc522(() => UID);
+
+  it('computes the ISO 14443-A CRC_A (halt-frame vector)', () => {
+    expect(crcA([0x50, 0x00])).toBe(0xcd57); // wire bytes 0x57, 0xCD
+  });
+
+  it('answers the version register with 0x92 and reads back init writes', () => {
+    const { spiDevice } = freshReader();
+    expect(spiRead(spiDevice, 0x37)).toBe(0x92);
+    spiWrite(spiDevice, 0x14, 0x03); // TxControlReg (antenna on)
+    expect(spiRead(spiDevice, 0x14)).toBe(0x03);
+  });
+
+  it('runs the CRC coprocessor over the FIFO into the result registers', () => {
+    const { spiDevice } = freshReader();
+    spiWrite(spiDevice, 0x01, 0x00);
+    spiWrite(spiDevice, 0x05, 0x04); // clear CRCIRq
+    spiWrite(spiDevice, 0x0a, 0x80);
+    spiWrite(spiDevice, 0x09, 0x50, 0x00);
+    spiWrite(spiDevice, 0x01, 0x03); // CalcCRC
+    expect(spiRead(spiDevice, 0x05) & 0x04).toBe(0x04);
+    expect(spiRead(spiDevice, 0x22)).toBe(0x57); // CRCResultRegL
+    expect(spiRead(spiDevice, 0x21)).toBe(0xcd); // CRCResultRegH
+  });
+
+  it('times out REQA without a card and answers ATQA with one', () => {
+    const reader = freshReader();
+    const missed = transceive(reader.spiDevice, [0x26]);
+    expect(missed.irq & 0x01).toBe(0x01); // TimerIRq → STATUS_TIMEOUT
+    expect(missed.data).toEqual([]);
+    reader.setCardPresent(true);
+    const hit = transceive(reader.spiDevice, [0x26]);
+    expect(hit.irq & 0x30).toBe(0x30); // RxIRq | IdleIRq
+    expect(hit.data).toEqual([0x04, 0x00]);
+  });
+
+  it('serves the anticollision cascade and a CRC-valid SAK', () => {
+    const reader = freshReader();
+    reader.setCardPresent(true);
+    const anticoll = transceive(reader.spiDevice, [0x93, 0x20]);
+    expect(anticoll.data).toEqual([...UID, UID[0] ^ UID[1] ^ UID[2] ^ UID[3]]);
+    const bcc = anticoll.data[4];
+    const select = transceive(reader.spiDevice, [0x93, 0x70, ...UID, bcc, 0x00, 0x00]);
+    const crc = crcA([0x08]);
+    expect(select.data).toEqual([0x08, crc & 0xff, (crc >> 8) & 0xff]);
+  });
+
+  it('halts on HaltA: REQA goes silent, WUPA re-wakes the card', () => {
+    const reader = freshReader();
+    reader.setCardPresent(true);
+    const halt = transceive(reader.spiDevice, [0x50, 0x00, 0x57, 0xcd]);
+    expect(halt.irq & 0x01).toBe(0x01); // timeout = halt success
+    expect(transceive(reader.spiDevice, [0x26]).irq & 0x01).toBe(0x01);
+    const woken = transceive(reader.spiDevice, [0x52]);
+    expect(woken.data).toEqual([0x04, 0x00]);
+    expect(transceive(reader.spiDevice, [0x26]).data).toEqual([0x04, 0x00]);
+  });
+
+  it('resets frame state on deselect mid-frame', () => {
+    const { spiDevice } = freshReader();
+    spiDevice.onByte(0x80 | (0x37 << 1)); // start a read, never finish it
+    spiDevice.onDeselect();
+    expect(spiRead(spiDevice, 0x37)).toBe(0x92);
   });
 });
 
