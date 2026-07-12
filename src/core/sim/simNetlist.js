@@ -41,7 +41,7 @@ const SEVEN_SEGMENT_SEGMENTS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'DP'];
 // Tier-2c driver/motion modules (their pins are switched by node voltages).
 const SIMULATED_MODULE_KINDS = new Set([
   'relay_module', 'temp_sensor', 'pir_sensor', 'soil_moisture', 'gas_sensor', 'sound_sensor', 'hall_sensor',
-  'stepper_driver', 'stepper_motor',
+  'stepper_driver', 'stepper_motor', 'motor_driver',
 ]);
 
 // Protocol modules that ride the Arduino firmware bridge at cycle resolution
@@ -492,6 +492,34 @@ export const buildSimNetlist = (circuit, options = {}) => {
           type: 'stepper_motor', id: `${ref}_TRK`, owner: ref, kind,
           coils, com,
           state: { patternIndex: null, halfSteps: 0, angle: 0 },
+        });
+        break;
+      }
+      case 'motor_driver': {
+        // L298N: two independent H-bridge channels, event-updated from the
+        // solved EN/IN node voltages. Each OUT switches to the VS or GND net
+        // through 2 Ω when its channel is enabled (≈2 V total bridge drop at
+        // 1 A across a pair — close to the real L298), floats (10 MΩ) when
+        // disabled. Unwired EN pins default enabled — real boards ship with
+        // the EN jumpers on.
+        // fixedPins: [VS, GND, ENA, IN1, IN2, ENB, IN3, IN4, OUT1..OUT4].
+        const idx = (i) => (isUnconnectedTerminal(nodes[i], ref, i + 1) ? null : indexOf(nodes[i]));
+        const vs = idx(0);
+        const gndNode = indexOf(nodes[1]);
+        // High-value ties keep floating/input-mode control pins solvable, and
+        // the board's own electronics load VS quiescently.
+        [2, 3, 4, 5, 6, 7].forEach((i) => {
+          const node = idx(i);
+          if (node != null) addResistor(`${ref}__t${i + 1}`, ref, 'motor_driver_tie', node, gndNode, 10e3);
+        });
+        if (vs != null) addResistor(`${ref}__q`, ref, 'motor_driver_tie', vs, gndNode, 10e3);
+        devices.push({
+          type: 'motor_driver', id: ref, owner: ref, kind, vs, gnd: gndNode,
+          channels: [
+            { en: idx(2), enConnected: idx(2) != null, inA: idx(3), inB: idx(4), outA: idx(8), outB: idx(9) },
+            { en: idx(5), enConnected: idx(5) != null, inA: idx(6), inB: idx(7), outA: idx(10), outB: idx(11) },
+          ],
+          state: { ch: [{ en: true, inA: false, inB: false }, { en: true, inA: false, inB: false }] },
         });
         break;
       }

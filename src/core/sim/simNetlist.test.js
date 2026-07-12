@@ -122,6 +122,24 @@ describe('buildSimNetlist', () => {
     expect(netlist.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
   });
 
+  it('emits the L298N with unwired enables defaulting to on', () => {
+    const nodes = ['VS', '0', 'NC_U3_3', 'VIN1', 'VIN2', 'NC_U3_6', 'NC_U3_7', 'NC_U3_8', 'VO1', 'VO2', 'NC_U3_11', 'NC_U3_12'];
+    const netlist = buildSimNetlist(circuitOf(withSupply([
+      { ref: 'U3', kind: 'motor_driver', value: '', nodes },
+    ])));
+    expect(netlist.ok).toBe(true);
+    const record = netlist.devices.find((device) => device.id === 'U3');
+    expect(record).toMatchObject({ type: 'motor_driver' });
+    expect(record.channels[0].enConnected).toBe(false);
+    expect(record.channels[0].outA).not.toBeNull();
+    expect(record.channels[1].inA).toBeNull();
+    // Quiescent VS load present; no tie for the unwired ENA.
+    expect(netlist.devices.some((device) => device.id === 'U3__q')).toBe(true);
+    expect(netlist.devices.some((device) => device.id === 'U3__t3')).toBe(false);
+    expect(netlist.devices.some((device) => device.id === 'U3__t4')).toBe(true);
+    expect(netlist.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
+  });
+
   it('maps the zener breakdown voltage from its value', () => {
     const netlist = buildSimNetlist(circuitOf(withSupply([
       { ref: 'D1', kind: 'zener', value: '9.1V', nodes: ['VCC', '0'] },

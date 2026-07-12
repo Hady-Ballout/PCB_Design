@@ -99,7 +99,7 @@ export const createSimulation = (circuit, options = {}) => {
   }
 
   const NR_TYPES = new Set(['diode', 'bjt', 'mosfet', 'opamp']);
-  const EVENT_TYPES = new Set(['comparator', 'timer_555', 'opto_out', 'stepper_driver', 'stepper_motor']);
+  const EVENT_TYPES = new Set(['comparator', 'timer_555', 'opto_out', 'stepper_driver', 'stepper_motor', 'motor_driver']);
   const nrDevices = devices.filter((device) => NR_TYPES.has(device.type));
   for (const device of nrDevices) {
     if (device.type === 'diode') {
@@ -433,6 +433,20 @@ export const createSimulation = (circuit, options = {}) => {
           }
           break;
         }
+        case 'motor_driver': {
+          // Per-channel H-bridge: enabled OUTs switch to the VS/GND nets
+          // through 2 Ω; disabled OUTs float behind 10 MΩ (coast).
+          device.channels.forEach((channel, index) => {
+            const st = device.state.ch[index];
+            for (const [out, inHigh] of [[channel.outA, st.inA], [channel.outB, st.inB]]) {
+              if (out == null) continue;
+              const target = inHigh ? device.vs : device.gnd;
+              if (st.en && target != null) stampConductance(out, target, 1 / 2);
+              else stampConductance(out, device.gnd, 1 / 10e6);
+            }
+          });
+          break;
+        }
         case 'relay': {
           const energized = device.state.energized;
           stampConductance(device.com, device.no, 1 / (energized ? 0.05 : 10e6));
@@ -617,6 +631,26 @@ export const createSimulation = (circuit, options = {}) => {
             changed = true;
           }
         }
+      } else if (device.type === 'motor_driver') {
+        // Latch each channel's EN/IN levels with the usual 2.5/2.3 V
+        // hysteresis; an unwired EN stays enabled (jumpered board).
+        device.channels.forEach((channel, index) => {
+          const st = device.state.ch[index];
+          const level = (node, prev) => {
+            if (node == null) return false;
+            const drive = atX(node) - atX(device.gnd);
+            return prev ? drive > 2.3 : drive > 2.5;
+          };
+          const en = channel.enConnected ? level(channel.en, st.en) : true;
+          const inA = level(channel.inA, st.inA);
+          const inB = level(channel.inB, st.inB);
+          if (en !== st.en || inA !== st.inA || inB !== st.inB) {
+            st.en = en;
+            st.inA = inA;
+            st.inB = inB;
+            changed = true;
+          }
+        });
       } else if (device.type === 'stepper_motor') {
         // Shaft tracker: sample which coils are pulled low (energized) and
         // walk the half-step ring. Stamps nothing, so it never reports a

@@ -442,6 +442,36 @@ describe('createSimulation — polish devices (M4)', () => {
     expect(volts(idle, 'VOUTA')).toBeGreaterThan(4.9);
   });
 
+  it('switches the L298N outputs by IN polarity and coasts when disabled', () => {
+    // [VS, GND, ENA, IN1, IN2, ENB, IN3, IN4, OUT1..OUT4]
+    const build = (inHigh, enaNet = 'NC_U3_3') => createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VS', '0'] },
+      { ref: 'V2', kind: 'voltage_source', value: '5V', nodes: ['VDRIVE', '0'] },
+      {
+        ref: 'U3', kind: 'motor_driver', value: '',
+        nodes: ['VS', '0', enaNet, inHigh === 'A' ? 'VDRIVE' : '0', inHigh === 'B' ? 'VDRIVE' : '0',
+          'NC_U3_6', 'NC_U3_7', 'NC_U3_8', 'VO1', 'VO2', 'NC_U3_11', 'NC_U3_12'],
+      },
+      { ref: 'M1', kind: 'dc_motor', value: '', nodes: ['VO1', 'VO2'] },
+    ]));
+
+    const forward = build('A');
+    expect(forward.solveDC()).toBe(true);
+    // 12 V through 2+2 Ω bridge into the 10 Ω winding: ~8.6 V across it.
+    expect(volts(forward, 'VO1') - volts(forward, 'VO2')).toBeGreaterThan(8);
+    expect(forward.observables().get('M1').speed01).toBeGreaterThan(0.9);
+
+    const reverse = build('B');
+    expect(reverse.solveDC()).toBe(true);
+    expect(volts(reverse, 'VO2') - volts(reverse, 'VO1')).toBeGreaterThan(8);
+
+    // ENA wired to ground: both outputs float — the motor coasts.
+    const coast = build('A', '0');
+    expect(coast.solveDC()).toBe(true);
+    expect(Math.abs(volts(coast, 'VO1') - volts(coast, 'VO2'))).toBeLessThan(0.1);
+    expect(coast.observables().get('M1').speed01).toBeLessThan(0.05);
+  });
+
   it('drives the current-sensor OUT at 2.5 V + 185 mV/A', () => {
     const engine = createSimulation(circuitOf([
       { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
