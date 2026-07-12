@@ -160,6 +160,14 @@ renderer sizes the grid from `diagram.slotLayout` (falling back to
 | `editors` | `editorConfig.js`, `firmwareInfo.js` | Editor window labels/keys and split-pane persistence (`EDITOR_SPLIT_STORAGE_KEY`, `loadEditorSplit`) — the editor windows themselves render inside `App.jsx`. Views: `spice`, `json`, `code` ("Code") — an editable firmware tab fed by the AI response's optional `code` field, with Reset/Download (`firmwareInfo.js` maps the circuit's first MCU board to language/filename: Uno/ESP32 → `sketch.ino` Arduino C++, Pi → `gpio_script.py` gpiozero; a no-MCU circuit shows a placeholder; revision changes show the same diff + accept/reject flow as SPICE via `pendingCodeChange`) — `canvas`, `blockSchematic` ("new schematic test") — a scaffold tab for an alternate block-based schematic (rectangle-per-component with pins on one side) — and `realisticSchematic` ("Realistic schematic") — an interactive breadboard editor (pan/zoom, pin-drag rewiring, part-drag placement, live Run-mode simulation) with photo-style parts |
 | `waveform` | `WaveformChart.jsx` | Custom SVG chart: trace toggles, zoom/pan, hover readout, CSV export, collapsible Ngspice log |
 
+Audio lifecycle note: the current `simAudio.js` service is explicitly started from the
+Run gesture before any asynchronous Uno firmware compile, rather than being created by a
+later effect. This keeps Web Audio autoplay-safe. Values containing `passive` or `piezo`
+require a detected waveform frequency; active and legacy-unlabeled buzzers use a 2.4 kHz
+fallback under DC drive. The Run toolbar exposes a persisted Sound/Muted toggle, circuit
+edits stop stale oscillator voices, and unavailable Web Audio degrades to silent electrical
+simulation.
+
 ## Persistence model
 
 Everything user-facing is `localStorage`-backed (no server-side chat storage): the chat

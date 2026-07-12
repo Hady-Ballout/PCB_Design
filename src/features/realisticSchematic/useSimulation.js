@@ -5,9 +5,18 @@
 // transform in RealisticSchematic.jsx.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createSimulation } from '../../core/sim/simEngine.js';
-import { createSimAudio } from './simAudio.js';
+import { buzzerAudioConfig, createSimAudio } from './simAudio.js';
 
 const FRAME_BUDGET_MS = 4;
+export const SIM_AUDIO_MUTED_STORAGE_KEY = 'prompt-to-pcb-sim-audio-muted-v1';
+
+const loadAudioMuted = () => {
+  try {
+    return globalThis.localStorage?.getItem(SIM_AUDIO_MUTED_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+};
 
 // Event-style controls (encoder detents, button presses, IR keys) fire once;
 // remembering them would replay the last press on every engine rebuild.
@@ -21,17 +30,37 @@ export function useSimulation(circuit, running, mcu = null) {
   const audioRef = useRef(null);
   const [simFrame, setSimFrame] = useState(null);
   const [controls, setControls] = useState([]);
+  const [audioMuted, setAudioMutedState] = useState(loadAudioMuted);
 
-  // Audio lives for the whole Run session (keyed on `running` alone) so
-  // engine rebuilds from mid-run circuit edits don't click the tone off.
+  const stopAudio = useCallback(() => {
+    audioRef.current?.stop();
+    audioRef.current = null;
+  }, []);
+
+  // Called directly by the Run click before any asynchronous firmware compile.
+  // The service then lives for the whole Run session, so engine rebuilds from
+  // mid-run circuit edits do not click the tone off.
+  const enableAudio = useCallback(() => {
+    if (!(circuit?.components ?? []).some((component) => component.kind === 'buzzer')) return false;
+    audioRef.current ??= createSimAudio();
+    audioRef.current.setMuted(audioMuted);
+    return audioRef.current.start();
+  }, [audioMuted, circuit]);
+
+  const setAudioMuted = useCallback((value) => {
+    const next = Boolean(value);
+    setAudioMutedState(next);
+    audioRef.current?.setMuted(next);
+    try {
+      globalThis.localStorage?.setItem(SIM_AUDIO_MUTED_STORAGE_KEY, String(next));
+    } catch { /* storage can be disabled without disabling simulation */ }
+  }, []);
+
   useEffect(() => {
-    if (!running) return undefined;
-    audioRef.current = createSimAudio();
-    return () => {
-      audioRef.current?.stop();
-      audioRef.current = null;
-    };
-  }, [running]);
+    if (!running) stopAudio();
+  }, [running, stopAudio]);
+
+  useEffect(() => () => stopAudio(), [stopAudio]);
 
   const snapshot = useCallback(() => {
     const engine = engineRef.current;
@@ -64,6 +93,7 @@ export function useSimulation(circuit, running, mcu = null) {
     // Debug hook: lets the console (and dev harnesses) poke the live engine.
     if (typeof window !== 'undefined') window.__simEngine = engine;
     if (!engine.ok) {
+      audioRef.current?.update(new Map(), []);
       setSimFrame({
         time: 0,
         speed: 0,
@@ -86,9 +116,9 @@ export function useSimulation(circuit, running, mcu = null) {
     }
     setControls(engine.controls);
 
-    const buzzerRefs = (circuit?.components ?? [])
+    const buzzers = (circuit?.components ?? [])
       .filter((component) => component.kind === 'buzzer')
-      .map((component) => component.ref);
+      .map(buzzerAudioConfig);
 
     let raf = 0;
     let lastTick = 0;
@@ -101,7 +131,7 @@ export function useSimulation(circuit, running, mcu = null) {
       if (frameParity === 0) {
         const frame = snapshot();
         setSimFrame(frame);
-        audioRef.current?.update(frame.observables, buzzerRefs);
+        audioRef.current?.update(frame.observables, buzzers);
       }
       raf = requestAnimationFrame(tick);
     };
@@ -123,5 +153,14 @@ export function useSimulation(circuit, running, mcu = null) {
     engineRef.current?.sendSerial?.(text);
   }, []);
 
-  return { simFrame, setControl, controls, sendSerial };
+  return {
+    simFrame,
+    setControl,
+    controls,
+    sendSerial,
+    audioMuted,
+    enableAudio,
+    stopAudio,
+    setAudioMuted,
+  };
 }

@@ -13,6 +13,7 @@ import { RealisticSchematic } from './RealisticSchematic.jsx';
 import { circuitToBreadboard } from './breadboardModel.js';
 import { holeCenter } from './breadboardGeometry.js';
 import { ALLOWED_KINDS } from '../../core/componentKinds.js';
+import { SIM_AUDIO_MUTED_STORAGE_KEY } from './useSimulation.js';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -31,6 +32,36 @@ const model = circuitToBreadboard(dividerCircuit);
 let container;
 let root;
 let rafSpy;
+
+const installFakeAudioContext = () => {
+  const instances = [];
+  class FakeAudioContext {
+    constructor() {
+      this.state = 'running';
+      this.currentTime = 0;
+      this.destination = {};
+      this.close = vi.fn(() => Promise.resolve());
+      instances.push(this);
+    }
+
+    createOscillator() {
+      return {
+        type: '',
+        frequency: { setValueAtTime: vi.fn() },
+        connect: vi.fn(), start: vi.fn(), stop: vi.fn(),
+      };
+    }
+
+    createGain() {
+      return {
+        gain: { value: 0, setTargetAtTime: vi.fn() },
+        connect: vi.fn(),
+      };
+    }
+  }
+  vi.stubGlobal('AudioContext', FakeAudioContext);
+  return instances;
+};
 
 const mount = (props) => {
   container = document.createElement('div');
@@ -55,6 +86,7 @@ const firePointer = (target, type, { clientX = 0, clientY = 0, pointerId = 1, bu
 const worldTransform = () => container.querySelector('.rs-world').getAttribute('transform');
 
 beforeEach(() => {
+  localStorage.clear();
   rafSpy = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => { cb(0); return 1; });
   vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => {});
 });
@@ -64,6 +96,7 @@ afterEach(() => {
   container?.remove();
   rafSpy.mockRestore();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe('breadboard navigation', () => {
@@ -332,6 +365,24 @@ describe('live simulation (Run mode)', () => {
     expect(container.querySelector('.realistic-sim-status').textContent).toBe('live');
   });
 
+  it('unlocks buzzer audio from Run and persists the mute preference', () => {
+    const contexts = installFakeAudioContext();
+    mountRunning({
+      title: 'Active buzzer',
+      nodes: ['VCC', '0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'BZ1', kind: 'buzzer', value: '5V active', nodes: ['VCC', '0'] },
+      ],
+    });
+    expect(contexts).toHaveLength(1);
+    const audioToggle = container.querySelector('.realistic-audio-toggle');
+    expect(audioToggle.getAttribute('aria-pressed')).toBe('false');
+    act(() => { audioToggle.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(audioToggle.getAttribute('aria-pressed')).toBe('true');
+    expect(localStorage.getItem(SIM_AUDIO_MUTED_STORAGE_KEY)).toBe('true');
+  });
+
   it('offers the voltage-map overlay only while running and layers it under the highlight', () => {
     mountRunning(dividerCircuit);
     const vmap = container.querySelector('.realistic-vmap');
@@ -533,6 +584,27 @@ describe('live simulation (Run mode)', () => {
     });
     expect(container.querySelector('.realistic-sim-banner.error').textContent).toContain("sketch.ino:5:3: error");
     expect(container.querySelector('.realistic-run').textContent).toContain('Run');
+  });
+
+  it('unlocks buzzer audio before awaiting firmware compilation and cleans up on failure', async () => {
+    const contexts = installFakeAudioContext();
+    const circuit = {
+      ...unoBlinkCircuit,
+      components: [
+        ...unoBlinkCircuit.components,
+        { ref: 'BZ1', kind: 'buzzer', value: '5V active', nodes: ['VPIN', '0'] },
+      ],
+    };
+    const compile = vi.fn(() => {
+      expect(contexts).toHaveLength(1);
+      return Promise.resolve({ ok: false, errors: ['compile stopped'] });
+    });
+    mountFirmware(circuit, compile);
+    await act(async () => {
+      container.querySelector('.realistic-run').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(compile).toHaveBeenCalledOnce();
+    expect(contexts[0].close).toHaveBeenCalledOnce();
   });
 
   it('sends typed serial input to the engine', async () => {

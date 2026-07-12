@@ -508,6 +508,11 @@
   background: #ffd43b;
 }
 
+.realistic-audio-toggle.muted {
+  background: #e9ecef;
+  color: var(--color-text-muted);
+}
+
 /* Serial monitor strip (Uno firmware simulation). */
 .realistic-serial {
   background: var(--color-surface);

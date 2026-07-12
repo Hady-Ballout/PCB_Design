@@ -35,7 +35,7 @@ const CLICK_MOVE_THRESHOLD = 3; // viewBox px of drag below which a press is a c
 // that model); see docs/AI_AND_CIRCUIT_MODEL.md.
 const DEFAULT_VALUE_BY_KIND = {
   resistor: '1k', load: '1k', photoresistor: '10k', thermistor: '10k', potentiometer: '10k',
-  capacitor: '100nF', inductor: '10mH', crystal: '16MHz',
+  capacitor: '100nF', inductor: '10mH', crystal: '16MHz', buzzer: '5V active',
   diode: '1N4148', zener: '5.1V', led: 'red',
   schottky: '1N5819', fuse: '1A', bridge_rectifier: 'DB107', vibration_motor: '3V',
   bjt_npn: '2N2222', bjt_pnp: '2N2907',
@@ -91,16 +91,30 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
   const [compiling, setCompiling] = useState(false);
   const [compileError, setCompileError] = useState(null);
   const [mcu, setMcu] = useState(null); // { hex } | { program } for the Uno bridge
-  const { simFrame, setControl, controls, sendSerial } = useSimulation(circuit, running, mcu);
+  const {
+    simFrame,
+    setControl,
+    controls,
+    sendSerial,
+    audioMuted,
+    enableAudio,
+    stopAudio,
+    setAudioMuted,
+  } = useSimulation(circuit, running, mcu);
 
   // Run with firmware: compile first (cached per chat by code hash), then
   // start the engine with the avr8js bridge attached.
   const hasUno = (circuit?.components ?? []).some((part) => part.kind === 'arduino_uno');
+  const hasBuzzer = (circuit?.components ?? []).some((part) => part.kind === 'buzzer');
   const toggleRun = async () => {
     if (running) {
+      stopAudio();
       setRunning(false);
       return;
     }
+    // Keep this before the first await: browsers only allow AudioContext to be
+    // unlocked while the Run click's user activation is still current.
+    enableAudio();
     setCompileError(null);
     if (hasUno && firmware?.trim() && typeof onCompileFirmware === 'function') {
       setCompiling(true);
@@ -108,11 +122,13 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
         const result = await onCompileFirmware(firmware);
         if (!result?.ok) {
           setCompileError((result?.errors ?? ['Compilation failed.']).join('\n'));
+          stopAudio();
           return;
         }
         setMcu({ hex: result.hex });
       } catch (error) {
         setCompileError(String(error?.message ?? error));
+        stopAudio();
         return;
       } finally {
         setCompiling(false);
@@ -614,6 +630,18 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
             title="Tint tie groups and rails by their live voltage (blue 0V → red max)"
           >
             V map
+          </button>
+        )}
+        {running && hasBuzzer && (
+          <button
+            type="button"
+            className={`realistic-audio-toggle ${audioMuted ? 'muted' : ''}`}
+            aria-label={audioMuted ? 'Unmute simulated buzzer sound' : 'Mute simulated buzzer sound'}
+            aria-pressed={audioMuted}
+            onClick={() => setAudioMuted(!audioMuted)}
+            title={audioMuted ? 'Unmute simulated buzzer sound' : 'Mute simulated buzzer sound'}
+          >
+            {audioMuted ? '🔇 Muted' : '🔊 Sound'}
           </button>
         )}
         <button type="button" onClick={() => zoomAround(centerAnchor(), 1 / 1.25)}>−</button>

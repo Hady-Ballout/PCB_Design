@@ -308,7 +308,7 @@ page agree numerically. Where they intentionally differ:
 | fuse | fixed resistor | same resistance **plus i²t blow**: sustained current above 2× `parseAmps(value, 1)` opens it (instantly at DC, after 10 ms in transient); broken-glass artwork, resets on Stop/Run ("replace the fuse") |
 | current_sensor | shunt only, no OUT drive | shunt **plus the ACS712 analog output**: OUT driven at 2.5 V + 185 mV/A of shunt current when VCC/OUT/GND are wired |
 | solar_panel | ideal DC source | ideal source behind **5 Ω** — panels sag under load (and survive a short at V/5Ω instead of a singular matrix) |
-| buzzer / motors | plain resistors | plain resistors **plus observables**: buzzer frequency detection (rising-1V-crossing timestamps → Web Audio tone in the UI), motor `speed01` from drive voltage vs rated (6 V dc / 3 V vibration) → spin/shake animation |
+| buzzer / motors | plain resistors | plain resistors **plus observables**: buzzer frequency detection (rising-1V-crossing timestamps → Web Audio tone in the UI); values containing `passive`/`piezo` sound only with a detected waveform, while active or legacy-unlabeled buzzers use 2.4 kHz for DC drive. The Run gesture unlocks browser audio before firmware compilation, and the toolbar provides a persisted mute toggle. Motor `speed01` comes from drive voltage vs rated (6 V dc / 3 V vibration) → spin/shake animation |
 | analysis | one-shot `.tran 0.1ms 20ms` + `.op` | backward-Euler from a zero state (power-on transient is visible), real-time-paced with a per-frame budget and a speed chip |
 
 Event-state devices (comparator, 555 latch, opto switch, regulator dropout) update
