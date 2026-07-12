@@ -45,6 +45,25 @@ export const variableOhms = (device, state = {}) => {
   }
 };
 
+// 28BYJ-48 half-step ring: energized-coil bitmask (A=bit0 … D=bit3) per
+// electrical position. Full-stepping firmware (Stepper.h) lands on the
+// two-coil entries (index delta ±2); half-stepping walks every entry (±1).
+export const HALF_STEP_MASKS = [0b0001, 0b0011, 0b0010, 0b0110, 0b0100, 0b1100, 0b1000, 0b1001];
+
+// Advance the shaft tracker: match the sampled coil mask against the ring and
+// return the signed half-step delta. All-off (hold), unknown masks, and jumps
+// beyond a full step (sampling glitches) contribute no rotation.
+export const stepperStepDelta = (prevIndex, mask) => {
+  const index = HALF_STEP_MASKS.indexOf(mask);
+  if (index === -1) return { index: prevIndex, delta: 0 };
+  if (prevIndex == null) return { index, delta: 0 };
+  let delta = index - prevIndex;
+  if (delta > 4) delta -= 8;
+  else if (delta < -4) delta += 8;
+  if (Math.abs(delta) > 2) return { index, delta: 0 };
+  return { index, delta };
+};
+
 // SPICE pnjlim: damp NR steps on an exponential junction so exp() never runs
 // away. vte = n·VT for the junction.
 export const limitJunction = (vnew, vold, vte, vcrit) => {

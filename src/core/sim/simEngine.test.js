@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { COMPONENT_KINDS, DEFAULT_PIN_COUNT_BY_KIND } from '../componentKinds.js';
-import { TEST_PROGRAM_D13_BLINK, TEST_PROGRAM_D13_HIGH, TEST_PROGRAM_RX_ENABLE, TEST_PROGRAM_SERVO_1750, TEST_PROGRAM_TRIG_PULSE, buildShiftOutProgram, buildSpiProgram, buildWs2812Program } from './avrRunner.js';
+import { TEST_PROGRAM_D13_BLINK, TEST_PROGRAM_D13_HIGH, TEST_PROGRAM_RX_ENABLE, TEST_PROGRAM_SERVO_1750, TEST_PROGRAM_TRIG_PULSE, buildShiftOutProgram, buildSpiProgram, buildStepperProgram, buildWs2812Program } from './avrRunner.js';
 import { createSimulation } from './simEngine.js';
 
 const circuitOf = (components, extra = {}) => ({
@@ -570,6 +570,36 @@ describe('createSimulation — protocol peripherals (Tier 2b)', () => {
     const { angle } = engine.observables().get('M1');
     expect(angle).toBeGreaterThan(133);
     expect(angle).toBeLessThan(137);
+  });
+
+  it('accumulates stepper shaft angle from a ULN2003 driven by firmware', () => {
+    const FULL_STEP = [0b0011, 0b0110, 0b1100, 0b1001];
+    const build = (masks) => createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodesForPins({ D2: 'VIN1', D3: 'VIN2', D4: 'VIN3', D5: 'VIN4' }) },
+      // [IN1..IN4, VCC, GND, OUTA..OUTD]
+      {
+        ref: 'U2', kind: 'stepper_driver', value: '',
+        nodes: ['VIN1', 'VIN2', 'VIN3', 'VIN4', 'VCC', '0', 'VA', 'VB', 'VC', 'VD'],
+      },
+      // [A, B, C, D, COM]
+      { ref: 'M1', kind: 'stepper_motor', value: '', nodes: ['VA', 'VB', 'VC', 'VD', 'VCC'] },
+      // ~3 ms per full step (12000 SBIW iterations ≈ 48k cycles).
+    ]), { mcu: { program: buildStepperProgram(masks, 12000) } });
+
+    const forward = build(FULL_STEP);
+    expect(forward.ok).toBe(true);
+    expect(forward.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
+    for (let i = 0; i < 60; i += 1) forward.advance(0.001, 50);
+    const spun = forward.observables().get('M1');
+    // ~20 full steps in 60 ms → ~40 half steps; generous window for timing.
+    expect(spun.halfSteps).toBeGreaterThan(20);
+    expect(spun.halfSteps).toBeLessThan(48);
+    expect(spun.angle).toBeGreaterThan(0);
+
+    const reverse = build([...FULL_STEP].reverse());
+    for (let i = 0; i < 60; i += 1) reverse.advance(0.001, 50);
+    expect(reverse.observables().get('M1').halfSteps).toBeLessThan(-20);
   });
 
   it('answers TRIG with an ECHO visible on the display branch', () => {

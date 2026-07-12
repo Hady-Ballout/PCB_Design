@@ -230,6 +230,21 @@ describe('realistic part rendering', () => {
     ['>IN</text>', '>COM</text>', '>NO</text>', '>NC</text>'].forEach((label) => expect(markup).toContain(label));
   });
 
+  it('rotates the stepper shaft marker by the sim angle', () => {
+    const model = circuitToBreadboard({
+      title: 'stepper',
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'M1', kind: 'stepper_motor', value: '', nodes: ['VA', 'VB', 'VC', 'VD', 'VCC'] },
+      ],
+    });
+    const part = model.parts.find((p) => p.kind === 'stepper_motor');
+    const markup = renderToStaticMarkup(
+      <svg><PartDefs /><RealisticPart part={part} sim={{ angle: 90 }} /></svg>,
+    );
+    expect(markup).toContain('rotate(90 ');
+  });
+
   it('anchors peripheral pads on their body terminals but keeps MCU pads collinear', () => {
     const slot = { x: 0, y: 0, width: 448, height: 120 };
     // Peripherals: pads sit on the body (servo top-edge connector at y=58,

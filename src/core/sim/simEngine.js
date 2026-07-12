@@ -4,7 +4,7 @@
 
 import { clearMatrix, makeMatrix, solveDense } from './linalg.js';
 import { buildSimNetlist, GROUND } from './simNetlist.js';
-import { evalBjt, evalDiode, evalMosfet, evalOpamp, junctionCriticalVoltage, limitDiode, limitJunction, THERMAL_VOLTAGE, variableOhms } from './simDevices.js';
+import { evalBjt, evalDiode, evalMosfet, evalOpamp, junctionCriticalVoltage, limitDiode, limitJunction, stepperStepDelta, THERMAL_VOLTAGE, variableOhms } from './simDevices.js';
 import { AVR_CLOCK_HZ, createAvrRunner } from './avrRunner.js';
 import { I2C_ADDRESS_BY_KIND, createPeripheral } from './avrPeripherals.js';
 import { observablesFor } from './simObservables.js';
@@ -99,7 +99,7 @@ export const createSimulation = (circuit, options = {}) => {
   }
 
   const NR_TYPES = new Set(['diode', 'bjt', 'mosfet', 'opamp']);
-  const EVENT_TYPES = new Set(['comparator', 'timer_555', 'opto_out', 'stepper_driver']);
+  const EVENT_TYPES = new Set(['comparator', 'timer_555', 'opto_out', 'stepper_driver', 'stepper_motor']);
   const nrDevices = devices.filter((device) => NR_TYPES.has(device.type));
   for (const device of nrDevices) {
     if (device.type === 'diode') {
@@ -616,6 +616,21 @@ export const createSimulation = (circuit, options = {}) => {
             device.state.on[i] = on;
             changed = true;
           }
+        }
+      } else if (device.type === 'stepper_motor') {
+        // Shaft tracker: sample which coils are pulled low (energized) and
+        // walk the half-step ring. Stamps nothing, so it never reports a
+        // change — flagging one would only burn DC settle rounds.
+        let mask = 0;
+        for (let i = 0; i < 4; i += 1) {
+          const coil = device.coils[i];
+          if (coil != null && atX(device.com) - atX(coil) > 2.5) mask |= 1 << i;
+        }
+        const { index, delta } = stepperStepDelta(device.state.patternIndex, mask);
+        device.state.patternIndex = index;
+        if (delta !== 0) {
+          device.state.halfSteps += delta;
+          device.state.angle = device.state.halfSteps * (360 / 4096);
         }
       } else if (device.type === 'comparator') {
         // ±5 mV hysteresis prevents chatter at the trip point.

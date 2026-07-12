@@ -109,6 +109,12 @@ export const observablesFor = (netlist, probe, controlState = new Map()) => {
       case 'relay':
         entry.energized = device.state?.energized ?? false;
         break;
+      case 'stepper_motor': {
+        entry.angle = device.state?.angle ?? 0;
+        entry.halfSteps = device.state?.halfSteps ?? 0;
+        entry.text = `${Math.round(((entry.angle % 360) + 360) % 360)}°`;
+        break;
+      }
       case 'bjt':
         entry.amps = branchCurrents.get(device.id) ?? 0; // collector current
         break;

@@ -1571,12 +1571,14 @@ function MotorDriverBody({ part }) {
 
 // 28BYJ-48 stepper: blue can with mounting ears, the offset shaft boss, and
 // the 5-wire lead into a white JST connector whose pads face the board.
-function StepperMotorBody({ part }) {
+function StepperMotorBody({ part, sim }) {
   const slot = part.meta.slot;
   if (!slot) return null;
   const cx = slot.x + 78;
   const cy = slot.y + 74;
   const r = 30;
+  // Live shaft angle from the sim tracker (the servo-horn pattern).
+  const shaftAngle = sim?.angle ?? 0;
   const names = FIXED_PIN_NAMES[part.kind] ?? [];
   const pinCount = part.pinNets?.length ?? names.length;
   const firstPad = mcuPadPoint(slot, 0, part.kind);
@@ -1591,8 +1593,10 @@ function StepperMotorBody({ part }) {
       <circle cx={cx} cy={cy} r={r} fill="url(#rsBluePlastic)" stroke="#173a75" strokeWidth="0.8" />
       <circle cx={cx} cy={cy} r={r - 2.4} fill="none" stroke="rgba(255,255,255,0.14)" strokeWidth="0.7" />
       <circle cx={cx} cy={cy - 11} r={6} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.5" />
-      <circle cx={cx} cy={cy - 11} r={2.6} fill="#e9edf0" stroke="#7c848b" strokeWidth="0.5" />
-      <line x1={cx - 2.6} y1={cy - 13.2} x2={cx + 2.6} y2={cy - 13.2} stroke="#8a929a" strokeWidth="1" />
+      <g transform={`rotate(${shaftAngle} ${cx} ${cy - 11})`}>
+        <circle cx={cx} cy={cy - 11} r={2.6} fill="#e9edf0" stroke="#7c848b" strokeWidth="0.5" />
+        <line x1={cx - 2.6} y1={cy - 13.2} x2={cx + 2.6} y2={cy - 13.2} stroke="#8a929a" strokeWidth="1" />
+      </g>
       <Silk x={cx} y={cy + 8} text={part.value || '28BYJ-48'} size={4.6} weight={700} fill="#eaf1f4" />
       <Silk x={cx} y={cy + 15} text={part.ref} size={4.2} fill="#cdd8ea" />
       {/* wire harness into the JST lead connector */}
@@ -2166,7 +2170,7 @@ export function RealisticPart({ part, sim }) {
   if (part.body === 'relay_module') return <RelayModuleBody part={part} sim={sim} />;
   if (part.body === 'lcd_display') return <LcdDisplayBody part={part} sim={sim} />;
   if (part.body === 'motor_driver') return <MotorDriverBody part={part} />;
-  if (part.body === 'stepper_motor') return <StepperMotorBody part={part} />;
+  if (part.body === 'stepper_motor') return <StepperMotorBody part={part} sim={sim} />;
   if (part.body === 'keypad') return <KeypadBody part={part} sim={sim} />;
   if (part.body === 'joystick') return <JoystickBody part={part} />;
   if (part.body === 'led_strip') return <LedStripBody part={part} sim={sim} />;

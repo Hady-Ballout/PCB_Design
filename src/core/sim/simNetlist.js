@@ -41,7 +41,7 @@ const SEVEN_SEGMENT_SEGMENTS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'DP'];
 // Tier-2c driver/motion modules (their pins are switched by node voltages).
 const SIMULATED_MODULE_KINDS = new Set([
   'relay_module', 'temp_sensor', 'pir_sensor', 'soil_moisture', 'gas_sensor', 'sound_sensor', 'hall_sensor',
-  'stepper_driver',
+  'stepper_driver', 'stepper_motor',
 ]);
 
 // Protocol modules that ride the Arduino firmware bridge at cycle resolution
@@ -470,6 +470,28 @@ export const buildSimNetlist = (circuit, options = {}) => {
           type: 'stepper_driver', id: ref, owner: ref, kind,
           in: ins, gnd: gndNode, out: outs,
           state: { on: [false, false, false, false] },
+        });
+        break;
+      }
+      case 'stepper_motor': {
+        // 28BYJ-48: four ~50 Ω windings from the +V common to A/B/C/D, plus a
+        // stamp-less tracker that accumulates shaft angle from the energized-
+        // coil sequence (event-updated in simEngine; the output shaft turns
+        // 360/4096 ° per half step through the 64:1 gearbox).
+        // fixedPins: [A, B, C, D, COM].
+        if (isUnconnectedTerminal(nodes[4], ref, 5)) break; // no common, no circuit
+        const com = indexOf(nodes[4]);
+        const coilOhms = parseOhms(value, 50);
+        const coils = [0, 1, 2, 3].map((i) => {
+          if (isUnconnectedTerminal(nodes[i], ref, i + 1)) return null;
+          const node = indexOf(nodes[i]);
+          addResistor(`${ref}_${'ABCD'[i]}`, ref, kind, com, node, coilOhms);
+          return node;
+        });
+        devices.push({
+          type: 'stepper_motor', id: `${ref}_TRK`, owner: ref, kind,
+          coils, com,
+          state: { patternIndex: null, halfSteps: 0, angle: 0 },
         });
         break;
       }

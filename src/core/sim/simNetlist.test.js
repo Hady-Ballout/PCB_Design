@@ -107,6 +107,21 @@ describe('buildSimNetlist', () => {
     expect(netlist.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
   });
 
+  it('emits stepper motor coils plus a stamp-less shaft tracker', () => {
+    const netlist = buildSimNetlist(circuitOf(withSupply([
+      // [A, B, C, D, COM] — coil D left unwired.
+      { ref: 'M1', kind: 'stepper_motor', value: '', nodes: ['VA', 'VB', 'VC', 'NC_M1_4', 'VCC'] },
+    ])));
+    expect(netlist.ok).toBe(true);
+    const coils = netlist.devices.filter((device) => device.owner === 'M1' && device.type === 'resistor');
+    expect(coils.map((device) => device.id)).toEqual(['M1_A', 'M1_B', 'M1_C']);
+    expect(coils[0].ohms).toBe(50);
+    const tracker = netlist.devices.find((device) => device.id === 'M1_TRK');
+    expect(tracker).toMatchObject({ type: 'stepper_motor', state: { patternIndex: null, halfSteps: 0 } });
+    expect(tracker.coils[3]).toBeNull();
+    expect(netlist.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
+  });
+
   it('maps the zener breakdown voltage from its value', () => {
     const netlist = buildSimNetlist(circuitOf(withSupply([
       { ref: 'D1', kind: 'zener', value: '9.1V', nodes: ['VCC', '0'] },

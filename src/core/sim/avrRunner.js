@@ -157,6 +157,23 @@ export const buildWs2812Program = (grbBytes) => {
   return Uint16Array.from(words);
 };
 
+// Stepper coil sequence on D2-D5 (PD2-PD5): each mask drives IN1-IN4 (bit 0
+// → D2 … bit 3 → D5), holds ~holdIterations·4 cycles, then advances; the
+// whole sequence loops forever.
+export const buildStepperProgram = (masks, holdIterations = 12000) => {
+  const words = [0x9a52, 0x9a53, 0x9a54, 0x9a55]; // SBI DDRD,2..5
+  const loopStart = words.length;
+  for (const mask of masks) {
+    for (let bit = 0; bit < 4; bit += 1) {
+      words.push(((mask >> bit) & 1 ? 0x9a58 : 0x9858) | (bit + 2)); // SBI/CBI PORTD,bit+2
+    }
+    words.push(ldi(24, holdIterations & 0xff), ldi(25, (holdIterations >> 8) & 0xff));
+    words.push(0x9701, 0xf7f1); // SBIW r24,1; BRNE .-2
+  }
+  words.push(0xc000 | ((loopStart - words.length - 1) & 0x0fff)); // RJMP loopStart
+  return Uint16Array.from(words);
+};
+
 // Enable UART reception (UCSR0B = RXEN0) then spin — lets tests inject
 // serial bytes and observe the RXC flag in UCSR0A.
 export const TEST_PROGRAM_RX_ENABLE = Uint16Array.from([
