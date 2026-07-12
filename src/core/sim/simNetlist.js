@@ -41,7 +41,7 @@ const SEVEN_SEGMENT_SEGMENTS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'DP'];
 // Tier-2c driver/motion modules (their pins are switched by node voltages).
 const SIMULATED_MODULE_KINDS = new Set([
   'relay_module', 'temp_sensor', 'pir_sensor', 'soil_moisture', 'gas_sensor', 'sound_sensor', 'hall_sensor',
-  'stepper_driver', 'stepper_motor', 'motor_driver',
+  'stepper_driver', 'stepper_motor', 'motor_driver', 'joystick',
 ]);
 
 // Protocol modules that ride the Arduino firmware bridge at cycle resolution
@@ -521,6 +521,29 @@ export const buildSimNetlist = (circuit, options = {}) => {
           ],
           state: { ch: [{ en: true, inA: false, inB: false }, { en: true, inA: false, inB: false }] },
         });
+        break;
+      }
+      case 'joystick': {
+        // KY-023: two potentiometer axes as stimulus-driven sources (OUT =
+        // stimulus × supply, so analogRead centers near 512) plus the stick's
+        // bare switch to GND (the sketch's INPUT_PULLUP provides the high).
+        // fixedPins: [GND, VCC, VRX, VRY, SW].
+        for (const [name, pinIndex, pinName] of [['x', 2, 'VRX'], ['y', 3, 'VRY']]) {
+          if (isUnconnectedTerminal(nodes[pinIndex], ref, pinIndex + 1)) continue;
+          devices.push({
+            type: 'sensor_source', id: `${ref}_${pinName}`, owner: ref, kind,
+            out: indexOf(nodes[pinIndex]), gnd: indexOf(a), vcc: indexOf(b),
+            law: 'joystick_axis', stimulusName: name, branch: branchCount, overrideVolts: 0,
+          });
+          branchCount += 1;
+        }
+        if (!isUnconnectedTerminal(nodes[4], ref, 5)) {
+          addVariableResistor(`${ref}_SW`, ref, kind, indexOf(nodes[4]), indexOf(a), 'joystick_sw', {});
+        }
+        controls.push({ ref, kind, type: 'slider', name: 'x', min: 0, max: 1, step: 0.01, value: 0.5, label: 'X axis' });
+        controls.push({ ref, kind, type: 'slider', name: 'y', min: 0, max: 1, step: 0.01, value: 0.5, label: 'Y axis' });
+        // Artwork-owned (a stick click pulses it); the panel skips momentary.
+        controls.push({ ref, kind, type: 'momentary', name: 'sw', value: 0 });
         break;
       }
       case 'pushbutton':

@@ -613,6 +613,7 @@ export const createSimulation = (circuit, options = {}) => {
           else if (device.law === 'pir') next = stimulus ? 3.3 : 0.05;
           else if (device.law === 'soil') next = 2.8 - 1.6 * stimulus;
           else if (device.law === 'module_ao') next = 0.4 + 3.6 * stimulus;
+          else if (device.law === 'joystick_axis') next = supply * Math.min(1, Math.max(0, stimulus));
           else if (device.law === 'module_do') next = stimulus > 0.5 ? 0.1 : supply;
         }
         if (Math.abs(device.overrideVolts - next) > 1e-3) {

@@ -140,6 +140,20 @@ describe('buildSimNetlist', () => {
     expect(netlist.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
   });
 
+  it('gives the joystick two axis sources, a stick switch, and controls', () => {
+    const netlist = buildSimNetlist(circuitOf(withSupply([
+      // [GND, VCC, VRX, VRY, SW] — VRY left unwired.
+      { ref: 'J1', kind: 'joystick', value: '', nodes: ['0', 'VCC', 'VX', 'NC_J1_4', 'VSW'] },
+    ])));
+    expect(netlist.ok).toBe(true);
+    expect(netlist.devices.find((d) => d.id === 'J1_VRX')).toMatchObject({ type: 'sensor_source', law: 'joystick_axis', stimulusName: 'x' });
+    expect(netlist.devices.some((d) => d.id === 'J1_VRY')).toBe(false);
+    expect(netlist.devices.find((d) => d.id === 'J1_SW')).toMatchObject({ type: 'vres', model: 'joystick_sw' });
+    expect(netlist.controls).toContainEqual(expect.objectContaining({ ref: 'J1', type: 'slider', name: 'x', value: 0.5 }));
+    expect(netlist.controls).toContainEqual(expect.objectContaining({ ref: 'J1', type: 'momentary', name: 'sw' }));
+    expect(netlist.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
+  });
+
   it('maps the zener breakdown voltage from its value', () => {
     const netlist = buildSimNetlist(circuitOf(withSupply([
       { ref: 'D1', kind: 'zener', value: '9.1V', nodes: ['VCC', '0'] },

@@ -245,6 +245,21 @@ describe('realistic part rendering', () => {
     expect(markup).toContain('rotate(90 ');
   });
 
+  it('offsets the joystick cap by the sim axis values', () => {
+    const model = circuitToBreadboard({
+      title: 'joystick',
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'J1', kind: 'joystick', value: '', nodes: ['0', 'VCC', 'VX', 'VY', 'VSW'] },
+      ],
+    });
+    const part = model.parts.find((p) => p.kind === 'joystick');
+    const markup = renderToStaticMarkup(
+      <svg><PartDefs /><RealisticPart part={part} sim={{ x: 1, y: 0 }} /></svg>,
+    );
+    expect(markup).toContain('translate(8 -8)');
+  });
+
   it('anchors peripheral pads on their body terminals but keeps MCU pads collinear', () => {
     const slot = { x: 0, y: 0, width: 448, height: 120 };
     // Peripherals: pads sit on the body (servo top-edge connector at y=58,

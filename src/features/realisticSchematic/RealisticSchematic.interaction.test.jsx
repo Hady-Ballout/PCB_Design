@@ -389,6 +389,37 @@ describe('live simulation (Run mode)', () => {
     expect(pirChip()).toContain('3.30V'); // motion
   });
 
+  it('deflects the joystick axes by dragging and springs back on release', () => {
+    mountRunning({
+      title: 'Joystick',
+      nodes: ['VCC', 'VX', 'VY', '0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        // [GND, VCC, VRX, VRY, SW]
+        { ref: 'J1', kind: 'joystick', value: '', nodes: ['0', 'VCC', 'VX', 'VY', 'NC_J1_5'] },
+        { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VX', '0'] },
+        { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['VY', '0'] },
+      ],
+    });
+    const chipFor = (net) => [...container.querySelectorAll('.realistic-legend-chip')]
+      .find((chip) => chip.textContent.includes(net)).textContent;
+    flushFrames(4);
+    expect(chipFor('VX')).toContain('2.50V'); // centered
+
+    const joystick = container.querySelector('[aria-label*="J1"]');
+    const svg = container.querySelector('svg');
+    firePointer(joystick, 'pointerdown', { clientX: 100, clientY: 100 });
+    // Full rightward deflection (+40 board px = x → 1.0), y unchanged.
+    firePointer(svg, 'pointermove', { clientX: 140, clientY: 100 });
+    flushFrames(4);
+    expect(chipFor('VX')).toContain('5.00V');
+    expect(chipFor('VY')).toContain('2.50V');
+
+    firePointer(svg, 'pointerup', { clientX: 140, clientY: 100 });
+    flushFrames(4);
+    expect(chipFor('VX')).toContain('2.50V'); // sprung back
+  });
+
   it('presses keypad keys through the artwork and shows LCD text', async () => {
     // Uno with keypad on D6-D13 (cols C1-C4 on D6,D7,D12,D13; rows on D8-D11)
     // and an LCD on A4/A5. Firmware: any program (the LCD text is driven via

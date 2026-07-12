@@ -40,6 +40,9 @@ export const variableOhms = (device, state = {}) => {
       // A3144 open-collector output: pulls to GND while the magnet is near.
       // (Power gating ignored — documented simplification.)
       return state.magnet ? 30 : OPEN_OHMS;
+    case 'joystick_sw':
+      // KY-023 stick click: a bare switch from SW to GND.
+      return state.sw ? CLOSED_OHMS : OPEN_OHMS;
     default:
       return OPEN_OHMS;
   }

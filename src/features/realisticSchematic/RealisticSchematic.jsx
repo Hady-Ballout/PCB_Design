@@ -143,6 +143,7 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
   const suppressClickRef = useRef(false); // swallow the click that ends a part move
   const simButtonRef = useRef(null); // { ref, pointerId } while a pushbutton is held (run mode)
   const simPotDragRef = useRef(null); // { ref, pointerId, startBoard, startWiper } while dragging a wiper (run mode)
+  const simJoyDragRef = useRef(null); // { ref, pointerId, startBoard, moved } while dragging a joystick (run mode)
 
   const commitView = () => {
     frameRef.current = 0;
@@ -274,6 +275,20 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
         startWiper: controlValue(part.ref, 'wiper', 0.5),
       };
       try { svgRef.current.setPointerCapture(event.pointerId); } catch { /* best-effort */ }
+      return;
+    }
+    if (part.kind === 'joystick') {
+      // Drag deflects the stick (both axes), release springs back to center,
+      // and a click without movement pulses the stick switch.
+      event.stopPropagation();
+      suppressClickRef.current = false;
+      simJoyDragRef.current = {
+        ref: part.ref,
+        pointerId: event.pointerId,
+        startBoard: toBoard(event.clientX, event.clientY),
+        moved: false,
+      };
+      try { svgRef.current.setPointerCapture(event.pointerId); } catch { /* best-effort */ }
     }
     // Other parts have no press gesture in run mode; a plain click still selects.
   };
@@ -329,6 +344,17 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
       setControl(simPotDragRef.current.ref, 'wiper', clamp(simPotDragRef.current.startWiper + dx / 60, 0, 1));
       return;
     }
+    if (simJoyDragRef.current) {
+      if (event.pointerId !== simJoyDragRef.current.pointerId) return;
+      const board = toBoard(event.clientX, event.clientY);
+      const dx = board.x - simJoyDragRef.current.startBoard.x;
+      const dy = board.y - simJoyDragRef.current.startBoard.y;
+      if (Math.abs(dx) > CLICK_MOVE_THRESHOLD || Math.abs(dy) > CLICK_MOVE_THRESHOLD) simJoyDragRef.current.moved = true;
+      // 40 board px of drag = full deflection from center on each axis.
+      setControl(simJoyDragRef.current.ref, 'x', clamp(0.5 + dx / 40, 0, 1));
+      setControl(simJoyDragRef.current.ref, 'y', clamp(0.5 + dy / 40, 0, 1));
+      return;
+    }
     if (wireDragRef.current) {
       if (event.pointerId !== wireDragRef.current.pointerId) return;
       const to = toBoard(event.clientX, event.clientY);
@@ -379,6 +405,20 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
       if (event.pointerId !== simButtonRef.current.pointerId) return;
       setControl(simButtonRef.current.ref, simButtonRef.current.name ?? 'pressed', 0);
       simButtonRef.current = null;
+      suppressClickRef.current = true;
+      return;
+    }
+    if (simJoyDragRef.current) {
+      if (event.pointerId !== simJoyDragRef.current.pointerId) return;
+      const { ref, moved } = simJoyDragRef.current;
+      simJoyDragRef.current = null;
+      // Spring back to center; a plain click (no drag) pulses the switch.
+      setControl(ref, 'x', 0.5);
+      setControl(ref, 'y', 0.5);
+      if (!moved) {
+        setControl(ref, 'sw', 1);
+        setTimeout(() => setControl(ref, 'sw', 0), 150);
+      }
       suppressClickRef.current = true;
       return;
     }
@@ -668,7 +708,7 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
               const dragging = partDrag?.ref === part.ref;
               const clickToggle = running ? RUN_CLICK_TOGGLES[part.kind] : undefined;
               const simInteractive = running
-                && (part.kind === 'pushbutton' || part.kind === 'potentiometer' || part.kind === 'keypad' || Boolean(clickToggle));
+                && (part.kind === 'pushbutton' || part.kind === 'potentiometer' || part.kind === 'keypad' || part.kind === 'joystick' || Boolean(clickToggle));
               const wrapper = interactive(
                 { type: 'part', ref: part.ref },
                 `${part.ref} ${String(part.kind).replaceAll('_', ' ')} ${part.value ?? ''}`.trim(),

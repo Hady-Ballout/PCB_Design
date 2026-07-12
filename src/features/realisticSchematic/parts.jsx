@@ -1426,7 +1426,7 @@ function KeypadBody({ part, sim }) {
 }
 
 // KY-023 thumb-stick module: red PCB with the black stick tower and cap.
-function JoystickBody({ part }) {
+function JoystickBody({ part, sim }) {
   const slot = part.meta.slot;
   if (!slot) return null;
   const x0 = slot.x + 10;
@@ -1435,6 +1435,10 @@ function JoystickBody({ part }) {
   const h = 78;
   const cx = x0 + w / 2;
   const cy = y0 + h / 2 + 4;
+  // Live stick deflection: full axis throw moves the cap ±8 px inside the
+  // fixed gimbal ring (the drag gesture / panel sliders feed sim.x/sim.y).
+  const capDx = ((sim?.x ?? 0.5) - 0.5) * 16;
+  const capDy = ((sim?.y ?? 0.5) - 0.5) * 16;
   return (
     <g>
       <rect x={x0} y={y0} width={w} height={h} rx={3} fill="#b3363c" stroke="#6e1c22" strokeWidth="0.7" />
@@ -1445,8 +1449,10 @@ function JoystickBody({ part }) {
       {/* gimbal base + stick cap */}
       <rect x={cx - 22} y={cy - 22} width={44} height={44} rx={4} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.6" />
       <circle cx={cx} cy={cy} r={17} fill="#20262b" stroke="#000" strokeWidth="0.5" />
-      <circle cx={cx} cy={cy} r={12.5} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.6" />
-      <ellipse cx={cx - 4} cy={cy - 5} rx={4.5} ry={3} fill="rgba(255,255,255,0.16)" />
+      <g transform={`translate(${capDx} ${capDy})`}>
+        <circle cx={cx} cy={cy} r={12.5} fill="url(#rsBlackPlastic)" stroke="#000" strokeWidth="0.6" />
+        <ellipse cx={cx - 4} cy={cy - 5} rx={4.5} ry={3} fill="rgba(255,255,255,0.16)" />
+      </g>
       <Silk x={x0 + 8} y={y0 + h - 5} text={part.ref} size={4.6} fill="#f3dede" anchor="start" />
       <Silk x={x0 + w - 6} y={y0 + h - 5} text={part.value || 'KY-023'} size={4} fill="#f3dede" anchor="end" />
       <McuHeader part={part} />
@@ -2172,7 +2178,7 @@ export function RealisticPart({ part, sim }) {
   if (part.body === 'motor_driver') return <MotorDriverBody part={part} />;
   if (part.body === 'stepper_motor') return <StepperMotorBody part={part} sim={sim} />;
   if (part.body === 'keypad') return <KeypadBody part={part} sim={sim} />;
-  if (part.body === 'joystick') return <JoystickBody part={part} />;
+  if (part.body === 'joystick') return <JoystickBody part={part} sim={sim} />;
   if (part.body === 'led_strip') return <LedStripBody part={part} sim={sim} />;
   if (part.body === 'stepper_driver' || part.body === 'rfid_reader' || part.body === 'current_sensor') return <OffboardModuleBody part={part} />;
   const points = part.holes.map((hole) => (hole ? holeCenter(hole) : null)).filter(Boolean);

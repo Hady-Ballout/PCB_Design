@@ -472,6 +472,41 @@ describe('createSimulation — polish devices (M4)', () => {
     expect(coast.observables().get('M1').speed01).toBeLessThan(0.05);
   });
 
+  it('centers the joystick axes at half supply and follows the stimulus', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      // [GND, VCC, VRX, VRY, SW]
+      { ref: 'J1', kind: 'joystick', value: '', nodes: ['0', 'VCC', 'VX', 'VY', 'VSW'] },
+      { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VX', '0'] },
+      { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['VY', '0'] },
+      // Pull-up on the stick switch (INPUT_PULLUP stand-in).
+      { ref: 'R3', kind: 'resistor', value: '10k', nodes: ['VCC', 'VSW'] },
+    ]));
+    expect(engine.solveDC()).toBe(true);
+    expect(volts(engine, 'VX')).toBeCloseTo(2.5, 1);
+    expect(volts(engine, 'VY')).toBeCloseTo(2.5, 1);
+    expect(volts(engine, 'VSW')).toBeGreaterThan(4.9);
+
+    engine.setControl('J1', 'x', 0.25);
+    engine.setControl('J1', 'sw', 1);
+    expect(engine.solveDC()).toBe(true);
+    expect(volts(engine, 'VX')).toBeCloseTo(1.25, 1);
+    expect(volts(engine, 'VY')).toBeCloseTo(2.5, 1);
+    expect(volts(engine, 'VSW')).toBeLessThan(0.1);
+  });
+
+  it('drops the joystick axes to 0 V when the module is unpowered', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'RL', kind: 'resistor', value: '1k', nodes: ['VCC', '0'] },
+      // VCC pin unwired → axis sources stay at 0 V.
+      { ref: 'J1', kind: 'joystick', value: '', nodes: ['0', 'NC_J1_2', 'VX', 'NC_J1_4', 'NC_J1_5'] },
+      { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VX', '0'] },
+    ]));
+    expect(engine.solveDC()).toBe(true);
+    expect(Math.abs(volts(engine, 'VX'))).toBeLessThan(0.05);
+  });
+
   it('drives the current-sensor OUT at 2.5 V + 185 mV/A', () => {
     const engine = createSimulation(circuitOf([
       { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
