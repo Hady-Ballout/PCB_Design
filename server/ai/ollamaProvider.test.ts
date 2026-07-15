@@ -368,7 +368,7 @@ describe('Ollama circuit output', () => {
 
   it('teaches the tier-2 module kinds in the schema and prompt', () => {
     const kinds = CIRCUIT_SCHEMA.properties.components.items.properties.kind.enum as readonly string[];
-    ['optocoupler', 'current_sensor', 'keypad', 'joystick', 'rtc_module', 'sd_card', 'rfid_reader', 'soil_moisture', 'gas_sensor', 'baro_sensor', 'adc_module']
+    ['optocoupler', 'current_sensor', 'keypad', 'joystick', 'rtc_module', 'sd_card', 'rfid_reader', 'mouse_sensor', 'soil_moisture', 'gas_sensor', 'baro_sensor', 'adc_module']
       .forEach((kind) => expect(kinds).toContain(kind));
     const body = buildOllamaRequestBody('Read soil moisture on a Pi', [], true);
     const prompt = body.messages[0].content;
@@ -378,6 +378,7 @@ describe('Ollama circuit output', () => {
     expect(prompt).toContain('raspberry_pi has no analog inputs');
     expect(prompt).toContain('<REF>_S');
     expect(prompt).toContain('MFRC522');
+    expect(prompt).toContain('PMW3360');
   });
 
   it('rejects a legacy 10-node raspberry_pi in fresh AI output', () => {

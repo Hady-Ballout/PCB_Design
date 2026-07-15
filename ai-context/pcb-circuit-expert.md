@@ -97,6 +97,7 @@ Allowed component kinds:
 - `rtc_module`
 - `sd_card`
 - `rfid_reader`
+- `mouse_sensor`
 - `soil_moisture`
 - `gas_sensor`
 - `baro_sensor`
@@ -173,6 +174,7 @@ Use these node orders consistently:
 | `rtc_module` | `[GND, VCC, SDA, SCL]` (exactly 4 nodes) |
 | `sd_card` | `[VCC, GND, MISO, MOSI, SCK, CS]` (exactly 6 nodes, SPI) |
 | `rfid_reader` | `[3V3, RST, GND, IRQ, MISO, MOSI, SCK, SDA]` (exactly 8 nodes, SPI; SDA is the SS pin; 3V3 to the 3.3V supply only) |
+| `mouse_sensor` | `[RST, GND, MOT, NCS, SCK, MOSI, MISO, VCC]` (exactly 8 nodes, SPI; NCS is the chip select; MOT is an optional active-low motion interrupt) |
 | `soil_moisture` | `[VCC, GND, AOUT]` (exactly 3 nodes; AOUT is analog) |
 | `gas_sensor` | `[VCC, GND, DO, AO]` (exactly 4 nodes; DO digital threshold, AO analog) |
 | `baro_sensor` | `[VCC, GND, SCL, SDA]` (exactly 4 nodes) |
@@ -238,6 +240,7 @@ Per-kind firmware libraries:
 | `rtc_module` | `RTClib` (`RTC_DS3231`) | `smbus2` at `0x68` |
 | `sd_card` | `SD.h` (`SD.begin(CS)`) | Pi mounts storage natively |
 | `rfid_reader` | `MFRC522` with `SPI.h` | the `mfrc522` python package |
+| `mouse_sensor` | `PMW3360` with `SPI.h`: `sensor.begin(NCS)`, then `readBurst()` for dx/dy | raw `spidev` register reads |
 | `soil_moisture` / `gas_sensor` | `analogRead` + threshold compare | `adc_module` channel reads |
 | `baro_sensor` | `Adafruit_BMP280` at `0x76` | the `bmp280` python library |
 | `adc_module` | `SPI.h` transfers (the part IS the ADC) | gpiozero `MCP3008(channel=N)` |
@@ -459,7 +462,7 @@ D8-D11 (`SIN1`-`SIN4`) carry only the driver's logic inputs; the coil current fl
 - `optocoupler` (PC817): the input LED needs a series resistor exactly like a discrete LED — `GPIO -- R(220-1k) -- A`, `K -- 0`. The output phototransistor (`E`/`C`) switches the isolated side; the isolation barrier is never bridged, so `A`/`K` must never share a net with `E`/`C`. It IS simulated: one SPICE line `X<REF> A K E C PC817` (the app injects the PC817 subcircuit). An opto output has no flyback protection — a motor or coil on `E`/`C` still needs its flyback diode.
 - `current_sensor` (ACS712): wire `IP+` and `IP-` **in series** with the load's supply path — the measured current physically flows through the module. `VCC -> 5V`, `OUT -> an analog pin`, `GND -> 0`. In SPICE only the derived shunt line `<REF>_S <IP+ node> <IP- node> 0.0012` appears.
 - `raspberry_pi` has no analog inputs: any analog-output sensor (joystick VRX/VRY, soil_moisture AOUT, gas_sensor AO, current_sensor OUT, LDR/thermistor dividers) on a Pi must go through an `adc_module` (MCP3008): `VDD`/`VREF -> 3V3`, `AGND`/`DGND -> 0`, `CLK -> GPIO11`, `DOUT -> GPIO9`, `DIN -> GPIO10`, `CS -> GPIO8`, sensor outputs into `CH0`-`CH7`.
-- SPI modules (`sd_card`, `rfid_reader`): Uno `D13`=SCK/`D12`=MISO/`D11`=MOSI + any digital CS; ESP32 `GPIO18`=SCK/`GPIO19`=MISO + free listed GPIOs; Pi `GPIO11`=SCLK/`GPIO9`=MISO/`GPIO10`=MOSI/`GPIO8`=CE0. The RC522 is 3.3V-only.
+- SPI modules (`sd_card`, `rfid_reader`, `mouse_sensor`): Uno `D13`=SCK/`D12`=MISO/`D11`=MOSI + any digital CS (the RC522's SDA and the PMW3360's NCS are their CS pins); ESP32 `GPIO18`=SCK/`GPIO19`=MISO + free listed GPIOs; Pi `GPIO11`=SCLK/`GPIO9`=MISO/`GPIO10`=MOSI/`GPIO8`=CE0. The RC522 is 3.3V-only.
 
 ### Rectification and Power Sources
 

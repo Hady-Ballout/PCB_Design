@@ -13,7 +13,7 @@ RUN curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/inst
       "Adafruit GFX Library" "Adafruit BusIO" "Servo" \
       "DHT sensor library" "Adafruit Unified Sensor" \
       "RTClib" "Adafruit MPU6050" "Adafruit BMP280 Library" "Adafruit NeoPixel" \
-      "Stepper" "IRremote" "MFRC522"
+      "Stepper" "IRremote" "MFRC522" "PMW3360 Module"
 
 WORKDIR /app
 

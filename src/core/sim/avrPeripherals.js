@@ -12,6 +12,7 @@ import {
   createMcp3008,
   createMfrc522,
   createMpu6050,
+  createPmw3360,
   createWs2812Decoder,
 } from './registerModels.js';
 
@@ -442,6 +443,41 @@ const createRfid = (record, runner) => {
   };
 };
 
+// PMW3360 mouse sensor on the SPI bus (NCS chip select). Trackpad-style
+// drags on the artwork (and the panel steppers) feed dx/dy counts into the
+// delta accumulators; the MOT pin, when wired, sits low while unread motion
+// is pending — the real part's active-low motion interrupt.
+const createMouseSensor = (record, runner) => {
+  const totals = { x: 0, y: 0 };
+  let motLevel = 1;
+  const setMot = (high) => {
+    motLevel = high ? 1 : 0;
+    if (record.pins.MOT) runner.setDigitalInput(record.pins.MOT, high);
+  };
+  const pmw = createPmw3360({ onPendingChange: (pending) => setMot(!pending) });
+  runner.registerSpiDevice(record.pins.NCS, pmw.spiDevice);
+  setMot(true); // idle high
+  return {
+    observe: () => ({
+      x: Math.round(totals.x),
+      y: Math.round(totals.y),
+      pending: pmw.pending(),
+      cpi: pmw.cpi(),
+    }),
+    level: (pin) => (pin === 'MOT' ? motLevel : 0),
+    onControl: (name, value) => {
+      if (name === 'dx') {
+        totals.x += value;
+        pmw.addMotion(value, 0);
+      } else if (name === 'dy') {
+        totals.y += value;
+        pmw.addMotion(0, value);
+      }
+    },
+    dispose: () => {},
+  };
+};
+
 // WS2812 strip: decode the bit-banged DIN stream from cycle-timestamped
 // port writes into RGB pixels.
 const createLedStrip = (record, runner) => {
@@ -475,6 +511,7 @@ const FACTORIES = {
   adc_module: createAdcModule,
   led_strip: createLedStrip,
   rfid_reader: createRfid,
+  mouse_sensor: createMouseSensor,
 };
 
 export const createPeripheral = (record, runner, controlState) =>

@@ -370,6 +370,137 @@ export const createMfrc522 = (getUid) => {
   };
 };
 
+// PMW3360 optical mouse sensor over SPI: just enough register machine for
+// the PMW3360 Arduino library's begin() (Power_Up_Reset, SROM upload,
+// signature check) and readBurst()/register motion reads. Wire framing is
+// the INVERSE of the MFRC522: the first byte after CS-low is the 7-bit
+// address with bit 7 SET for writes; a read returns the register on the next
+// clocked byte. Motion accumulates as float counts (addMotion) and drains on
+// a Motion (0x02) read or the first byte of a Motion_Burst (0x50) frame —
+// the fractional remainder survives so fast drags lose nothing. Deltas are
+// not rescaled by CPI (Config1 only reads back). Unmodelled registers read
+// back their written value (a Map), which absorbs the library's init writes.
+export const createPmw3360 = ({ onPendingChange } = {}) => {
+  const regs = new Map();
+  let accumX = 0;
+  let accumY = 0;
+  let deltaX = 0; // latched counts, two's-complement on the wire
+  let deltaY = 0;
+  let motionLatched = false;
+  let sromLoaded = false;
+  let frame = null; // { addr, isWrite } latched from the first frame byte
+  let burst = null; // remaining Motion_Burst bytes in this CS frame
+  let lastPending = false;
+
+  const pending = () => Math.abs(accumX) >= 1 || Math.abs(accumY) >= 1;
+  const notifyPending = () => {
+    if (pending() !== lastPending) {
+      lastPending = pending();
+      onPendingChange?.(lastPending);
+    }
+  };
+
+  const clamp16 = (value) => Math.max(-32768, Math.min(32767, Math.trunc(value)));
+  const latch = () => {
+    deltaX = clamp16(accumX);
+    deltaY = clamp16(accumY);
+    accumX -= deltaX;
+    accumY -= deltaY;
+    motionLatched = deltaX !== 0 || deltaY !== 0;
+    notifyPending();
+  };
+  const clearMotion = () => {
+    accumX = 0;
+    accumY = 0;
+    deltaX = 0;
+    deltaY = 0;
+    motionLatched = false;
+    notifyPending();
+  };
+
+  const low = (value) => value & 0xff;
+  const high = (value) => (value >> 8) & 0xff;
+
+  const readReg = (addr) => {
+    switch (addr) {
+      case 0x00: return 0x42; // Product_ID
+      case 0x01: return 0x01; // Revision_ID
+      case 0x02: // Motion: reading latches the accumulators into the deltas
+        latch();
+        return motionLatched ? 0x80 : 0x00;
+      case 0x03: return low(deltaX);
+      case 0x04: return high(deltaX);
+      case 0x05: return low(deltaY);
+      case 0x06: return high(deltaY);
+      case 0x07: return 0x40; // SQUAL: tracking a surface
+      case 0x0f: return regs.get(addr) ?? 0x31; // Config1: default 5000 CPI
+      case 0x24: return 0x40; // Observation: SROM running
+      case 0x2a: return sromLoaded ? 0x04 : 0x00; // SROM_ID
+      case 0x3f: return 0xbd; // Inverse_Product_ID
+      default: return regs.get(addr) ?? 0;
+    }
+  };
+
+  const writeReg = (addr, value) => {
+    switch (addr) {
+      case 0x02: // Motion write clears the latch and the accumulators
+        clearMotion();
+        break;
+      case 0x3a: // Power_Up_Reset
+        if (value === 0x5a) {
+          regs.clear();
+          clearMotion();
+          sromLoaded = false;
+        }
+        break;
+      case 0x62: // SROM_Load_Burst: absorb the blob, don't count the bytes
+        sromLoaded = true;
+        break;
+      default:
+        regs.set(addr, value);
+    }
+  };
+
+  return {
+    spiDevice: {
+      onByte(mosi) {
+        if (frame == null) {
+          frame = { addr: mosi & 0x7f, isWrite: Boolean(mosi & 0x80) };
+          if (!frame.isWrite && frame.addr === 0x50) {
+            // Motion_Burst: latch, then successive bytes in this CS frame
+            // walk the 12-byte burst report.
+            latch();
+            burst = [
+              motionLatched ? 0x80 : 0x00, 0x40,
+              low(deltaX), high(deltaX), low(deltaY), high(deltaY),
+              0x40, 0x00, 0x00, 0x00, 0x00, 0x20,
+            ];
+          }
+          return 0;
+        }
+        if (burst) return burst.shift() ?? 0;
+        if (frame.isWrite) {
+          writeReg(frame.addr, mosi);
+          return 0;
+        }
+        return readReg(frame.addr);
+      },
+      onDeselect() {
+        frame = null;
+        burst = null;
+      },
+    },
+    addMotion(dx, dy) {
+      accumX += dx;
+      accumY += dy;
+      notifyPending();
+    },
+    pending,
+    cpi: () => ((regs.get(0x0f) ?? 0x31) + 1) * 100,
+    sromLoaded: () => sromLoaded,
+  };
+};
+
 // WS2812 bitstream decoder: Adafruit's 16 MHz bit-bang emits ~5-cycle highs
 // for 0 and ~13-cycle highs for 1 (20 cycles per bit); a low gap ≥ 40 µs
 // (640 cycles) latches the frame. Bytes are MSB-first in GRB order.

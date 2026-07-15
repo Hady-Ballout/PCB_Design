@@ -52,7 +52,7 @@ const AVR_PERIPHERAL_KINDS = new Set([
   'servo', 'ultrasonic_sensor', 'dht_sensor', 'rotary_encoder',
   'oled_display', 'lcd_display', 'shift_register', 'keypad',
   'imu_sensor', 'rtc_module', 'baro_sensor', 'adc_module', 'led_strip',
-  'ir_receiver', 'rfid_reader',
+  'ir_receiver', 'rfid_reader', 'mouse_sensor',
 ]);
 
 // Protocol pins per kind: which the MCU drives vs the module drives, which
@@ -109,6 +109,14 @@ const PERIPHERAL_PIN_SPECS = {
     required: ['SDA', 'MOSI', 'MISO', 'SCK'], moduleDriven: [],
     spi: { mosi: 'MOSI', miso: 'MISO', sck: 'SCK', cs: 'SDA' },
   },
+  // PMW3360: NCS is the SPI chip select; MOT is an optional active-low motion
+  // interrupt the module drives (low while unread motion is pending). RST is
+  // plain GPIO the model ignores (Power_Up_Reset is the real reset).
+  mouse_sensor: {
+    required: ['NCS', 'MOSI', 'MISO', 'SCK'], optional: ['MOT'],
+    moduleDriven: ['MOT'], ownsInputs: ['MOT'],
+    spi: { mosi: 'MOSI', miso: 'MISO', sck: 'SCK', cs: 'NCS' },
+  },
 };
 
 // Module pin-name → fixedPins index (protocol pins only).
@@ -133,6 +141,7 @@ const PERIPHERAL_PIN_INDEX = {
   led_strip: { DIN: 1 }, // [VCC, DIN, GND]
   ir_receiver: { OUT: 0 }, // [OUT, GND, VCC]
   rfid_reader: { MISO: 4, MOSI: 5, SCK: 6, SDA: 7 }, // [3V3, RST, GND, IRQ, MISO, MOSI, SCK, SDA]
+  mouse_sensor: { MOT: 2, NCS: 3, SCK: 4, MOSI: 5, MISO: 6 }, // [RST, GND, MOT, NCS, SCK, MOSI, MISO, VCC]
 };
 
 const KEYPAD_KEYS = ['1', '2', '3', 'A', '4', '5', '6', 'B', '7', '8', '9', 'C', '*', '0', '#', 'D'];
@@ -735,6 +744,11 @@ export const buildSimNetlist = (circuit, options = {}) => {
       }
     } else if (part.kind === 'rfid_reader') {
       controls.push({ ref: part.ref, kind: part.kind, type: 'button', name: 'tap', value: 0, label: 'Tap card' });
+    } else if (part.kind === 'mouse_sensor') {
+      // Event-typed: each change is counts to add, not persistent state. The
+      // artwork trackpad drag routes through the same two control names.
+      controls.push({ ref: part.ref, kind: part.kind, type: 'stepper', name: 'dx', value: 0, label: 'Move X' });
+      controls.push({ ref: part.ref, kind: part.kind, type: 'stepper', name: 'dy', value: 0, label: 'Move Y' });
     } else if (part.kind === 'ir_receiver') {
       // Rendered as one remote widget by the stimulus panel (grouped by ref).
       for (let key = 1; key <= 9; key += 1) {

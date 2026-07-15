@@ -171,6 +171,41 @@ describe('RFID reader peripheral', () => {
   });
 });
 
+describe('mouse sensor peripheral', () => {
+  it('routes SPI frames to the PMW3360 model through the NCS chip select', () => {
+    // Read Product_ID over hardware SPI with CS on D10 (buildSpiProgram's CS).
+    const runner = createAvrRunner({ program: buildSpiProgram([0x00, 0x00]) });
+    const mouse = createPeripheral(
+      { kind: 'mouse_sensor', owner: 'M1', pins: { NCS: 'D10', MOSI: 'D11', MISO: 'D12', SCK: 'D13' } },
+      runner,
+      new Map(),
+    );
+    runner.run(20_000);
+    expect(runner.cpu.data[0x0101]).toBe(0x42); // second transfer returned Product_ID
+    expect(mouse.observe()).toMatchObject({ x: 0, y: 0, pending: false, cpi: 5000 });
+  });
+
+  it('drives MOT low while motion is pending and releases it once drained', () => {
+    // The program reads the Motion register (0x02), which latches and drains.
+    const runner = createAvrRunner({ program: buildSpiProgram([0x02, 0x00]) });
+    const mouse = createPeripheral(
+      { kind: 'mouse_sensor', owner: 'M1', pins: { NCS: 'D10', MOSI: 'D11', MISO: 'D12', SCK: 'D13', MOT: 'D2' } },
+      runner,
+      new Map(),
+    );
+    expect(mouse.level('MOT')).toBe(1); // idle high
+    mouse.onControl('dx', 12);
+    mouse.onControl('dy', -3);
+    expect(mouse.level('MOT')).toBe(0);
+    expect((runner.cpu.data[0x29] >> 2) & 1).toBe(0); // PIND bit 2 (D2) pulled low
+    expect(mouse.observe()).toMatchObject({ x: 12, y: -3, pending: true });
+    runner.run(20_000); // firmware reads Motion, draining the accumulators
+    expect(runner.cpu.data[0x0101]).toBe(0x80); // MOT bit was set in the report
+    expect(mouse.level('MOT')).toBe(1);
+    expect(mouse.observe().pending).toBe(false);
+  });
+});
+
 describe('shift register peripheral', () => {
   it('shifts a byte MSB-first and latches it to the outputs', () => {
     const runner = createAvrRunner({ program: buildShiftOutProgram(0b10110110) });

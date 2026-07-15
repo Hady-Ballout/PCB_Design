@@ -213,6 +213,13 @@ export const COMPONENT_KINDS = {
     wiringOnly: true,
     fixedPins: ['3V3', 'RST', 'GND', 'IRQ', 'MISO', 'MOSI', 'SCK', 'SDA'],
   },
+  // PMW3360 breakout, physical header order (RS GD MT SS SC MO MI VI).
+  // NCS is the SPI chip select; MOT is the active-low motion interrupt.
+  mouse_sensor: {
+    spicePrefix: 'U', pins: 8, symbolType: 'generic', label: 'Mouse sensor (PMW3360, SPI)',
+    wiringOnly: true,
+    fixedPins: ['RST', 'GND', 'MOT', 'NCS', 'SCK', 'MOSI', 'MISO', 'VCC'],
+  },
   soil_moisture: {
     spicePrefix: 'U', pins: 3, symbolType: 'generic', label: 'Soil moisture sensor (capacitive)',
     wiringOnly: true,

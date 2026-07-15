@@ -62,6 +62,7 @@ const OFFBOARD_SLOT_HEIGHTS = {
   keypad: PERIPHERAL_SLOT_HEIGHT,
   joystick: PERIPHERAL_SLOT_HEIGHT,
   rfid_reader: PERIPHERAL_SLOT_HEIGHT,
+  mouse_sensor: PERIPHERAL_SLOT_HEIGHT,
   current_sensor: PERIPHERAL_SLOT_HEIGHT,
 };
 const OFFBOARD_MCU_KINDS = new Set(['arduino_uno', 'raspberry_pi']);

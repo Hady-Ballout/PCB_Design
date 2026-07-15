@@ -207,6 +207,45 @@ describe('buildSimNetlist', () => {
     expect(scrambled.warnings.some((w) => w.code === 'module_not_simulated')).toBe(true);
   });
 
+  it('attaches the PMW3360 on the hardware SPI pins with trackpad controls', () => {
+    const unoNodes = (assignments) => {
+      const nodes = ['NC_U1_1', 'NC_U1_2', '0', ...Array.from({ length: 21 }, (_, i) => `NC_U1_${i + 4}`)];
+      for (const [pin, net] of Object.entries(assignments)) {
+        nodes[4 + Number(pin.slice(1))] = net;
+      }
+      return nodes;
+    };
+    // [RST, GND, MOT, NCS, SCK, MOSI, MISO, VCC]
+    const mouseNodes = ['NC_M1_1', '0', 'VMOT', 'VNCS', 'VSCK', 'VMOSI', 'VMISO', 'NC_M1_8'];
+    const wired = buildSimNetlist(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodes({ D2: 'VMOT', D10: 'VNCS', D11: 'VMOSI', D12: 'VMISO', D13: 'VSCK' }) },
+      { ref: 'M1', kind: 'mouse_sensor', value: '', nodes: mouseNodes },
+    ]), { mcuRef: 'U1' });
+    expect(wired.devices.find((d) => d.id === 'M1')).toMatchObject({
+      type: 'avr_peripheral',
+      pins: { NCS: 'D10', MOSI: 'D11', MISO: 'D12', SCK: 'D13', MOT: 'D2' },
+      ownedPins: ['D2'],
+    });
+    expect(wired.controls).toContainEqual(expect.objectContaining({ ref: 'M1', type: 'stepper', name: 'dx' }));
+    expect(wired.controls).toContainEqual(expect.objectContaining({ ref: 'M1', type: 'stepper', name: 'dy' }));
+    expect(wired.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
+
+    // The optional MOT pin can stay unwired without blocking attachment.
+    const noMot = buildSimNetlist(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodes({ D10: 'VNCS', D11: 'VMOSI', D12: 'VMISO', D13: 'VSCK' }) },
+      { ref: 'M1', kind: 'mouse_sensor', value: '', nodes: ['NC_M1_1', '0', 'NC_M1_3', 'VNCS', 'VSCK', 'VMOSI', 'VMISO', 'NC_M1_8'] },
+    ]), { mcuRef: 'U1' });
+    expect(noMot.devices.find((d) => d.id === 'M1')).toMatchObject({ type: 'avr_peripheral' });
+    expect(noMot.warnings.some((w) => w.code === 'module_not_simulated')).toBe(false);
+
+    // MOSI landing anywhere but D11 breaks the hardware-SPI gate.
+    const scrambled = buildSimNetlist(circuitOf([
+      { ref: 'U1', kind: 'arduino_uno', value: '', nodes: unoNodes({ D10: 'VNCS', D9: 'VMOSI', D12: 'VMISO', D13: 'VSCK' }) },
+      { ref: 'M1', kind: 'mouse_sensor', value: '', nodes: mouseNodes },
+    ]), { mcuRef: 'U1' });
+    expect(scrambled.warnings.some((w) => w.code === 'module_not_simulated')).toBe(true);
+  });
+
   it('maps the zener breakdown voltage from its value', () => {
     const netlist = buildSimNetlist(circuitOf(withSupply([
       { ref: 'D1', kind: 'zener', value: '9.1V', nodes: ['VCC', '0'] },

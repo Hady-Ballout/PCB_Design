@@ -57,14 +57,14 @@ adding a kind to the registry automatically offers it to the model. The current 
 
 - **Core (14):** `resistor`, `capacitor`, `inductor`, `diode`, `led`, `bjt_npn`, `bjt_pnp`,
   `mosfet_n`, `mosfet_p`, `opamp`, `regulator`, `voltage_source`, `signal_source`, `load`.
-- **Extended (47):** `zener`, `photoresistor`, `thermistor`, `buzzer`, `crystal`,
+- **Extended (48):** `zener`, `photoresistor`, `thermistor`, `buzzer`, `crystal`,
   `temp_sensor`, `comparator`, `pushbutton`, `potentiometer`, `switch_spdt`, `rgb_led`,
   `seven_segment`, `timer_555`, `ultrasonic_sensor`, `dht_sensor`, `oled_display`,
   `pir_sensor`, `servo`, `dc_motor`, `relay_module`, `stepper_motor`, `stepper_driver`,
   `motor_driver`, `lcd_display`, `rotary_encoder`, `led_strip`, `imu_sensor`,
   `ir_receiver`, `shift_register`, `optocoupler`, `current_sensor`, `keypad`, `joystick`,
-  `rtc_module`, `sd_card`, `rfid_reader`, `soil_moisture`, `gas_sensor`, `baro_sensor`,
-  `adc_module`, `schottky`, `bridge_rectifier`, `fuse`, `vibration_motor`,
+  `rtc_module`, `sd_card`, `rfid_reader`, `mouse_sensor`, `soil_moisture`, `gas_sensor`,
+  `baro_sensor`, `adc_module`, `schottky`, `bridge_rectifier`, `fuse`, `vibration_motor`,
   `sound_sensor`, `hall_sensor`, `solar_panel`. Several of these are simulated rather
   than wiring-only: `optocoupler` emits one X line against the built-in `PC817`
   subcircuit, `current_sensor` a single derived `<REF>_S` milliohm shunt line,
@@ -81,8 +81,9 @@ Sensor/module parts (`temp_sensor`, `ultrasonic_sensor`, `dht_sensor`, `oled_dis
 `pir_sensor`, `servo`, `relay_module`, the tier-1 additions `stepper_motor`,
 `stepper_driver`, `motor_driver`, `lcd_display`, `rotary_encoder`, `led_strip`,
 `imu_sensor`, `ir_receiver`, `shift_register`, plus the tier-2 additions `keypad`,
-`joystick`, `rtc_module`, `sd_card`, `rfid_reader`, `soil_moisture`, `gas_sensor`,
-`baro_sensor`, `adc_module`, plus the tier-3 `sound_sensor` and `hall_sensor`) are
+`joystick`, `rtc_module`, `sd_card`, `rfid_reader`, `mouse_sensor`, `soil_moisture`,
+`gas_sensor`, `baro_sensor`, `adc_module`, plus the tier-3 `sound_sensor` and
+`hall_sensor`) are
 likewise **wiring-only** and use fixed pin lists (`FIXED_PIN_NAMES` in
 `src/core/componentKinds.js`), exported to SPICE only as a comment.
 
@@ -118,7 +119,7 @@ opamp, `pushbutton` straddles with both pins on the bottom strip (top legs decor
 TO-92 cans, `rotary_encoder`/`imu_sensor`/`rtc_module`/`sd_card`/`soil_moisture`/
 `gas_sensor`/`baro_sensor` stay inline as breadboard-pluggable modules, and
 `servo`/`dc_motor`/`relay_module`/`lcd_display`/`motor_driver`/`stepper_motor`/
-`stepper_driver`/`led_strip`/`keypad`/`joystick`/`rfid_reader`/`current_sensor` sit in
+`stepper_driver`/`led_strip`/`keypad`/`joystick`/`rfid_reader`/`mouse_sensor`/`current_sensor` sit in
 compact off-board slots below the board (variable-height slot stack shared with the MCU
 boards; MCU boards always claim the first slots). Kind-specific artwork dispatches via
 `KIND_RENDERERS` in `parts.jsx` (zener/photoresistor/thermistor/buzzer/crystal/
@@ -424,6 +425,26 @@ are ignored. `ir-key` controls are event-style — they (and `stepper`/`button`)
 excluded from the rebuild replay memory in `useSimulation.js` so a mid-run circuit edit
 doesn't ghost-repeat the last press. Compiling IRremote sketches needs the `IRremote`
 library (Dockerfile / docs/OPERATIONS.md).
+
+**Tier 2c — Mouse sensor.** `mouse_sensor` (PMW3360 breakout, fixedPins
+`[RST, GND, MOT, NCS, SCK, MOSI, MISO, VCC]`) reuses the role-mapped SPI gate with **NCS
+as the chip select**. `createPmw3360` (registerModels.js) models the register machine the
+`PMW3360 Module` library's `begin()`/`readBurst()` needs — note the wire framing is the
+**inverse** of the MFRC522: first byte is the 7-bit address with **bit 7 SET = write**.
+Registers: Product_ID 0x42 / Inverse 0xBD / Revision 0x01, Motion 0x02 (read = latch,
+write = clear), Delta_X/Y_L/H two's-complement, SQUAL 0x40, Config1 CPI read-back
+(default 0x31 → 5000 CPI; deltas are not rescaled — documented simplification),
+Power_Up_Reset 0x3A (0x5A = full reset), Motion_Burst 0x50 (latch, then the 12-byte
+report walks out within one CS frame), SROM_Enable/Load_Burst (absorbed; SROM_ID reads
+0x04 after a burst). Motion uses **accumulate-and-drain float counts**: a latch truncates
+the accumulators into the delta registers and keeps the fractional remainder, so fast or
+slow drags never quantize away. The **artwork is a trackpad** in run mode — dragging on
+the breakout feeds pointer deltas as counts (4 counts/board px, no spring-back; a live
+X/Y readout and a lens glow show pending motion) — with `Move X`/`Move Y` panel steppers
+as the fallback (`stepper` is event-typed, so no rebuild replay). The optional **MOT**
+pin is module-driven active-low while unread motion is pending (ir_receiver OUT
+mechanics); RST is plain GPIO the model ignores. Not power-gated (standard
+bridge-peripheral limitation). Needs the `PMW3360 Module` library installed.
 
 Still deferred: `sd_card` (FAT).
 

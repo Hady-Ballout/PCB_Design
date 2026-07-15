@@ -1298,6 +1298,7 @@ const OFFBOARD_SILK = {
   stepper_driver: ['ULN2003', 'Stepper driver'],
   led_strip: ['WS2812', 'NeoPixel strip'],
   rfid_reader: ['RC522', 'RFID reader'],
+  mouse_sensor: ['PMW3360', 'Mouse sensor'],
   current_sensor: ['ACS712', 'Current sensor'],
 };
 
@@ -1348,6 +1349,31 @@ function RfidReaderBody({ part, sim }) {
             {sim.uid}
           </text>
         </g>
+      )}
+    </g>
+  );
+}
+
+// PMW3360 breakout: the generic slot PCB plus the sensor lens. During sim it
+// doubles as a trackpad — drag on it to feed motion counts — showing a live
+// X/Y readout; the lens glows while unread motion is pending in the sensor.
+function MouseSensorBody({ part, sim }) {
+  const slot = part.meta.slot;
+  if (!slot) return null;
+  const x0 = slot.x + 10;
+  const y0 = slot.y + 24;
+  return (
+    <g>
+      <OffboardModuleBody part={part} />
+      <circle cx={x0 + 24} cy={y0 + 26} r={9} fill="#0b1520" stroke="#123a63" strokeWidth="0.8" />
+      <circle cx={x0 + 24} cy={y0 + 26} r={4.5} fill="#1d3247" />
+      {sim?.pending && (
+        <circle cx={x0 + 24} cy={y0 + 26} r={11} fill="#d64545" opacity={0.55} filter="url(#rsGlow)" />
+      )}
+      {sim && (
+        <text x={x0 + 24} y={y0 + 44} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 4.4, fill: '#a9c3dc' }}>
+          {`X ${sim.x ?? 0}  Y ${sim.y ?? 0}`}
+        </text>
       )}
     </g>
   );
@@ -2204,6 +2230,7 @@ export function RealisticPart({ part, sim }) {
   if (part.body === 'joystick') return <JoystickBody part={part} sim={sim} />;
   if (part.body === 'led_strip') return <LedStripBody part={part} sim={sim} />;
   if (part.body === 'rfid_reader') return <RfidReaderBody part={part} sim={sim} />;
+  if (part.body === 'mouse_sensor') return <MouseSensorBody part={part} sim={sim} />;
   if (part.body === 'stepper_driver' || part.body === 'current_sensor') return <OffboardModuleBody part={part} />;
   const points = part.holes.map((hole) => (hole ? holeCenter(hole) : null)).filter(Boolean);
   if (points.length === 0) return null;
@@ -2329,6 +2356,7 @@ const THUMBNAIL_SPECS = {
   keypad: slotThumb('keypad', 120, '0 12 200 100'),
   joystick: slotThumb('joystick', 120, '0 12 160 100'),
   rfid_reader: slotThumb('rfid_reader', 120, '0 8 210 106'),
+  mouse_sensor: slotThumb('mouse_sensor', 120, '0 8 210 106'),
   current_sensor: slotThumb('current_sensor', 120, '0 8 150 106'),
   rtc_module: { part: thumbPart('rtc_module', 'module', [3, 4, 5, 6]), viewBox: MODULE4_VIEWBOX },
   schottky: { part: thumbPart('schottky', 'twoLead', [3, 6], '1N5819'), viewBox: TWO_LEAD_VIEWBOX },

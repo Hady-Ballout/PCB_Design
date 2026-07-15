@@ -5,6 +5,7 @@ import {
   createMcp3008,
   createMfrc522,
   createMpu6050,
+  createPmw3360,
   createRegisterSlave,
   createWs2812Decoder,
   crcA,
@@ -181,6 +182,115 @@ describe('createMfrc522', () => {
     spiDevice.onByte(0x80 | (0x37 << 1)); // start a read, never finish it
     spiDevice.onDeselect();
     expect(spiRead(spiDevice, 0x37)).toBe(0x92);
+  });
+});
+
+describe('createPmw3360', () => {
+  // CS-framed SPI access — NOTE the framing is the inverse of the MFRC522:
+  // plain 7-bit address, bit 7 SET marks a write.
+  const spiRead = (device, reg) => {
+    device.onByte(reg & 0x7f);
+    const value = device.onByte(0x00);
+    device.onDeselect();
+    return value;
+  };
+  const spiWrite = (device, reg, ...values) => {
+    device.onByte(0x80 | (reg & 0x7f));
+    for (const value of values) device.onByte(value);
+    device.onDeselect();
+  };
+  const readMotionRegs = (device) => ({
+    motion: spiRead(device, 0x02),
+    dx: (spiRead(device, 0x03) | (spiRead(device, 0x04) << 8)) << 16 >> 16,
+    dy: (spiRead(device, 0x05) | (spiRead(device, 0x06) << 8)) << 16 >> 16,
+  });
+
+  it('answers the product signature and revision', () => {
+    const { spiDevice } = createPmw3360();
+    expect(spiRead(spiDevice, 0x00)).toBe(0x42); // Product_ID
+    expect(spiRead(spiDevice, 0x3f)).toBe(0xbd); // Inverse_Product_ID
+    expect(spiRead(spiDevice, 0x01)).toBe(0x01); // Revision_ID
+  });
+
+  it('reads back Config1 and maps it to CPI', () => {
+    const pmw = createPmw3360();
+    expect(spiRead(pmw.spiDevice, 0x0f)).toBe(0x31); // default 5000 CPI
+    expect(pmw.cpi()).toBe(5000);
+    spiWrite(pmw.spiDevice, 0x0f, 0x07);
+    expect(spiRead(pmw.spiDevice, 0x0f)).toBe(0x07);
+    expect(pmw.cpi()).toBe(800);
+  });
+
+  it('accumulates float motion and drains it on a Motion read', () => {
+    const pmw = createPmw3360();
+    expect(readMotionRegs(pmw.spiDevice)).toEqual({ motion: 0x00, dx: 0, dy: 0 });
+    pmw.addMotion(300.4, -20);
+    expect(pmw.pending()).toBe(true);
+    const first = readMotionRegs(pmw.spiDevice);
+    expect(first.motion).toBe(0x80);
+    expect(first.dx).toBe(300);
+    expect(first.dy).toBe(-20);
+    // Drained: only the 0.4 fractional remainder stays behind.
+    const second = readMotionRegs(pmw.spiDevice);
+    expect(second.motion).toBe(0x00);
+    expect(second.dx).toBe(0);
+    pmw.addMotion(0.7, 0); // 0.4 + 0.7 crosses one full count
+    expect(readMotionRegs(pmw.spiDevice).dx).toBe(1);
+  });
+
+  it('walks the 12-byte Motion_Burst report within one CS frame', () => {
+    const pmw = createPmw3360();
+    pmw.addMotion(-2, 515);
+    const { spiDevice } = pmw;
+    spiDevice.onByte(0x50);
+    const report = Array.from({ length: 14 }, () => spiDevice.onByte(0x00));
+    spiDevice.onDeselect();
+    expect(report.slice(0, 7)).toEqual([0x80, 0x40, 0xfe, 0xff, 0x03, 0x02, 0x40]);
+    expect(report[11]).toBe(0x20); // Shutter_L
+    expect(report.slice(12)).toEqual([0, 0]); // past the end reads zero
+    // The burst latched-and-drained the motion.
+    expect(pmw.pending()).toBe(false);
+  });
+
+  it('loads SROM: handshake absorbed, burst flips SROM_ID, Observation runs', () => {
+    const pmw = createPmw3360();
+    expect(spiRead(pmw.spiDevice, 0x2a)).toBe(0x00);
+    spiWrite(pmw.spiDevice, 0x13, 0x1d); // SROM_Enable init
+    spiWrite(pmw.spiDevice, 0x13, 0x18); // SROM_Enable start
+    spiWrite(pmw.spiDevice, 0x62, 0x01, 0x02, 0x03); // firmware blob (truncated)
+    expect(pmw.sromLoaded()).toBe(true);
+    expect(spiRead(pmw.spiDevice, 0x2a)).toBe(0x04);
+    expect(spiRead(pmw.spiDevice, 0x24)).toBe(0x40);
+  });
+
+  it('resets everything on Power_Up_Reset', () => {
+    const pmw = createPmw3360();
+    pmw.addMotion(50, 50);
+    spiWrite(pmw.spiDevice, 0x0f, 0x07);
+    spiWrite(pmw.spiDevice, 0x62, 0x01);
+    spiWrite(pmw.spiDevice, 0x3a, 0x5a);
+    expect(pmw.pending()).toBe(false);
+    expect(pmw.sromLoaded()).toBe(false);
+    expect(pmw.cpi()).toBe(5000);
+    expect(readMotionRegs(pmw.spiDevice).motion).toBe(0x00);
+  });
+
+  it('fires onPendingChange on accumulate and after the drain', () => {
+    const flips = [];
+    const pmw = createPmw3360({ onPendingChange: (pending) => flips.push(pending) });
+    pmw.addMotion(3, 0);
+    expect(flips).toEqual([true]);
+    readMotionRegs(pmw.spiDevice);
+    expect(flips).toEqual([true, false]);
+    pmw.addMotion(0.5, 0); // below one count: no flip
+    expect(flips).toEqual([true, false]);
+  });
+
+  it('resets frame state on deselect mid-frame', () => {
+    const { spiDevice } = createPmw3360();
+    spiDevice.onByte(0x00); // start a Product_ID read, never clock the data
+    spiDevice.onDeselect();
+    expect(spiRead(spiDevice, 0x00)).toBe(0x42);
   });
 });
 

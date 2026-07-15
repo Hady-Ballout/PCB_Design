@@ -62,7 +62,7 @@ arduino-cli lib install "LiquidCrystal I2C" "Keypad" "Adafruit SSD1306" \
   "Adafruit GFX Library" "Adafruit BusIO" "Servo" \
   "DHT sensor library" "Adafruit Unified Sensor" \
   "RTClib" "Adafruit MPU6050" "Adafruit BMP280 Library" "Adafruit NeoPixel" \
-  "Stepper" "IRremote" "MFRC522"
+  "Stepper" "IRremote" "MFRC522" "PMW3360 Module"
 ```
 
 Sketches are compiled locally in a temp dir (`sketch/sketch.ino`, `--fqbn

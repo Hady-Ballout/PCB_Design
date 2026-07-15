@@ -280,6 +280,28 @@ describe('realistic part rendering', () => {
     expect(tapped).toContain('DE AD BE EF');
   });
 
+  it('shows the mouse sensor motion readout and pending glow only during sim', () => {
+    const model = circuitToBreadboard({
+      title: 'mouse',
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        {
+          ref: 'M1', kind: 'mouse_sensor', value: '',
+          nodes: ['NC_M1_1', '0', 'NC_M1_3', 'VNCS', 'VSCK', 'VMOSI', 'VMISO', 'VCC'],
+        },
+      ],
+    });
+    const part = model.parts.find((p) => p.kind === 'mouse_sensor');
+    const idle = renderToStaticMarkup(<svg><PartDefs /><RealisticPart part={part} /></svg>);
+    expect(idle).toContain('PMW3360');
+    expect(idle).not.toContain('X 12');
+    const running = renderToStaticMarkup(
+      <svg><PartDefs /><RealisticPart part={part} sim={{ x: 12, y: -3, pending: true }} /></svg>,
+    );
+    expect(running).toContain('X 12  Y -3');
+    expect(running).toContain('url(#rsGlow)');
+  });
+
   it('anchors peripheral pads on their body terminals but keeps MCU pads collinear', () => {
     const slot = { x: 0, y: 0, width: 448, height: 120 };
     // Peripherals: pads sit on the body (servo top-edge connector at y=58,
@@ -417,6 +439,7 @@ describe('library part thumbnails', () => {
     expect(renderToStaticMarkup(<PartThumbnail kind="adc_module" />)).toContain('MCP3008');
     expect(renderToStaticMarkup(<PartThumbnail kind="keypad" />)).toContain('>*</text>');
     expect(renderToStaticMarkup(<PartThumbnail kind="rfid_reader" />)).toContain('RC522');
+    expect(renderToStaticMarkup(<PartThumbnail kind="mouse_sensor" />)).toContain('PMW3360');
     expect(renderToStaticMarkup(<PartThumbnail kind="schottky" />)).toContain('url(#rsPartSchottky)');
     expect(renderToStaticMarkup(<PartThumbnail kind="bridge_rectifier" />)).toContain('DB107');
     expect(renderToStaticMarkup(<PartThumbnail kind="solar_panel" />)).toContain('url(#rsPartSolar)');

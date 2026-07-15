@@ -510,6 +510,47 @@ describe('live simulation (Run mode)', () => {
     expect([...container.querySelectorAll('[data-keypad-key]')].find((el) => el.dataset.keypadKey === '5').getAttribute('fill')).toBe('#2c3238');
   });
 
+  it('feeds trackpad drags into the mouse sensor with no spring-back', async () => {
+    // Uno with the PMW3360 on the hardware SPI pins (NCS on D10). Firmware:
+    // any program — the drag feeds the model directly; the readout comes
+    // from the peripheral's observe().
+    const nodes = ['NC_U1_1', 'NC_U1_2', '0', ...Array.from({ length: 21 }, (_, i) => `NC_U1_${i + 4}`)];
+    const assign = (pin, net) => { nodes[4 + Number(pin.slice(1))] = net; };
+    assign('D10', 'VNCS'); assign('D11', 'VMOSI'); assign('D12', 'VMISO'); assign('D13', 'VSCK');
+    const circuit = {
+      title: 'Mouse sensor',
+      nodes: ['VNCS', 'VMOSI', 'VMISO', 'VSCK', '0'],
+      components: [
+        { ref: 'U1', kind: 'arduino_uno', value: '', nodes },
+        // [RST, GND, MOT, NCS, SCK, MOSI, MISO, VCC]
+        { ref: 'M1', kind: 'mouse_sensor', value: '', nodes: ['NC_M1_1', '0', 'NC_M1_3', 'VNCS', 'VSCK', 'VMOSI', 'VMISO', 'NC_M1_8'] },
+      ],
+    };
+    const hex = ':06000000259A2D9AFFCFA6\n:00000001FF\n'; // D13-high program
+    mountFirmware(circuit, () => Promise.resolve({ ok: true, hex, errors: [] }));
+    await act(async () => {
+      container.querySelector('.realistic-run').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    flushFrames(4);
+    const readout = () => [...container.querySelectorAll('text')]
+      .find((el) => el.textContent.startsWith('X '))?.textContent;
+    expect(readout()).toBe('X 0  Y 0');
+
+    const sensor = container.querySelector('[aria-label*="M1"]');
+    const svg = container.querySelector('svg');
+    firePointer(sensor, 'pointerdown', { clientX: 100, clientY: 100 });
+    // +40 board px right, +10 down → 160 and 40 counts at 4 counts/px.
+    firePointer(svg, 'pointermove', { clientX: 140, clientY: 110 });
+    flushFrames(4);
+    expect(readout()).toBe('X 160  Y 40');
+
+    // Release: totals hold (no spring-back), later moves add nothing.
+    firePointer(svg, 'pointerup', { clientX: 140, clientY: 110 });
+    firePointer(svg, 'pointermove', { clientX: 200, clientY: 200 });
+    flushFrames(4);
+    expect(readout()).toBe('X 160  Y 40');
+  });
+
   it('surfaces a friendly error for an unsimulatable circuit', () => {
     mountRunning({
       title: 'No ground',

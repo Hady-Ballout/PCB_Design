@@ -160,6 +160,7 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
   const simButtonRef = useRef(null); // { ref, pointerId } while a pushbutton is held (run mode)
   const simPotDragRef = useRef(null); // { ref, pointerId, startBoard, startWiper } while dragging a wiper (run mode)
   const simJoyDragRef = useRef(null); // { ref, pointerId, startBoard, moved } while dragging a joystick (run mode)
+  const simMouseDragRef = useRef(null); // { ref, pointerId, lastBoard } while dragging the mouse-sensor trackpad (run mode)
 
   const commitView = () => {
     frameRef.current = 0;
@@ -305,6 +306,19 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
         moved: false,
       };
       try { svgRef.current.setPointerCapture(event.pointerId); } catch { /* best-effort */ }
+      return;
+    }
+    if (part.kind === 'mouse_sensor') {
+      // Trackpad drag: pointer deltas become sensor counts (the PMW3360
+      // measures displacement, so the drag IS the motion). No spring-back.
+      event.stopPropagation();
+      suppressClickRef.current = false;
+      simMouseDragRef.current = {
+        ref: part.ref,
+        pointerId: event.pointerId,
+        lastBoard: toBoard(event.clientX, event.clientY),
+      };
+      try { svgRef.current.setPointerCapture(event.pointerId); } catch { /* best-effort */ }
     }
     // Other parts have no press gesture in run mode; a plain click still selects.
   };
@@ -369,6 +383,18 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
       // 40 board px of drag = full deflection from center on each axis.
       setControl(simJoyDragRef.current.ref, 'x', clamp(0.5 + dx / 40, 0, 1));
       setControl(simJoyDragRef.current.ref, 'y', clamp(0.5 + dy / 40, 0, 1));
+      return;
+    }
+    if (simMouseDragRef.current) {
+      if (event.pointerId !== simMouseDragRef.current.pointerId) return;
+      const board = toBoard(event.clientX, event.clientY);
+      const dx = board.x - simMouseDragRef.current.lastBoard.x;
+      const dy = board.y - simMouseDragRef.current.lastBoard.y;
+      simMouseDragRef.current.lastBoard = board;
+      // 4 sensor counts per board px; floats accumulate in the model, so
+      // slow drags are not quantized away.
+      if (dx !== 0) setControl(simMouseDragRef.current.ref, 'dx', dx * 4);
+      if (dy !== 0) setControl(simMouseDragRef.current.ref, 'dy', dy * 4);
       return;
     }
     if (wireDragRef.current) {
@@ -441,6 +467,13 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
     if (simPotDragRef.current) {
       if (event.pointerId !== simPotDragRef.current.pointerId) return;
       simPotDragRef.current = null;
+      suppressClickRef.current = true;
+      return;
+    }
+    if (simMouseDragRef.current) {
+      if (event.pointerId !== simMouseDragRef.current.pointerId) return;
+      // No spring-back: releasing just stops producing counts.
+      simMouseDragRef.current = null;
       suppressClickRef.current = true;
       return;
     }
@@ -736,7 +769,7 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
               const dragging = partDrag?.ref === part.ref;
               const clickToggle = running ? RUN_CLICK_TOGGLES[part.kind] : undefined;
               const simInteractive = running
-                && (part.kind === 'pushbutton' || part.kind === 'potentiometer' || part.kind === 'keypad' || part.kind === 'joystick' || Boolean(clickToggle));
+                && (part.kind === 'pushbutton' || part.kind === 'potentiometer' || part.kind === 'keypad' || part.kind === 'joystick' || part.kind === 'mouse_sensor' || Boolean(clickToggle));
               const wrapper = interactive(
                 { type: 'part', ref: part.ref },
                 `${part.ref} ${String(part.kind).replaceAll('_', ' ')} ${part.value ?? ''}`.trim(),
