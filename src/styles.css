@@ -427,6 +427,8 @@ h3 {
   font-weight: 400;
 }
 
+/* No box around the thread: the message list flows flat on the panel and
+   the composer below is the only framed box. */
 .chat-thread {
   display: flex;
   flex: 1;
@@ -436,16 +438,13 @@ h3 {
 }
 
 .chat-messages {
-  background: var(--color-canvas);
-  border: 2px solid #111111;
-  border-radius: 10px;
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-height: 360px;
   overflow-y: auto;
-  padding: 12px 10px;
+  padding: 4px 2px;
 }
 
 .chat-welcome {
@@ -461,17 +460,15 @@ h3 {
   margin: 6px 0 0;
 }
 
+/* Flat messages: no bubble frame. Sender is shown by alignment (AI left,
+   You right) and a soft tint on your own messages. */
 .chat-message {
   align-self: flex-start;
   animation: message-in 300ms cubic-bezier(0.2, 1, 0.5, 1) both;
-  background: #ffffff;
-  border: 2px solid #111111;
-  border-radius: 10px;
-  box-shadow: var(--shadow-xs);
   display: grid;
-  gap: 6px;
-  max-width: 90%;
-  padding: 9px 11px;
+  gap: 4px;
+  max-width: 92%;
+  padding: 2px;
 }
 
 @keyframes message-in {
@@ -488,11 +485,12 @@ h3 {
 
 .chat-message.user {
   align-self: flex-end;
-  background: var(--nb-yellow);
+  background: var(--nb-yellow-soft);
+  border-radius: 10px;
+  padding: 8px 11px;
 }
 
 .chat-message.pending {
-  box-shadow: 3px 3px 0 var(--nb-pink);
   color: var(--color-text-muted);
 }
 
@@ -512,7 +510,6 @@ h3 {
 
 .chat-artifact-chip {
   background: var(--nb-purple-soft);
-  border: 2px solid #111111;
   border-radius: 6px;
   color: var(--color-text);
   display: grid;
@@ -535,7 +532,6 @@ h3 {
 
 .clarify-card {
   background: var(--nb-blue-soft);
-  border: 2px solid #111111;
   border-radius: 6px;
   display: grid;
   gap: 12px;
@@ -663,6 +659,62 @@ h3 {
   text-transform: uppercase;
 }
 
+/* ── Plan-mode card (Build this) ── */
+
+.plan-card {
+  background: var(--nb-blue-soft);
+  border-radius: 6px;
+  display: grid;
+  gap: 12px;
+  padding: 10px;
+}
+
+.plan-card.resolved {
+  opacity: 0.75;
+}
+
+.plan-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.plan-actions small {
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.plan-build {
+  background: var(--nb-yellow);
+  border: 2px solid #111111;
+  border-radius: 6px;
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  min-height: 0;
+  padding: 6px 12px;
+}
+
+.plan-build:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.plan-resolved-note {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Plan/Ask replies are multi-line plain text with "-" bullets. */
+.chat-message p.chat-multiline {
+  white-space: pre-wrap;
+}
+
 /* Generation stage trail: Circuit → Review → Reply */
 
 .generation-status {
@@ -737,6 +789,47 @@ h3 {
   width: 12px;
 }
 
+/* Live model reasoning streamed while a request is in flight. The scroll box
+   is ~4 lines tall and App pins it to the newest text; the whole window
+   disappears when the real reply lands. */
+.thinking-window {
+  border-left: 3px solid var(--color-text-subtle);
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+  padding-left: 10px;
+}
+
+.thinking-window-label {
+  align-items: center;
+  color: var(--color-text-subtle);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  gap: 6px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.thinking-window-scroll {
+  /* ~4 lines of the 12px reasoning text below */
+  max-height: 66px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.thinking-window-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.thinking-window-scroll p {
+  color: var(--color-text-subtle);
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 0;
+  white-space: pre-wrap;
+}
+
 .typing-dots {
   display: inline-flex;
   gap: 4px;
@@ -780,6 +873,114 @@ h3 {
   gap: 8px;
 }
 
+/* Conversation composer: the single rounded box, sitting below the flat
+   message list. The textarea and its controls blend into this one frame. */
+.chat-thread .chat-composer {
+  background: var(--color-canvas);
+  border: 2px solid #111111;
+  border-radius: 12px;
+  padding: 6px;
+}
+
+.chat-thread .chat-composer-input textarea {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  height: 72px;
+  min-height: 0;
+}
+
+/* Drop the mode dropdown and send button to the bottom edge so they clear
+   the typed text above them. */
+.chat-thread .composer-mode-menu,
+.chat-thread .composer-send-button {
+  bottom: 7px;
+}
+
+.chat-thread .chat-composer-input textarea:focus {
+  box-shadow: none;
+}
+
+/* Mode dropdown pinned inside the composer's bottom-left corner. */
+.composer-mode-menu {
+  bottom: 10px;
+  left: 10px;
+  position: absolute;
+}
+
+/* Ghost buttons: strip the house slab/shadow/press-lift treatment. */
+.composer-mode-trigger,
+.composer-mode-option {
+  box-shadow: none;
+}
+
+.composer-mode-trigger:hover:not(:disabled),
+.composer-mode-trigger:active:not(:disabled),
+.composer-mode-option:hover:not(:disabled),
+.composer-mode-option:active:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+}
+
+.composer-mode-trigger {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 4px;
+  min-height: 0;
+  padding: 4px 6px;
+}
+
+.composer-mode-trigger:hover:not(:disabled),
+.composer-mode-trigger[aria-expanded='true'] {
+  background: rgba(17, 17, 17, 0.06);
+  color: #111111;
+}
+
+.composer-mode-list {
+  background: #ffffff;
+  border: 2px solid #111111;
+  border-radius: 6px;
+  bottom: calc(100% + 6px);
+  box-shadow: var(--shadow-xs);
+  display: grid;
+  gap: 2px;
+  left: 0;
+  list-style: none;
+  margin: 0;
+  min-width: 116px;
+  padding: 4px;
+  position: absolute;
+  z-index: 5;
+}
+
+.composer-mode-option {
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  min-height: 0;
+  padding: 6px 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.composer-mode-option:hover {
+  background: rgba(17, 17, 17, 0.06);
+}
+
+.composer-mode-option.selected {
+  background: var(--nb-yellow);
+}
+
 .chat-composer-input {
   position: relative;
 }
@@ -787,6 +988,7 @@ h3 {
 .chat-composer-input textarea {
   min-height: 92px;
   resize: none;
+  padding-bottom: 34px;
   padding-right: 48px;
 }
 

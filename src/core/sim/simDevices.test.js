@@ -1,5 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { HALF_STEP_MASKS, stepperStepDelta } from './simDevices.js';
+import { HALF_STEP_MASKS, stepperStepDelta, variableOhms } from './simDevices.js';
+
+describe('variableOhms — ir_phototransistor', () => {
+  const device = { model: 'ir_phototransistor', params: {} };
+
+  it('is near-open (10 MΩ) in the dark', () => {
+    expect(variableOhms(device, { ir: 0 })).toBeCloseTo(10e6, -4);
+  });
+
+  it('saturates to 500 Ω under full IR light', () => {
+    expect(variableOhms(device, { ir: 1 })).toBeCloseTo(500, 0);
+  });
+
+  it('defaults to the dark end (ir = 0.1) with no control state', () => {
+    const defaulted = variableOhms(device, {});
+    expect(defaulted).toBeCloseTo(variableOhms(device, { ir: 0.1 }), 0);
+    expect(defaulted).toBeGreaterThan(1e6);
+  });
+
+  it('clamps out-of-range slider values', () => {
+    expect(variableOhms(device, { ir: -1 })).toBeCloseTo(10e6, -4);
+    expect(variableOhms(device, { ir: 2 })).toBeCloseTo(500, 0);
+  });
+});
 
 describe('stepperStepDelta — 28BYJ-48 half-step ring', () => {
   it('walks CW half steps as +1 per pattern', () => {

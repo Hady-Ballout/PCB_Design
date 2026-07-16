@@ -570,6 +570,30 @@ describe('tier-2 SPICE support', () => {
     expect(toSpice(aiCircuit)).not.toContain('.model DSCH');
   });
 
+  it('emits the IR parts: DIR emitter model and phototransistor resistance', () => {
+    const spice = toSpice({
+      title: 'IR link',
+      type: 'sensor',
+      supplyVoltage: 5,
+      nodes: ['VCC', 'IRA', 'VSENSE', '0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'R1', kind: 'resistor', value: '220', nodes: ['VCC', 'IRA'] },
+        { ref: 'DIR1', kind: 'ir_led', value: '940nm', nodes: ['IRA', '0'] },
+        { ref: 'RIR1', kind: 'ir_phototransistor', value: '', nodes: ['VCC', 'VSENSE'] },
+        { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['VSENSE', '0'] },
+      ],
+      notes: [],
+    });
+    expect(spice).toContain('DIR1 IRA 0 DIR');
+    expect(spice).toContain('.model DIR ');
+    expect(spice).toContain('RIR1 VCC VSENSE 10k');
+  });
+
+  it('omits the DIR model when no IR emitter is present', () => {
+    expect(toSpice(aiCircuit)).not.toContain('.model DIR ');
+  });
+
   it('emits the bridge rectifier as four correctly oriented derived diodes', () => {
     const spice = toSpice({
       title: 'Bridge',

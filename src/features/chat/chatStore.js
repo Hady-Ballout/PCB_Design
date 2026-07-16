@@ -22,12 +22,15 @@ const createId = () => {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 };
 
+export const COMPOSER_MODES = ['plan', 'ask', 'implement'];
+
 export const createChat = ({ id = createId(), now = Date.now() } = {}) => ({
   id,
   title: 'New circuit',
   createdAt: now,
   updatedAt: now,
   draft: '',
+  draftMode: 'implement',
   messages: [],
   memory: {
     summary: '',
@@ -90,9 +93,21 @@ const sanitizeClarification = (clarification) => {
   };
 };
 
+const PLAN_STATUSES = ['proposed', 'built'];
+const ASSIST_MESSAGE_MODES = ['plan', 'ask'];
+
+const sanitizePlan = (plan) => {
+  if (!plan || typeof plan !== 'object') return null;
+  return {
+    forPrompt: String(plan.forPrompt || ''),
+    status: PLAN_STATUSES.includes(plan.status) ? plan.status : 'proposed',
+  };
+};
+
 const normalizeMessage = (message) => {
   if (!message || !['user', 'assistant'].includes(message.role)) return null;
   const clarification = message.role === 'assistant' ? sanitizeClarification(message.clarification) : null;
+  const plan = message.role === 'assistant' ? sanitizePlan(message.plan) : null;
   return {
     id: String(message.id || createId()),
     role: message.role,
@@ -102,6 +117,8 @@ const normalizeMessage = (message) => {
     // pad MCU boards saved before a pin-list extension so history stays valid.
     ...(message.circuit && typeof message.circuit === 'object' ? { circuit: padMcuNodes(message.circuit) } : {}),
     ...(clarification ? { clarification } : {}),
+    ...(plan ? { plan } : {}),
+    ...(message.role === 'assistant' && ASSIST_MESSAGE_MODES.includes(message.mode) ? { mode: message.mode } : {}),
   };
 };
 
@@ -162,6 +179,7 @@ const normalizeChat = (chat) => {
     createdAt: base.createdAt,
     updatedAt: Number(chat.updatedAt) || base.createdAt,
     draft: String(chat.draft || ''),
+    draftMode: COMPOSER_MODES.includes(chat.draftMode) ? chat.draftMode : 'implement',
     messages: Array.isArray(chat.messages) ? chat.messages.map(normalizeMessage).filter(Boolean) : [],
     memory: {
       summary: String(chat.memory?.summary || ''),
@@ -276,6 +294,14 @@ export const composeClarifiedPrompt = (forPrompt, questions, answers) => [
   'Design the circuit now honoring these clarifications.',
 ].join('\n');
 
+// The full prompt sent to /api/generate-circuit when the user builds a plan.
+export const composePlanBuildPrompt = (forPrompt, planText) => [
+  `Original request: ${forPrompt}`,
+  'Approved design plan:',
+  String(planText || '').trim(),
+  'Build this circuit now, following the approved plan.',
+].join('\n');
+
 // The compact user bubble shown in chat (and replayed as history context).
 export const formatClarificationSummary = (questions, answers) =>
   `Clarifications: ${questions
@@ -285,6 +311,19 @@ export const formatClarificationSummary = (questions, answers) =>
 export const buildConversationContext = (messages) =>
   (Array.isArray(messages) ? messages : [])
     .filter((message) => message.role === 'user' || (message.role === 'assistant' && message.circuit))
+    .map((message) => ({
+      role: message.role,
+      content: message.content,
+      ...(message.circuit ? { circuit: message.circuit } : {}),
+    }));
+
+// Context for /api/assist-circuit (Plan/Ask): unlike the strict generation
+// context above, assistant text-only turns are kept for conversational
+// continuity. Generation history stays clean because runGeneration keeps
+// using buildConversationContext.
+export const buildAssistContext = (messages) =>
+  (Array.isArray(messages) ? messages : [])
+    .filter((message) => message.role === 'user' || message.role === 'assistant')
     .map((message) => ({
       role: message.role,
       content: message.content,

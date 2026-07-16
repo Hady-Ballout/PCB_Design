@@ -141,7 +141,7 @@ export const createSimulation = (circuit, options = {}) => {
   // LED-family diodes carry a persistence-of-vision current average so PWM
   // reads as dimming instead of 30 Hz-sampled flicker (τ = 30 ms).
   const ledDiodes = devices.filter((device) => device.type === 'diode'
-    && (device.kind === 'led' || device.kind === 'rgb_led' || device.kind === 'seven_segment'));
+    && (device.kind === 'led' || device.kind === 'ir_led' || device.kind === 'rgb_led' || device.kind === 'seven_segment'));
   for (const led of ledDiodes) led.emaI = 0;
 
   // Firmware bridge: the avr8js runner steps in lockstep with the MNA

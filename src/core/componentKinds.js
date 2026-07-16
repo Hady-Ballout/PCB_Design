@@ -19,6 +19,8 @@ export const COMPONENT_KINDS = {
   inductor: { spicePrefix: 'L', pins: 2, symbolType: 'inductor', label: 'Inductor' },
   diode: { spicePrefix: 'D', pins: 2, symbolType: 'diode', label: 'Diode' },
   led: { spicePrefix: 'D', pins: 2, symbolType: 'led', label: 'LED' },
+  // 940nm emitter diode: lower Vf than a visible LED (DIR model), dark lens artwork.
+  ir_led: { spicePrefix: 'D', pins: 2, symbolType: 'led', label: 'IR emitter LED' },
   bjt_npn: { spicePrefix: 'Q', pins: 3, symbolType: 'bjt_npn', label: 'NPN transistor' },
   bjt_pnp: { spicePrefix: 'Q', pins: 3, symbolType: 'bjt_pnp', label: 'PNP transistor' },
   mosfet_n: { spicePrefix: 'M', pins: 3, symbolType: 'generic', label: 'N-channel MOSFET' },
@@ -42,6 +44,9 @@ export const COMPONENT_KINDS = {
   // Simulated as a tiny series resistance ("1A" ratings fall back to 0.05Ω).
   fuse: { spicePrefix: 'R', pins: 2, symbolType: 'generic', label: 'Fuse' },
   photoresistor: { spicePrefix: 'R', pins: 2, symbolType: 'resistor', label: 'Photoresistor (LDR)' },
+  // Raw 2-pin analog IR receiver: conductance follows an "IR light" slider,
+  // like the LDR. For demodulated remote protocols use ir_receiver instead.
+  ir_phototransistor: { spicePrefix: 'R', pins: 2, symbolType: 'resistor', label: 'IR phototransistor (raw receiver)' },
   thermistor: { spicePrefix: 'R', pins: 2, symbolType: 'resistor', label: 'Thermistor' },
   // Simulated as a resistive load so the deck stays runnable.
   buzzer: { spicePrefix: 'R', pins: 2, symbolType: 'generic', label: 'Buzzer' },

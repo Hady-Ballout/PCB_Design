@@ -7,10 +7,16 @@ KiCad-style netlist, and (optionally) simulated waveform data.
 ## Data flow
 
 ```text
-User prompt (chat UI)
-  -> POST /api/clarify-circuit (plain JSON) — AI asks up to 3 multiple-choice
+User prompt (chat UI, composer mode: Plan | Ask | Implement)
+  Plan/Ask -> POST /api/assist-circuit (streamed NDJSON) — one conversational AI
+     reply, no clarify round, no artifacts; a Plan reply carries a "Build this"
+     button that feeds the plan into the Implement pipeline below
+  Implement (default)
+  -> POST /api/clarify-circuit (streamed NDJSON) — AI asks up to 3 multiple-choice
      clarifying questions; user answers via chips (falls through on failure)
   -> POST /api/generate-circuit (streamed NDJSON, prompt + clarification answers)
+  (all three streams carry live "thinking" events — the model's reasoning tokens,
+   shown ephemerally in the chat while the request runs, discarded on completion)
   -> Ollama (or an OpenAI-compatible provider) generates circuit JSON + SPICE
   -> server validates schema/SPICE AND gates on the topology rule engine
      (src/core/topologyRules.js): functional errors (e.g. a GPIO driving a buzzer

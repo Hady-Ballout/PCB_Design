@@ -241,12 +241,18 @@ function CapacitorBody({ part, points }) {
   );
 }
 
+// IR parts share a smoked black 5mm package; the emitter glows faint violet
+// while conducting, the way a phone camera reveals an invisible IR beam.
+const IR_LENS_FILL = '#2a2f3d';
+const IR_GLOW_FILL = '#b06cf0';
+
 function LedBody({ part, points, sim }) {
   const [a, b] = points;
   const dir = bodyDir(part.strip);
   const y = Math.min(a.y, b.y) + dir * 17;
   const mid = (a.x + b.x) / 2;
-  const { fill } = ledColor(part.value);
+  const ir = part.kind === 'ir_led' || part.kind === 'ir_phototransistor';
+  const { fill } = ir ? { fill: IR_LENS_FILL } : ledColor(part.value);
   // Flat-sided lens silhouette: the vertical chord marks the cathode (pin 2),
   // like the flattened rim of a real 5mm LED.
   const flat = b.x > a.x ? 6 : -6;
@@ -254,16 +260,17 @@ function LedBody({ part, points, sim }) {
   const sweep = flat > 0 ? 0 : 1;
   const lens = `M ${mid + flat} ${y - chordY} A 9 9 0 1 ${sweep} ${mid + flat} ${y + chordY} Z`;
   const brightness = sim?.brightness ?? 0;
+  const glowFill = ir ? IR_GLOW_FILL : fill;
   return (
     <g>
       <Lead from={a} to={{ x: mid - 3.5, y: y + 9 }} />
       <Lead from={b} to={{ x: mid + 3.5, y: y + 9 }} />
       {brightness > 0 && (
-        <circle cx={mid} cy={y} r={10 + 8 * brightness} fill={fill} opacity={0.25 + 0.6 * brightness} filter="url(#rsGlow)" />
+        <circle cx={mid} cy={y} r={10 + 8 * brightness} fill={glowFill} opacity={ir ? 0.15 + 0.35 * brightness : 0.25 + 0.6 * brightness} filter="url(#rsGlow)" />
       )}
       <path d={lens} fill={fill} stroke="rgba(0,0,0,0.35)" strokeWidth="0.7" />
       <path d={lens} fill="url(#rsPartLens)" />
-      {brightness > 0 && <path d={lens} fill="#fff" opacity={0.5 * brightness} />}
+      {brightness > 0 && <path d={lens} fill={ir ? IR_GLOW_FILL : '#fff'} opacity={(ir ? 0.25 : 0.5) * brightness} />}
       <line x1={mid + flat} y1={y - chordY + 1} x2={mid + flat} y2={y + chordY - 1} stroke="rgba(0,0,0,0.4)" strokeWidth="1.4" />
       <ellipse cx={mid - 3} cy={y - 3.5} rx={2.6} ry={1.8} fill="rgba(255,255,255,0.75)" />
       <RefLabel x={mid} y={y - 14} text={part.ref} />
@@ -2194,6 +2201,10 @@ const KIND_RENDERERS = {
   resistor: ResistorBody,
   capacitor: CapacitorBody,
   led: LedBody,
+  // Both IR parts reuse the LED silhouette with the smoked IR lens; the
+  // phototransistor never receives a brightness observable, so it stays dark.
+  ir_led: LedBody,
+  ir_phototransistor: LedBody,
   diode: DiodeBody,
   inductor: InductorBody,
   zener: ZenerBody,
@@ -2290,6 +2301,8 @@ const THUMBNAIL_SPECS = {
   inductor: { part: thumbPart('inductor', 'twoLead', [3, 6], '10uH'), viewBox: TWO_LEAD_VIEWBOX },
   diode: { part: thumbPart('diode', 'twoLead', [3, 6]), viewBox: TWO_LEAD_VIEWBOX },
   led: { part: thumbPart('led', 'twoLead', [3, 6], 'red'), viewBox: TWO_LEAD_VIEWBOX },
+  ir_led: { part: thumbPart('ir_led', 'twoLead', [3, 6], '940nm'), viewBox: TWO_LEAD_VIEWBOX },
+  ir_phototransistor: { part: thumbPart('ir_phototransistor', 'twoLead', [3, 6]), viewBox: TWO_LEAD_VIEWBOX },
   zener: { part: thumbPart('zener', 'twoLead', [3, 6]), viewBox: TWO_LEAD_VIEWBOX },
   photoresistor: { part: thumbPart('photoresistor', 'twoLead', [3, 6]), viewBox: TWO_LEAD_VIEWBOX },
   thermistor: { part: thumbPart('thermistor', 'twoLead', [3, 6], '10k'), viewBox: TWO_LEAD_VIEWBOX },

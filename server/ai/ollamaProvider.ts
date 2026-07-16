@@ -19,6 +19,7 @@ import type {
   CurrentDesign,
   GeneratedCircuit,
   OllamaRequestBody,
+  OpenAiStreamHandlers,
   ParsedCircuitResponse,
   ProviderConfig,
   RuleViolation,
@@ -93,7 +94,8 @@ Compound parts take a fixed node count (${COMPOUND_NODE_HINTS}; seven_segment us
 - seven_segment: one diode per used segment to COM, e.g. "<REF>_A <A node> <COM node> DRED".
 - current_sensor nodes [IP+, IP-, VCC, OUT, GND]: wire IP+ and IP- in series with the load's supply path (the measured current flows through them); VCC -> 5V, OUT -> an analog pin, GND -> 0. In SPICE write only one derived line "<REF>_S <IP+ node> <IP- node> 0.0012"; never a bare <REF> line and never lines for VCC/OUT/GND.
 - bridge_rectifier (4 nodes) [AC1, AC2, V+, V-]: four derived diode lines "<REF>_A AC1 V+ DGEN", "<REF>_B AC2 V+ DGEN", "<REF>_C V- AC1 DGEN", "<REF>_D V- AC2 DGEN" using the exact JSON node names; drive AC1/AC2 from a signal_source SINE and take DC off V+/V- (add a smoothing capacitor). Never one bare <REF> line.
-The remaining two-lead additions (zener as D with a breakdown value like 5.1, schottky as D with the DSCH model, photoresistor/thermistor/buzzer/dc_motor/vibration_motor/fuse/pushbutton as R, crystal as C) follow the standard ref-prefix rules above.
+The remaining two-lead additions (zener as D with a breakdown value like 5.1, schottky as D with the DSCH model, photoresistor/thermistor/ir_phototransistor/buzzer/dc_motor/vibration_motor/fuse/pushbutton as R, crystal as C) follow the standard ref-prefix rules above.
+ir_led is an infrared emitter LED: refs start with D, SPICE line "D<REF> ANODE CATHODE DIR" plus ".model DIR D(IS=1e-18 N=1.4 RS=6 CJO=2p BV=5 IBV=10u)", and it always needs a series resistor (100-330) like any LED. ir_phototransistor is the matching raw 2-pin analog receiver: an R element used in a voltage divider exactly like a photoresistor (its light level is a simulation slider). Use the ir_receiver module instead only when the user wants demodulated remote-control protocols.
 solar_panel is a DC source: refs start with V, SPICE is "V<REF> PLUS MINUS DC <volts>", and its positive node feeds the circuit like a battery.
 A GPIO/digital pin driving a load must share its net with at least one other component, e.g. a series resistor. Only add a separate voltage_source or signal_source for a pin's waveform when the user explicitly wants to simulate that pin's behavior.
 Never drive a buzzer, motor, relay coil, or speaker directly from a GPIO pin — always switch it with an NPN transistor or N-MOSFET: GPIO pin -> 1k base resistor -> base, emitter -> 0, load between the supply and the collector, plus a flyback diode across any motor or coil (including vibration motors).
@@ -749,6 +751,7 @@ const shouldUseJsonResponseFormat = (): boolean => process.env.AI_RESPONSE_FORMA
 
 export const buildOpenAiCompatibleBody = (config: ProviderConfig, ollamaBody: OllamaRequestBody): Record<string, unknown> => ({
   model: config.model,
+  ...(ollamaBody.stream ? { stream: true } : {}),
   temperature: ollamaBody.options.temperature,
   max_tokens: positiveIntegerOption(process.env.AI_MAX_TOKENS, isZaiProvider(config.provider) ? 12000 : 4096),
   ...(shouldUseJsonResponseFormat() ? { response_format: { type: 'json_object' } } : {}),
@@ -819,6 +822,82 @@ const providerContentError = (config: ProviderConfig, data: Record<string, unkno
   );
 };
 
+// Streaming variant of the OpenAI-compatible call: parses SSE "data:" lines,
+// forwards reasoning tokens (delta.reasoning_content — the live "thinking"
+// display) and cumulative answer text, and resolves to the full content.
+// Gateways that ignore stream:true and answer with one JSON body still work.
+export async function streamOpenAiCompatibleContent(
+  config: ProviderConfig,
+  ollamaBody: OllamaRequestBody,
+  handlers: OpenAiStreamHandlers = {},
+): Promise<string> {
+  const response = await fetch(openAiCompatibleUrl(config), {
+    method: 'POST',
+    headers: openAiCompatibleHeaders(config),
+    body: JSON.stringify(buildOpenAiCompatibleBody(config, { ...ollamaBody, stream: true })),
+  });
+  if (!response.ok) throw new Error(`${config.provider} returned ${response.status}: ${await response.text()}`);
+
+  if ((response.headers.get('content-type') || '').includes('application/json')) {
+    const data = await response.json() as Record<string, unknown>;
+    const content = readOpenAiCompatibleContent(data);
+    if (!content) throw providerContentError(config, data);
+    handlers.onContent?.(content);
+    return content;
+  }
+  if (!response.body) throw new Error(`${config.provider} did not return a readable response stream.`);
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = '';
+  let content = '';
+  let lastEvent: Record<string, unknown> = {};
+
+  const consumeLine = (line: string): void => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith(':')) return; // blank or SSE keepalive comment
+    const payload = trimmed.startsWith('data:') ? trimmed.slice(5).trim() : trimmed;
+    if (!payload || payload === '[DONE]') return;
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(payload) as Record<string, unknown>;
+    } catch {
+      return; // non-JSON noise between events — skip
+    }
+    if (event.error) {
+      throw new Error(typeof event.error === 'string' ? event.error : JSON.stringify(event.error));
+    }
+    lastEvent = event;
+    const choice = (event.choices as Record<string, unknown>[])?.[0];
+    const delta = (choice?.delta ?? {}) as Record<string, unknown>;
+    if (typeof delta.reasoning_content === 'string' && delta.reasoning_content) {
+      handlers.onThinking?.(delta.reasoning_content);
+    }
+    const token = readOpenAiCompatibleContent(event);
+    if (token) {
+      content += token;
+      handlers.onContent?.(content);
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      buffered += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const lines = buffered.split(/\r?\n/);
+      buffered = lines.pop() || '';
+      lines.forEach(consumeLine);
+      if (done) break;
+    }
+    if (buffered.trim()) consumeLine(buffered);
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+
+  if (!content) throw providerContentError(config, lastEvent);
+  return content;
+}
+
 async function callOpenAiCompatible(
   config: ProviderConfig,
   prompt: string,
@@ -826,8 +905,11 @@ async function callOpenAiCompatible(
   currentDesign: CurrentDesign | null,
   memory: Partial<ChatMemory> | null,
   correction: CorrectionContext | null,
+  handlers: OpenAiStreamHandlers | null = null,
 ): Promise<string> {
-  const ollamaBody = buildOllamaRequestBody(prompt, history, false, currentDesign, memory, correction);
+  const ollamaBody = buildOllamaRequestBody(prompt, history, Boolean(handlers), currentDesign, memory, correction);
+  if (handlers) return streamOpenAiCompatibleContent(config, ollamaBody, handlers);
+
   const response = await fetch(openAiCompatibleUrl(config), {
     method: 'POST',
     headers: openAiCompatibleHeaders(config),
@@ -874,13 +956,16 @@ export async function streamCircuitWithOllama(
   currentDesign: CurrentDesign | null = null,
   onContent: (content: string, state: StreamState) => void = () => {},
   memory: Partial<ChatMemory> | null = null,
+  onThinking: (delta: string, state: StreamState) => void = () => {},
 ): Promise<GeneratedCircuit> {
   const config = providerConfig();
   if (config.provider !== 'ollama') {
     return parseWithCorrectionRetry(async (correction, attempt) => {
-      const content = await callOpenAiCompatible(config, prompt, history, currentDesign, memory, correction);
-      onContent(content, { attempt, correcting: attempt > 0 });
-      return content;
+      const state: StreamState = { attempt, correcting: attempt > 0 };
+      return callOpenAiCompatible(config, prompt, history, currentDesign, memory, correction, {
+        onThinking: (delta) => onThinking(delta, state),
+        onContent: (partial) => onContent(partial, state),
+      });
     });
   }
 
@@ -901,8 +986,12 @@ export async function streamCircuitWithOllama(
 
     const consumeLine = (line: string): void => {
       if (!line.trim()) return;
-      const event = JSON.parse(line) as { error?: string; message?: { content?: string } };
+      const event = JSON.parse(line) as { error?: string; message?: { content?: string; thinking?: string } };
       if (event.error) throw new Error(event.error);
+      // Ollama only emits thinking for models/requests that support it;
+      // forward it when present so those setups get the live display too.
+      const thinking = event.message?.thinking || '';
+      if (thinking) onThinking(thinking, { attempt, correcting: attempt > 0 });
       const token = event.message?.content || '';
       if (!token) return;
       content += token;

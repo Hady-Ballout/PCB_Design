@@ -15,23 +15,42 @@ A single `createServer` callback does manual `request.url`/`request.method` matc
 | `/api/auth/login` | POST | no | returns a JWT |
 | `/api/auth/verify` | POST | no | consumes the email verification token |
 | `/api/auth/me` | GET | via header | |
-| `/api/clarify-circuit` | POST | **yes** | plain JSON, pre-generation question round |
+| `/api/clarify-circuit` | POST | **yes** | streams NDJSON, pre-generation question round |
+| `/api/assist-circuit` | POST | **yes** | streams NDJSON, Plan/Ask conversational reply |
 | `/api/generate-circuit` | POST | **yes** (`Authorization: Bearer <jwt>`) | streams NDJSON |
 | `/api/simulate-circuit` | POST | **yes** | runs Ngspice |
 
 Every route below `/api/auth/*` requires a valid JWT (`getUser` via `verifyJwt`); there is
 no anonymous circuit generation path.
 
-`/api/clarify-circuit` takes the same request body as `/api/generate-circuit`
-(`{prompt, messages, currentDesign, memory}`) and returns
-`{questions: [{id, question, options}]}` — up to 3 clarifying questions, each with the
-canonical `'No preference (you decide)'` option appended server-side. Failures return
-`{code: 'clarify_failed', error}`; the client treats any failure as "skip the round and
-generate directly", so this endpoint must never block generation.
+All three AI chat endpoints stream NDJSON and share a `{type: 'thinking', delta}` event:
+live model reasoning tokens (GLM `reasoning_content` via the streaming SSE call in
+`streamOpenAiCompatibleContent`, or Ollama `message.thinking` when a model emits it),
+batched server-side to ~10 events/sec by `createThinkingBatcher`. The client renders them
+in an ephemeral "Thinking" window and discards them when the reply lands; models without
+reasoning tokens simply produce no `thinking` events.
 
-`/api/generate-circuit` streams `{type: 'spice', provisional: true, ...}` events as the AI
-response arrives (via `streamCircuitWithOllama`'s callback, deduped by
-`${attempt}:${spice}`), then a final `{type: 'complete', data: {...}}` event containing the
+`/api/clarify-circuit` takes the same request body as `/api/generate-circuit`
+(`{prompt, messages, currentDesign, memory}`) and streams `thinking` events followed by
+`{type: 'complete', data: {questions: [{id, question, options}]}}` — up to 3 clarifying
+questions, each with the canonical `'No preference (you decide)'` option appended
+server-side. Failures become `{type: 'error', code: 'clarify_failed', error}` mid-stream
+(or a plain JSON error before the stream starts); the client treats any failure as "skip
+the round and generate directly", so this endpoint must never block generation.
+
+`/api/assist-circuit` serves the chat composer's **Plan** and **Ask** modes. It takes
+`{mode: 'plan' | 'ask', prompt, messages, currentDesign, memory}` and streams `thinking`
+events followed by `{type: 'complete', data: {mode, reply}}` — one conversational
+plain-text reply, no circuit, no SPICE, and deliberately **no `updateChatMemory` call**
+(assist replies confirm no design). Failures become
+`{type: 'error', code: 'assist_failed', error}` (or plain JSON pre-stream) and the client
+surfaces them as a chat message without touching the design.
+
+`/api/generate-circuit` streams `{type: 'thinking', delta, attempt}` and
+`{type: 'spice', provisional: true, ...}` events as the AI
+response arrives (via `streamCircuitWithOllama`'s callbacks, spice deduped by
+`${attempt}:${spice}`; an attempt bump tells the client to reset the thinking window for
+the correction retry), then a final `{type: 'complete', data: {...}}` event containing the
 reconciled circuit, SPICE, reply, firmware `code` (`''` when the circuit has no MCU board),
 updated chat memory, plus the generation-quality fields:
 
@@ -74,17 +93,36 @@ a hard error only occurs when all `MAX_GENERATION_ATTEMPTS` (3) attempts failed 
   budget, the best candidate is accepted with `degraded: true` and safe additive auto-fixes
   applied — never a user-facing hard failure once anything parsed),
   `buildOllamaRequestBody`, and `generateCircuitWithOllama`/`streamCircuitWithOllama`
-  (both resolve to `GeneratedCircuit` = parsed response + `issues` + `generation`). Also
-  supports an OpenAI-compatible provider path (`AI_PROVIDER`, e.g. Z.ai/GLM) as an
-  alternative to Ollama.
+  (both resolve to `GeneratedCircuit` = parsed response + `issues` + `generation`;
+  `streamCircuitWithOllama` also takes `onThinking(delta, state)` alongside `onContent`).
+  Also supports an OpenAI-compatible provider path (`AI_PROVIDER`, e.g. Z.ai/GLM) as an
+  alternative to Ollama, including `streamOpenAiCompatibleContent` — an SSE streaming
+  call that forwards `delta.reasoning_content` chunks to `onThinking` and cumulative
+  `delta.content` to `onContent` (so the provisional-SPICE preview works for
+  OpenAI-compatible providers too), with a plain-JSON fallback for gateways that ignore
+  `stream: true`.
 - **`clarifyProvider.ts`** — the pre-generation clarifying-question round. Owns
   `CLARIFY_SCHEMA` (1–3 questions, 2–4 options each, grammar-constrained like the circuit
   schema), a small standalone system prompt (no `circuitKnowledgePrompt()` — this call is
   deliberately cheap), `buildClarifyRequestBody` (memory + design inventory + prior *user*
   turns only), `sanitizeClarifyQuestions` (caps/dedupes options, strips model-provided
   "no preference" variants, appends the canonical one, assigns `q1..q3` ids), and
-  `generateClarifyingQuestions`. No correction retry: a failed clarify round is cheap and
-  the client falls back to direct generation.
+  `generateClarifyingQuestions` (optional `onThinking` switches the OpenAI-compatible
+  path to the streaming SSE call). No correction retry: a failed clarify round is cheap
+  and the client falls back to direct generation.
+- **`assistProvider.ts`** — the Plan/Ask conversational endpoint. Owns `ASSIST_SCHEMA`
+  (`{"reply": "..."}`, the smallest possible wrapper — a JSON `format` is mandatory on both
+  provider paths), `PLAN_SYSTEM_PROMPT` (textual design plan, embeds `ALLOWED_KINDS` so
+  plans only propose buildable parts, plans edits when a design exists) and
+  `ASK_SYSTEM_PROMPT` (tutor persona, never claims to change the design),
+  `sanitizeAssistHistory` (unlike the generation filter it keeps assistant *text* turns for
+  conversational continuity, folding circuit turns into a compact summary),
+  `buildAssistRequestBody` (knowledge base injected for **plan** only; full circuit JSON in
+  context for **ask** only), `cleanAssistReply` (newline-preserving, 8k cap), and
+  `generateAssistReply` (parses the `{"reply"}` wrapper via `findBalancedJson` with a
+  plain-text fallback for models that ignore the format; optional `onThinking` switches
+  the OpenAI-compatible path to the streaming SSE call). No correction retry and no
+  chat-memory update. `OLLAMA_NUM_PREDICT_ASSIST` (default 1024) bounds the reply budget.
 - **`chatMemory.ts`** — `normalizeChatMemory`, `sanitizeConversationHistory`,
   `updateChatMemory`: a per-chat persisted summary of confirmed requirements/decisions, sent
   back to the model on every revision request instead of the full transcript.

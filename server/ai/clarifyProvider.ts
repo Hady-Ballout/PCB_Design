@@ -10,6 +10,7 @@ import {
   positiveIntegerOption,
   providerConfig,
   readOpenAiCompatibleContent,
+  streamOpenAiCompatibleContent,
 } from './ollamaProvider.js';
 import type {
   ChatMemory,
@@ -18,6 +19,7 @@ import type {
   ClarifyResult,
   CurrentDesign,
   OllamaRequestBody,
+  ThinkingCallback,
 } from '../types.js';
 
 export const NO_PREFERENCE_OPTION = 'No preference (you decide)';
@@ -146,6 +148,7 @@ export async function generateClarifyingQuestions(
   history: ChatMessage[] = [],
   currentDesign: CurrentDesign | null = null,
   memory: Partial<ChatMemory> | null = null,
+  onThinking: ThinkingCallback | null = null,
 ): Promise<ClarifyResult> {
   const config = providerConfig();
   const body = buildClarifyRequestBody(prompt, history, currentDesign, memory);
@@ -160,6 +163,8 @@ export async function generateClarifyingQuestions(
     if (!response.ok) throw new Error(`Ollama returned ${response.status}: ${await response.text()}`);
     const data = await response.json() as Record<string, unknown>;
     content = (data.message as Record<string, unknown>)?.content as string || '';
+  } else if (onThinking) {
+    content = await streamOpenAiCompatibleContent(config, body, { onThinking });
   } else {
     const response = await fetch(openAiCompatibleUrl(config), {
       method: 'POST',

@@ -30,6 +30,11 @@ export const variableOhms = (device, state = {}) => {
       const light = clamp(state.light ?? 0.55, 0, 1);
       return 10 ** (Math.log10(1e6) + (Math.log10(200) - Math.log10(1e6)) * light);
     }
+    case 'ir_phototransistor': {
+      // Dark ≈ 10 MΩ (cutoff), saturated ≈ 500 Ω, log-interpolated. Default 0.1 keeps it dark.
+      const ir = clamp(state.ir ?? 0.1, 0, 1);
+      return 10 ** (Math.log10(10e6) + (Math.log10(500) - Math.log10(10e6)) * ir);
+    }
     case 'thermistor': {
       // NTC beta model around 25°C.
       const tempC = state.tempC ?? 25;

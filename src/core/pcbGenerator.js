@@ -690,6 +690,7 @@ export const toSpice = (circuit) => {
     if (part.kind === 'inductor') lines.push(`${ref} ${a} ${b} ${part.value.replace(/h$/i, '')}`);
     if (part.kind === 'diode') lines.push(`${ref} ${a} ${b} DGEN`);
     if (part.kind === 'led') lines.push(`${ref} ${a} ${b} DRED`);
+    if (part.kind === 'ir_led') lines.push(`${ref} ${a} ${b} DIR`);
     if (part.kind === 'schottky') lines.push(`${ref} ${a} ${b} DSCH`);
     if (part.kind === 'solar_panel') lines.push(`${ref} ${a} ${b} DC ${cleanVoltageValue(part.value)}`);
     if (part.kind === 'bjt_npn') lines.push(`${ref} ${a} ${b} ${c} Q2N2222`);
@@ -702,7 +703,7 @@ export const toSpice = (circuit) => {
     if (part.kind === 'optocoupler') lines.push(`${ref} ${part.nodes.join(' ')} PC817`);
     if (part.kind === 'regulator') lines.push(`${ref} ${regulatorOutputNode(part.nodes)} 0 DC ${regulatorVoltage(part.value)}`);
     if (part.kind === 'zener') lines.push(`${ref} ${a} ${b} ${zenerModelName(part.value)}`);
-    if (part.kind === 'photoresistor' || part.kind === 'thermistor') lines.push(`${ref} ${a} ${b} ${resistiveValue(part.value, '10k')}`);
+    if (part.kind === 'photoresistor' || part.kind === 'thermistor' || part.kind === 'ir_phototransistor') lines.push(`${ref} ${a} ${b} ${resistiveValue(part.value, '10k')}`);
     if (part.kind === 'buzzer') lines.push(`${ref} ${a} ${b} ${resistiveValue(part.value, '1k')}`);
     if (part.kind === 'crystal') lines.push(`${ref} ${a} ${b} 20p`);
     if (part.kind === 'pushbutton') lines.push(`${ref} ${a} ${b} 10Meg`);
@@ -767,6 +768,7 @@ export const toSpice = (circuit) => {
     lines.push('.model DBLU D(IS=1e-20 N=2 RS=10 CJO=2p BV=5 IBV=10u)');
   }
   if (circuit.components.some((part) => part.kind === 'schottky')) lines.push('.model DSCH D(IS=1e-8 RS=0.5 N=1.05 BV=40 IBV=1u)');
+  if (circuit.components.some((part) => part.kind === 'ir_led')) lines.push('.model DIR D(IS=1e-18 N=1.4 RS=6 CJO=2p BV=5 IBV=10u)');
   if (circuit.components.some((part) => part.kind === 'bjt_pnp')) lines.push('.model Q2N3906 PNP(IS=1e-14 BF=200 VAF=100)');
   if (circuit.components.some((part) => part.kind === 'mosfet_n')) lines.push('.model MNMOS NMOS(LEVEL=1 KP=20u VTO=2)');
   if (circuit.components.some((part) => part.kind === 'mosfet_p')) lines.push('.model MPMOS PMOS(LEVEL=1 KP=10u VTO=-2)');

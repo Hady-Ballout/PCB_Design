@@ -32,7 +32,7 @@ export const formatSI = (value, unit) => {
 
 const RESISTIVE_KINDS = new Set([
   'resistor', 'load', 'buzzer', 'dc_motor', 'vibration_motor', 'fuse',
-  'photoresistor', 'thermistor', 'current_sensor',
+  'photoresistor', 'thermistor', 'ir_phototransistor', 'current_sensor',
 ]);
 
 export const observablesFor = (netlist, probe, controlState = new Map()) => {
@@ -69,7 +69,7 @@ export const observablesFor = (netlist, probe, controlState = new Map()) => {
           entry.segments[device.channel] = { amps, brightness: ledBrightness(seenAmps) };
         } else {
           entry.amps = amps;
-          if (device.kind === 'led') entry.brightness = ledBrightness(seenAmps);
+          if (device.kind === 'led' || device.kind === 'ir_led') entry.brightness = ledBrightness(seenAmps);
         }
         break;
       }

@@ -19,6 +19,7 @@ function symbolPaths(kind) {
         </>
       );
     case 'led':
+    case 'ir_led':
       return (
         <>
           <path d="M2 12h16 M32 12h14 M18 6v12l14 -6z M32 6v12" />

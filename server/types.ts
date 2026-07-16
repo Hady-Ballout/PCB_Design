@@ -94,6 +94,15 @@ export interface ClarifyResult {
   questions: ClarifyQuestion[];
 }
 
+// ── Plan / Ask assist modes ──
+
+export type AssistMode = 'plan' | 'ask';
+
+export interface AssistResult {
+  mode: AssistMode;
+  reply: string;
+}
+
 // ── AI provider ──
 
 export interface ProviderConfig {
@@ -141,6 +150,16 @@ export interface GeneratedCircuit extends ParsedCircuitResponse {
 export interface StreamState {
   attempt: number;
   correcting: boolean;
+}
+
+// Live reasoning tokens (e.g. GLM reasoning_content) forwarded to the client
+// while a request is in flight; never part of the persisted result.
+export type ThinkingCallback = (delta: string) => void;
+
+export interface OpenAiStreamHandlers {
+  onThinking?: ThinkingCallback;
+  // Called with the cumulative assistant text after each content chunk.
+  onContent?: (content: string) => void;
 }
 
 export interface CorrectionContext {

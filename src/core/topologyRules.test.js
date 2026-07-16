@@ -136,6 +136,56 @@ describe('led_polarity', () => {
   });
 });
 
+describe('IR discrete parts', () => {
+  it('flags an IR emitter LED across the supply with no resistor', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'DIR1', kind: 'ir_led', value: '940nm', nodes: ['VCC', '0'] },
+    ]));
+    expect(idsOf(result)).toContain('led_no_series_resistor');
+  });
+
+  it('accepts an IR emitter LED behind a series resistor', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '220', nodes: ['VCC', 'IRA'] },
+      { ref: 'DIR1', kind: 'ir_led', value: '940nm', nodes: ['IRA', '0'] },
+    ]));
+    expect(idsOf(result)).not.toContain('led_no_series_resistor');
+    expect(errorsOf(result)).toEqual([]);
+  });
+
+  it('flags an unambiguously reversed IR emitter LED', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '220', nodes: ['IRA', '0'] },
+      { ref: 'DIR1', kind: 'ir_led', value: '940nm', nodes: ['IRA', 'VCC'] },
+    ]));
+    expect(idsOf(result)).toContain('led_polarity');
+  });
+
+  it('does not let an IR emitter LED pass for a flyback diode', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('esp32', 'U1', { '3V3': 'V33', GND: '0', GPIO4: 'CTRL' }),
+      { ref: 'RB1', kind: 'resistor', value: '1k', nodes: ['CTRL', 'BASE'] },
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'RM1', kind: 'dc_motor', value: '6V', nodes: ['VCC', 'MLOW'] },
+      { ref: 'DIR1', kind: 'ir_led', value: '940nm', nodes: ['MLOW', 'VCC'] },
+      { ref: 'Q1', kind: 'bjt_npn', value: '2N2222', nodes: ['MLOW', 'BASE', '0'] },
+    ]));
+    expect(idsOf(result)).toContain('missing_flyback_diode');
+  });
+
+  it('keeps an IR phototransistor divider clean', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'RIR1', kind: 'ir_phototransistor', value: '', nodes: ['VCC', 'VSENSE'] },
+      { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VSENSE', '0'] },
+    ]));
+    expect(result.violations).toEqual([]);
+  });
+});
+
 describe('i2c_missing_pullups', () => {
   it('warns when SDA/SCL have no pull-up resistors', () => {
     const result = checkCircuitTopology(circuitOf([

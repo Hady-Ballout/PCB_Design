@@ -20,6 +20,7 @@ the frontend expects `VITE_API_URL` (see below) or same-origin `/api`.
 |---|---|
 | `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_API_KEY` | local/hosted Ollama connection |
 | `OLLAMA_NUM_CTX`, `OLLAMA_NUM_PREDICT` | context/output size for circuit generation |
+| `OLLAMA_NUM_PREDICT_CLARIFY`, `OLLAMA_NUM_PREDICT_ASSIST` | output budgets for the clarify round (default 512) and Plan/Ask replies (default 1024) |
 | `OLLAMA_CONTEXT_DIAGNOSTICS` | `1` to log per-request turn count/revision flag |
 | `AI_PROVIDER`, `AI_API_URL`, `AI_MODEL`, `AI_API_KEY`, `AI_MAX_TOKENS` | switch to an OpenAI-compatible provider (e.g. Z.ai/GLM) instead of Ollama |
 | `ZAI_THINKING_TYPE`, `ZAI_REASONING_EFFORT` | Z.ai-specific tuning |

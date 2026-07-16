@@ -22,7 +22,7 @@ import {
   kindLabel,
 } from './componentKinds.js';
 
-const RESISTIVE_KINDS = new Set(['resistor', 'load', 'photoresistor', 'thermistor', 'potentiometer']);
+const RESISTIVE_KINDS = new Set(['resistor', 'load', 'photoresistor', 'thermistor', 'ir_phototransistor', 'potentiometer']);
 const DRIVER_KINDS = new Set(['bjt_npn', 'bjt_pnp', 'mosfet_n', 'mosfet_p']);
 const HEAVY_LOAD_KINDS = new Set(['buzzer', 'dc_motor', 'vibration_motor']);
 // Inductive motor loads that need a flyback diode when transistor-switched.
@@ -41,7 +41,7 @@ const DRIVER_MODULE_OUTPUT_PINS = {
 const ISOLATOR_OUTPUT_PINS = {
   optocoupler: new Set(['E', 'C']),
 };
-const DIODE_KINDS = new Set(['diode', 'led', 'zener', 'schottky']);
+const DIODE_KINDS = new Set(['diode', 'led', 'ir_led', 'zener', 'schottky']);
 const GPIO_PIN_PATTERN = /^(D\d+|A\d+|GPIO\d+)$/;
 const MCU_LOGIC_VOLTS = { arduino_uno: 5, raspberry_pi: 3.3, esp32: 3.3 };
 
@@ -55,6 +55,7 @@ const ROLE_PINS = {
   mosfet_p: ['drain', 'gate', 'source'],
   diode: ['anode', 'cathode'],
   led: ['anode', 'cathode'],
+  ir_led: ['anode', 'cathode'],
   zener: ['anode', 'cathode'],
   schottky: ['anode', 'cathode'],
   vibration_motor: ['+', '−'],
@@ -387,7 +388,7 @@ const TOPOLOGY_RULES = [
       const found = [];
       const noResistor = { crossResistors: false, crossDiodes: true, crossDrivers: true };
       for (const part of circuit.components) {
-        const legs = part.kind === 'led' ? [[0, 1]]
+        const legs = part.kind === 'led' || part.kind === 'ir_led' ? [[0, 1]]
           : part.kind === 'rgb_led' ? [[0, 3], [1, 3], [2, 3]]
             // The optocoupler's input LED (A pin 1, K pin 2) needs a series
             // resistor exactly like a discrete LED.
@@ -426,7 +427,7 @@ const TOPOLOGY_RULES = [
       for (const part of circuit.components) {
         // Zener stays excluded (normally reverse-biased); a schottky is a
         // normal forward rectifier and gets the same polarity check.
-        if (part.kind !== 'led' && part.kind !== 'diode' && part.kind !== 'schottky') continue;
+        if (part.kind !== 'led' && part.kind !== 'ir_led' && part.kind !== 'diode' && part.kind !== 'schottky') continue;
         const [anodeNet, cathodeNet] = part.nodes.map(String);
         const anodeSide = graph.reach(anodeNet, { skipRefs: [part.ref] });
         const cathodeSide = graph.reach(cathodeNet, { skipRefs: [part.ref] });
@@ -573,7 +574,7 @@ const TOPOLOGY_RULES = [
         const switched = hasDriverOutputOn(graph, motorNets);
         if (!switched) continue;
         const hasFlyback = circuit.components.some((other) =>
-          DIODE_KINDS.has(other.kind) && other.kind !== 'led'
+          DIODE_KINDS.has(other.kind) && other.kind !== 'led' && other.kind !== 'ir_led'
           && other.nodes.length === 2
           && motorNets.has(String(other.nodes[0])) && motorNets.has(String(other.nodes[1])));
         if (!hasFlyback) {
@@ -724,7 +725,9 @@ const traceLinearBranch = (graph, startPin, gpioNet) => {
       const value = parseResistance(part.value);
       if (value === null) return null;
       ohms += value;
-    } else if (part.kind === 'led') {
+    } else if (part.kind === 'led' || part.kind === 'ir_led') {
+      // The 2 V-per-LED drop assumed by the caller slightly under-estimates
+      // current for an IR LED (Vf ≈ 1.3 V) — conservative for an advisory rule.
       ledCount += 1;
     } else if (part.kind !== 'diode' && part.kind !== 'pushbutton' && part.kind !== 'inductor') {
       return null;

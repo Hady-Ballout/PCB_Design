@@ -36,7 +36,7 @@ const CLICK_MOVE_THRESHOLD = 3; // viewBox px of drag below which a press is a c
 const DEFAULT_VALUE_BY_KIND = {
   resistor: '1k', load: '1k', photoresistor: '10k', thermistor: '10k', potentiometer: '10k',
   capacitor: '100nF', inductor: '10mH', crystal: '16MHz', buzzer: '5V active',
-  diode: '1N4148', zener: '5.1V', led: 'red',
+  diode: '1N4148', zener: '5.1V', led: 'red', ir_led: '940nm', ir_phototransistor: '10k',
   schottky: '1N5819', fuse: '1A', bridge_rectifier: 'DB107', vibration_motor: '3V',
   bjt_npn: '2N2222', bjt_pnp: '2N2907',
   opamp: 'LM358', comparator: 'LM358',

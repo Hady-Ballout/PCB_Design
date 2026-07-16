@@ -1,8 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  COMPOSER_MODES,
+  buildAssistContext,
   buildConversationContext,
   chatTitleFromPrompt,
   composeClarifiedPrompt,
+  composePlanBuildPrompt,
   createChat,
   formatClarificationSummary,
   loadChatStore,
@@ -64,6 +67,11 @@ function App() {
   const [page, setPage] = useState(pageFromHash);
   const [generatingChatId, setGeneratingChatId] = useState(null);
   const [clarifyingChatId, setClarifyingChatId] = useState(null);
+  const [assistingChatId, setAssistingChatId] = useState(null);
+  // Live model reasoning for the single in-flight AI request. Ephemeral: reset
+  // whenever the attempt changes (generation correction retry) and cleared
+  // when the request settles — never written to the chat store.
+  const [thinkingState, setThinkingState] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const messagesEndRef = useRef(null);
   const spiceEditorRef = useRef(null);
@@ -87,7 +95,20 @@ function App() {
   const circuitJsonSyncError = activeChat?.circuitJsonSyncError || '';
   const isGenerating = generatingChatId === activeChat?.id;
   const isClarifying = clarifyingChatId === activeChat?.id;
-  const generationBusy = Boolean(generatingChatId || clarifyingChatId);
+  const isAssisting = assistingChatId === activeChat?.id;
+  const generationBusy = Boolean(generatingChatId || clarifyingChatId || assistingChatId);
+  const thinkingText = thinkingState?.chatId === activeChat?.id ? thinkingState.text : '';
+
+  const appendThinking = (chatId, delta, attempt = 0) => {
+    if (!delta) return;
+    setThinkingState((prev) => (
+      prev && prev.chatId === chatId && prev.attempt === attempt
+        ? { chatId, attempt, text: prev.text + delta }
+        : { chatId, attempt, text: delta }
+    ));
+  };
+  const clearThinking = () => setThinkingState(null);
+  const composerMode = activeChat?.draftMode || 'implement';
   const sortedChats = useMemo(
     () => [...chatStore.chats].sort((a, b) => b.updatedAt - a.updatedAt),
     [chatStore.chats],
@@ -120,6 +141,7 @@ function App() {
     }));
   };
   const setPrompt = (value) => setChatField('draft', value);
+  const setComposerMode = (value) => setChatField('draftMode', COMPOSER_MODES.includes(value) ? value : 'implement');
   const setEditableSpice = (value) => setChatField('editableSpice', value);
   const setEditableCircuitJson = (value) => setChatField('editableCircuitJson', value);
   const setEditableCode = (value) => setChatField('editableCode', value);
@@ -517,6 +539,7 @@ function App() {
   // back to direct generation so the feature can never block a prompt.
   const beginPrompt = async (chat, submittedPrompt) => {
     const chatId = chat.id;
+    const mode = COMPOSER_MODES.includes(chat.draftMode) ? chat.draftMode : 'implement';
     const priorMessages = chat.messages;
     const currentDesign = chat.result
       ? {
@@ -543,10 +566,11 @@ function App() {
       updatedAt: Date.now(),
       draft: '',
       error: '',
-      // A new prompt supersedes any question round still waiting for answers.
+      // A new Plan/Implement prompt supersedes any question round still
+      // waiting for answers; an Ask question leaves the round answerable.
       messages: [
         ...chat.messages.map((message) => (
-          message.clarification?.status === 'pending'
+          mode !== 'ask' && message.clarification?.status === 'pending'
             ? { ...message, clarification: { ...message.clarification, status: 'skipped' } }
             : message
         )),
@@ -554,10 +578,21 @@ function App() {
       ],
     }));
 
+    if (mode !== 'implement') {
+      await runAssist(chatId, mode, submittedPrompt, priorMessages, currentDesign, memory);
+      return;
+    }
+
     setClarifyingChatId(chatId);
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 20000);
+      // Idle timeout: stream activity (thinking tokens) resets the clock, so
+      // a model that is visibly reasoning is not cut off at a fixed deadline.
+      let timeoutId = setTimeout(() => controller.abort(), 20000);
+      const resetIdleTimeout = () => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => controller.abort(), 20000);
+      };
       let questions = [];
       try {
         const response = await fetch(`${API_BASE}/api/clarify-circuit`, {
@@ -572,7 +607,13 @@ function App() {
           signal: controller.signal,
         });
         if (response.ok) {
-          const data = await response.json();
+          const contentType = response.headers.get('content-type') || '';
+          const data = contentType.includes('application/x-ndjson')
+            ? await readGenerationStream(response, (event) => {
+                resetIdleTimeout();
+                if (event.type === 'thinking') appendThinking(chatId, event.delta);
+              })
+            : await response.json();
           questions = Array.isArray(data.questions) ? data.questions : [];
         }
       } finally {
@@ -600,9 +641,140 @@ function App() {
       console.error(`Clarify round failed, generating directly: ${clarifyError.message}`);
     } finally {
       setClarifyingChatId(null);
+      clearThinking();
     }
 
     await runGeneration(chatId, submittedPrompt, priorMessages, currentDesign, previousSpice, memory);
+  };
+
+  // Plan/Ask modes: one conversational AI call, no clarify round, and no
+  // artifacts — the design, editors, and chat memory are never touched.
+  const runAssist = async (chatId, mode, submittedPrompt, priorMessages, currentDesign, memory) => {
+    setAssistingChatId(chatId);
+    try {
+      const controller = new AbortController();
+      // Plans run longer than clarify's 512 tokens, so 20s would be too
+      // tight. Idle timeout: stream activity (thinking tokens) resets the
+      // clock instead of capping the total request time.
+      let timeoutId = setTimeout(() => controller.abort(), 60000);
+      const resetIdleTimeout = () => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => controller.abort(), 60000);
+      };
+      let data;
+      try {
+        const response = await fetch(`${API_BASE}/api/assist-circuit`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({
+            mode,
+            prompt: submittedPrompt,
+            messages: buildAssistContext(priorMessages),
+            currentDesign,
+            memory,
+          }),
+          signal: controller.signal,
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.ok && contentType.includes('application/x-ndjson')) {
+          data = await readGenerationStream(response, (event) => {
+            resetIdleTimeout();
+            if (event.type === 'thinking') appendThinking(chatId, event.delta);
+          });
+        } else {
+          data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || `Request failed with HTTP ${response.status}.`);
+        }
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      const reply = String(data.reply || '').trim();
+      if (!reply) throw new Error('The assistant returned an empty reply.');
+      updateChat(chatId, (chat) => ({
+        ...chat,
+        updatedAt: Date.now(),
+        error: '',
+        messages: [
+          ...chat.messages,
+          {
+            id: messageId(),
+            role: 'assistant',
+            content: reply,
+            createdAt: Date.now(),
+            mode,
+            ...(mode === 'plan' ? { plan: { forPrompt: submittedPrompt, status: 'proposed' } } : {}),
+          },
+        ],
+      }));
+    } catch (assistError) {
+      updateChat(chatId, (chat) => ({
+        ...chat,
+        updatedAt: Date.now(),
+        error: assistError.message,
+        messages: [
+          ...chat.messages,
+          {
+            id: messageId(),
+            role: 'assistant',
+            content: `I couldn't ${mode === 'plan' ? 'draft a plan for' : 'answer'} that. Nothing was changed. (${assistError.message})`,
+            createdAt: Date.now(),
+          },
+        ],
+      }));
+    } finally {
+      setAssistingChatId(null);
+      clearThinking();
+    }
+  };
+
+  // "Build this" on a plan message: fold the plan into the generation prompt
+  // and run the normal circuit pipeline against the design as it is NOW (the
+  // click-time snapshot), skipping the clarify round — the plan already
+  // settled the open decisions.
+  const buildFromPlan = async (planMessageId) => {
+    const chat = activeChat;
+    if (!chat || generationBusy) return;
+    const message = chat.messages.find((entry) => entry.id === planMessageId);
+    if (!message?.plan || message.plan.status !== 'proposed') return;
+
+    const priorMessages = chat.messages;
+    const currentDesign = chat.result
+      ? {
+          circuit: chat.result.circuit,
+          spice: chat.editableSpice,
+          kicadNetlist: chat.editableKicadNetlist,
+          code: chat.editableCode,
+        }
+      : null;
+    const previousSpice = chat.editableSpice;
+    const memory = chat.memory;
+
+    updateChat(chat.id, (current) => ({
+      ...current,
+      updatedAt: Date.now(),
+      messages: [
+        ...current.messages.map((entry) => (
+          entry.id === planMessageId
+            ? { ...entry, plan: { ...entry.plan, status: 'built' } }
+            : entry
+        )),
+        {
+          id: messageId(),
+          role: 'user',
+          content: 'Build this plan.',
+          createdAt: Date.now(),
+        },
+      ],
+    }));
+
+    await runGeneration(
+      chat.id,
+      composePlanBuildPrompt(message.plan.forPrompt, message.content),
+      priorMessages,
+      currentDesign,
+      previousSpice,
+      memory,
+    );
   };
 
   const answerClarification = (clarificationMessageId, questionId, answer) => {
@@ -714,6 +886,12 @@ function App() {
       const contentType = response.headers.get('content-type') || '';
       const data = contentType.includes('application/x-ndjson')
         ? await readGenerationStream(response, (event) => {
+            if (event.type === 'thinking') {
+              // A new attempt (correction retry) restarts the reasoning, so
+              // appendThinking replaces the window instead of appending.
+              appendThinking(chatId, event.delta, event.attempt || 0);
+              return;
+            }
             if (event.type !== 'spice') return;
             updateChat(chatId, (chat) => ({
               ...chat,
@@ -788,6 +966,7 @@ function App() {
       }));
     } finally {
       setGeneratingChatId(null);
+      clearThinking();
     }
   };
 
@@ -1552,6 +1731,11 @@ function App() {
           openChat={openChat}
           isGenerating={isGenerating}
           isClarifying={isClarifying}
+          isAssisting={isAssisting}
+          composerMode={composerMode}
+          setComposerMode={setComposerMode}
+          buildFromPlan={buildFromPlan}
+          thinkingText={thinkingText}
           answerClarification={answerClarification}
           submitClarification={(clarificationMessageId) => submitClarificationAnswers(clarificationMessageId, false)}
           skipClarification={(clarificationMessageId) => submitClarificationAnswers(clarificationMessageId, true)}

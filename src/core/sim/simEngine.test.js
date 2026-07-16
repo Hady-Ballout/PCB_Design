@@ -121,6 +121,35 @@ describe('createSimulation — DC solves', () => {
     expect(bright).toBeGreaterThan(4);
   });
 
+  it('lights an IR emitter LED behind a series resistor', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '220', nodes: ['VCC', 'VA'] },
+      { ref: 'D1', kind: 'ir_led', value: '940nm', nodes: ['VA', '0'] },
+    ]));
+    expect(engine.solveDC()).toBe(true);
+    const entry = engine.observables().get('D1');
+    // ~16 mA through 220 Ω at Vf ≈ 1.3 V → full brightness.
+    expect(entry.amps).toBeGreaterThan(0.01);
+    expect(entry.brightness).toBeGreaterThan(0.5);
+  });
+
+  it('swings an IR phototransistor divider with the IR slider', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'Q1', kind: 'ir_phototransistor', value: '', nodes: ['VCC', 'VSENSE'] },
+      { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VSENSE', '0'] },
+    ]));
+    expect(engine.solveDC()).toBe(true);
+    const dark = volts(engine, 'VSENSE');
+    engine.setControl('Q1', 'ir', 1);
+    engine.solveDC();
+    const lit = volts(engine, 'VSENSE');
+    expect(dark).toBeLessThan(0.5);
+    expect(lit).toBeGreaterThan(4);
+    expect(engine.observables().get('Q1').ohms).toBeCloseTo(500, 0);
+  });
+
   it('models the regulator as an ideal source on its output', () => {
     const engine = createSimulation(circuitOf([
       { ref: 'V1', kind: 'voltage_source', value: '9V', nodes: ['VIN', '0'] },

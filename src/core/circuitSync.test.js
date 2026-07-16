@@ -500,6 +500,32 @@ describe('tier-2 synchronization', () => {
     expect(kinds).toMatchObject({ VSOL1: 'solar_panel', F1: 'fuse', DS1: 'schottky', RVM1: 'vibration_motor' });
   });
 
+  it('round-trips the IR parts through SPICE export and reparse', () => {
+    const base = {
+      title: 'IR link',
+      type: 'sensor',
+      supplyVoltage: 5,
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', footprint: '', nodes: ['VCC', '0'] },
+        { ref: 'R1', kind: 'resistor', value: '220', footprint: '', nodes: ['VCC', 'IRA'] },
+        { ref: 'DIR1', kind: 'ir_led', value: '940nm', footprint: '', nodes: ['IRA', '0'] },
+        { ref: 'RIR1', kind: 'ir_phototransistor', value: '', footprint: '', nodes: ['VCC', 'VSENSE'] },
+        { ref: 'R2', kind: 'resistor', value: '10k', footprint: '', nodes: ['VSENSE', '0'] },
+      ],
+      notes: [],
+    };
+    const parsed = parseSpiceNetlist(toSpice(base), base);
+    expect(parsed.ok).toBe(true);
+    const kinds = Object.fromEntries(parsed.circuit.components.map((part) => [part.ref, part.kind]));
+    expect(kinds).toMatchObject({ DIR1: 'ir_led', RIR1: 'ir_phototransistor' });
+  });
+
+  it('recognizes a DIR line as an ir_led even without a base circuit', () => {
+    const parsed = parseSpiceNetlist('* deck\nV1 VCC 0 DC 5\nD7 VCC K1 DIR\nR1 K1 0 220\n.end', null);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.circuit.components.find((part) => part.ref === 'D7').kind).toBe('ir_led');
+  });
+
   it('recognizes a DSCH line as a schottky even without a base circuit', () => {
     const parsed = parseSpiceNetlist('* deck\nV1 VCC 0 DC 5\nDS9 VCC K1 DSCH\nR1 K1 0 330\n.end', null);
     expect(parsed.ok).toBe(true);

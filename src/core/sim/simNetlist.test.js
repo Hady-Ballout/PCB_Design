@@ -54,6 +54,33 @@ describe('buildSimNetlist', () => {
     expect(netlist.nodeIndex.has('__int_D1')).toBe(true);
   });
 
+  it('emits the IR phototransistor as a slider-driven variable resistor', () => {
+    const netlist = buildSimNetlist(circuitOf(withSupply([
+      { ref: 'R2', kind: 'ir_phototransistor', value: '', nodes: ['VCC', 'OUT'] },
+      { ref: 'R3', kind: 'resistor', value: '10k', nodes: ['OUT', '0'] },
+    ])));
+    expect(netlist.ok).toBe(true);
+    expect(netlist.devices.find((device) => device.id === 'R2')).toMatchObject({
+      type: 'vres', model: 'ir_phototransistor',
+    });
+    expect(netlist.controls).toContainEqual(expect.objectContaining({
+      ref: 'R2', type: 'slider', name: 'ir', value: 0.1, label: 'IR light',
+    }));
+    expect(netlist.warnings.some((w) => w.code === 'kind_not_simulated')).toBe(false);
+  });
+
+  it('emits the IR emitter LED as a diode with the low-Vf DIR model', () => {
+    const netlist = buildSimNetlist(circuitOf(withSupply([
+      { ref: 'D1', kind: 'ir_led', value: '940nm', nodes: ['VCC', '0'] },
+    ])));
+    expect(netlist.ok).toBe(true);
+    const junction = netlist.devices.find((device) => device.id === 'D1' && device.type === 'diode');
+    expect(junction.model).toMatchObject({ is: 1e-18, n: 1.4 });
+    // Series resistance externalized like every other diode kind.
+    expect(netlist.devices.find((device) => device.id === 'D1__rs').ohms).toBe(6);
+    expect(netlist.warnings.some((w) => w.code === 'kind_not_simulated')).toBe(false);
+  });
+
   it('flags MCU boards without dropping the rest; active kinds simulate', () => {
     const netlist = buildSimNetlist(circuitOf(withSupply([
       { ref: 'U1', kind: 'esp32', value: '', nodes: Array.from({ length: 12 }, (_, i) => `NC_U1_${i + 1}`) },

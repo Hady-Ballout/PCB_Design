@@ -1,12 +1,38 @@
 # AI provider and the circuit model
 
+## Composer modes: Plan, Ask, Implement
+
+Every chat prompt is sent in one of three user-selectable modes (a minimal dropdown at the
+composer's bottom-left corner, persisted per chat as `draftMode` in `chatStore.js`,
+default **Implement**).
+`beginPrompt` in `src/app/App.jsx` branches on the mode:
+
+- **Plan** — one call to `POST /api/assist-circuit` (`generateAssistReply` in
+  `server/ai/assistProvider.ts`, `mode: 'plan'`). The AI returns a plain-text design plan;
+  nothing else changes (no circuit, no editors, no chat memory). The plan message carries
+  `plan: {forPrompt, status: 'proposed'|'built'}` and renders a **"Build this"** button
+  (`PlanCard.jsx`); clicking it marks the plan `built` and runs the normal generation
+  pipeline with `composePlanBuildPrompt(forPrompt, planText)` — the clarify round is
+  skipped because the plan already settled the open decisions.
+- **Ask** — same endpoint with `mode: 'ask'`: a conversational answer (with the current
+  circuit JSON in context when a design exists), again with zero side effects. Uniquely,
+  an Ask prompt does **not** supersede a pending clarification round — the question card
+  stays answerable afterwards.
+- **Implement** — the two-phase clarify → generate flow below, unchanged.
+
+Plan/Ask replies are assistant messages without a `circuit`, so the strict generation
+context (`buildConversationContext` client-side, `sanitizeConversationHistory`
+server-side) still excludes them — an approved plan reaches generation only through
+`composePlanBuildPrompt`. The assist endpoint instead uses `buildAssistContext` /
+`sanitizeAssistHistory`, which keep assistant text turns for conversational continuity.
+
 ## Two-phase prompt flow: clarify, then generate
 
-Every user prompt runs two AI calls, orchestrated deterministically by the client
-(`beginPrompt` in `src/app/App.jsx`):
+Every **Implement**-mode prompt runs two AI calls, orchestrated deterministically by the
+client (`beginPrompt` in `src/app/App.jsx`):
 
 1. **Clarify** — `POST /api/clarify-circuit` → `generateClarifyingQuestions`
-   (`server/ai/clarifyProvider.ts`). A cheap, non-streaming call with its own small
+   (`server/ai/clarifyProvider.ts`). A cheap call with its own small
    grammar-constrained schema (`CLARIFY_SCHEMA`: 1–3 questions, 2–4 short options each) and
    a standalone system prompt (no knowledge base). The server sanitizes the model output
    (`sanitizeClarifyQuestions`: caps, dedupe, `q1..q3` ids) and always appends the
@@ -24,6 +50,23 @@ never block a prompt. There is no correction retry on the clarify call.
 Clarification assistant messages carry no `circuit`, so `buildConversationContext`
 (client) and `sanitizeConversationHistory` (server) exclude them from model history; the
 user's answers reach future turns via the compact `Clarifications: …` user message instead.
+
+## Live thinking display
+
+All three AI chat endpoints stream NDJSON with a shared `{type: 'thinking', delta}` event
+carrying the model's live reasoning tokens: for OpenAI-compatible providers,
+`streamOpenAiCompatibleContent` (`server/ai/ollamaProvider.ts`) makes the request with
+`stream: true` and forwards each SSE `delta.reasoning_content` chunk (GLM emits these when
+`ZAI_THINKING_TYPE=enabled`); the Ollama branch forwards `message.thinking` when a model
+produces it. Deltas are batched to ~10 events/sec (`createThinkingBatcher` in
+`server/index.ts`); on `/api/generate-circuit` they also carry `attempt` so the client can
+reset the display when a correction retry restarts the reasoning. The chat UI shows the
+text in an ephemeral `ThinkingWindow` inside the pending bubble and discards it the moment
+the reply arrives — thinking is never persisted, never in chat history, and never sent
+back to the model. Models without reasoning tokens produce no events and the static
+placeholder bubbles behave as before. Bonus of the streaming call: the provisional-SPICE
+preview during generation now works for OpenAI-compatible providers too (previously
+Ollama-only), since `delta.content` chunks feed the same `onContent` callback.
 
 ## The circuit JSON contract
 
@@ -53,11 +96,12 @@ code can go stale until the next AI generation (known limitation). The
 Allowed `kind` values are the single source of truth in `src/core/componentKinds.js`
 (`ALLOWED_KINDS`). The AI schema `enum` and the "Allowed component kinds" / fixed-pin
 guidance in the system prompt (`server/ai/ollamaProvider.ts`) are **generated from it**, so
-adding a kind to the registry automatically offers it to the model. The current 64 kinds:
+adding a kind to the registry automatically offers it to the model. The current 66 kinds:
 
 - **Core (14):** `resistor`, `capacitor`, `inductor`, `diode`, `led`, `bjt_npn`, `bjt_pnp`,
   `mosfet_n`, `mosfet_p`, `opamp`, `regulator`, `voltage_source`, `signal_source`, `load`.
-- **Extended (48):** `zener`, `photoresistor`, `thermistor`, `buzzer`, `crystal`,
+- **Extended (50):** `zener`, `photoresistor`, `thermistor`, `ir_led`, `ir_phototransistor`,
+  `buzzer`, `crystal`,
   `temp_sensor`, `comparator`, `pushbutton`, `potentiometer`, `switch_spdt`, `rgb_led`,
   `seven_segment`, `timer_555`, `ultrasonic_sensor`, `dht_sensor`, `oled_display`,
   `pir_sensor`, `servo`, `dc_motor`, `relay_module`, `stepper_motor`, `stepper_driver`,
@@ -69,7 +113,13 @@ adding a kind to the registry automatically offers it to the model. The current 
   than wiring-only: `optocoupler` emits one X line against the built-in `PC817`
   subcircuit, `current_sensor` a single derived `<REF>_S` milliohm shunt line,
   `bridge_rectifier` four derived `<REF>_A..D` diode lines (compound pattern),
-  `schottky` a D line with the `DSCH` model, `fuse`/`vibration_motor` resistive R lines,
+  `schottky` a D line with the `DSCH` model, `ir_led` a D line with the low-Vf `DIR`
+  model (940 nm emitter, Vf ≈ 1.3 V — LED family everywhere else: series-resistor and
+  polarity topology rules, brightness observable rendered as a faint violet
+  "phone-camera" glow on a smoked lens), `ir_phototransistor` a resistive R line that
+  the live sim replaces with an **IR light slider**-driven variable resistance
+  (dark ≈ 10 MΩ → saturated ≈ 500 Ω, the photoresistor pattern; use it in a divider),
+  `fuse`/`vibration_motor` resistive R lines,
   and `solar_panel` a plain `V... DC` line (full source treatment — see below).
 - **Microcontroller boards (3):** `arduino_uno`, `raspberry_pi`, `esp32`.
 
@@ -122,7 +172,7 @@ TO-92 cans, `rotary_encoder`/`imu_sensor`/`rtc_module`/`sd_card`/`soil_moisture`
 `stepper_driver`/`led_strip`/`keypad`/`joystick`/`rfid_reader`/`mouse_sensor`/`current_sensor` sit in
 compact off-board slots below the board (variable-height slot stack shared with the MCU
 boards; MCU boards always claim the first slots). Kind-specific artwork dispatches via
-`KIND_RENDERERS` in `parts.jsx` (zener/photoresistor/thermistor/buzzer/crystal/
+`KIND_RENDERERS` in `parts.jsx` (zener/photoresistor/thermistor/ir_led/ir_phototransistor/buzzer/crystal/
 potentiometer/switch_spdt/rgb_led/ultrasonic_sensor/dht_sensor/oled_display/pir_sensor/
 rotary_encoder/imu_sensor) plus dedicated straddle and slot bodies (custom LCD/L298N/
 28BYJ-48/keypad/joystick artwork; `OffboardModuleBody` is the generic slot PCB for the
@@ -287,12 +337,12 @@ element-for-element**: the same compound expansions (potentiometer → two half 
 around the wiper, switch_spdt with pin 2 as COM, rgb_led → three diodes, seven_segment →
 per-connected-segment diode, bridge_rectifier → four DGEN legs, current_sensor → 1.2 mΩ
 shunt gated on connected IP± pins), the same NC-leg skipping, and the same `.model`
-parameters (DGEN/DRED/DSCH/zener BV), so the live sim and the server-side Ngspice waveform
+parameters (DGEN/DRED/DSCH/DIR/zener BV), so the live sim and the server-side Ngspice waveform
 page agree numerically. Where they intentionally differ:
 
 | Aspect | `toSpice()` / Ngspice | live sim (M1–M3) |
 |---|---|---|
-| pushbutton / switch / pot / LDR / thermistor | fixed snapshot (open button, 50 % wiper, 10 k defaults) | **interactive**: control state (pressed, throw, wiper α, lux, °C) parameterizes the stamps live |
+| pushbutton / switch / pot / LDR / thermistor / IR phototransistor | fixed snapshot (open button, 50 % wiper, 10 k defaults) | **interactive**: control state (pressed, throw, wiper α, lux, °C, IR level) parameterizes the stamps live |
 | BJT | Q2N2222/Q2N3906 with VAF=100 | Ebers-Moll, same IS/BF, **no Early effect** (simpler Jacobian, negligible at breadboard scale) |
 | MOSFET | LEVEL=1, no λ | same level 1 plus **λ=0.01** (keeps the saturation Jacobian nonsingular). Both are the deck's weak KP=20µ device — a 5 V gate saturates at ~90 µA, so LEDs won't visibly light through it; this matches ngspice exactly and is not a sim bug |
 | opamp | LM358 subcircuit (VCVS ladder, **no rail clamp**) | behavioral tanh VCVS (gain 1e5, Ro=100Ω) **clamped to the supply rails** with LM358-ish headroom — a deliberate improvement |
@@ -446,7 +496,15 @@ pin is module-driven active-low while unread motion is pending (ir_receiver OUT
 mechanics); RST is plain GPIO the model ignores. Not power-gated (standard
 bridge-peripheral limitation). Needs the `PMW3360 Module` library installed.
 
-Still deferred: `sd_card` (FAT).
+**Discrete IR pair.** Alongside the TSOP module, `ir_led` (940 nm emitter diode, `DIR`
+model, dark lens + violet conduction glow) and `ir_phototransistor` (raw 2-pin receiver,
+`IR light`-slider variable resistance for divider circuits) are plain analog parts — the
+LED and LDR templates, not bridge peripherals. Deliberate non-goal: there is **no optical
+coupling** between an `ir_led` and any receiver in the same circuit — all peripherals
+couple only to the MCU/nets, never to each other. An emitter→receiver optical link joins
+the deferred list below.
+
+Still deferred: `sd_card` (FAT); optical emitter→receiver coupling for the IR pair.
 
 Solver notes: junction limiting (pnjlim) must veto NR convergence — with an LED off-seed,
 node voltages sit nearly still for ~10 iterations while the junction linearization climbs

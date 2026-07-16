@@ -3,6 +3,7 @@
 // potentiometer wiper on the board.
 const SLIDER_PRESENTATION = {
   light: { icon: '🌙', endIcon: '🔆', format: (value) => `${Math.round(value * 100)}%` },
+  ir: { icon: '🌙', endIcon: '📡', format: (value) => `${Math.round(value * 100)}%` },
   tempC: { icon: '❄', endIcon: '🔥', format: (value) => `${Math.round(value)} °C` },
   wiper: { icon: '', endIcon: '', format: (value) => `${Math.round(value * 100)}%` },
 };

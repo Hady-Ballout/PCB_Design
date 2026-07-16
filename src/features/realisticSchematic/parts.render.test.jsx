@@ -302,6 +302,45 @@ describe('realistic part rendering', () => {
     expect(running).toContain('url(#rsGlow)');
   });
 
+  it('renders the IR emitter dark with a violet glow only while conducting', () => {
+    const model = circuitToBreadboard({
+      title: 'ir emitter',
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'R1', kind: 'resistor', value: '220', nodes: ['VCC', 'IRA'] },
+        { ref: 'DIR1', kind: 'ir_led', value: '940nm', nodes: ['IRA', '0'] },
+      ],
+    });
+    const part = model.parts.find((p) => p.kind === 'ir_led');
+    const idle = renderToStaticMarkup(<svg><PartDefs /><RealisticPart part={part} /></svg>);
+    // Smoked lens, no glow while off — IR is invisible until it conducts.
+    expect(idle).toContain('#2a2f3d');
+    expect(idle).not.toContain('#b06cf0');
+    const lit = renderToStaticMarkup(
+      <svg><PartDefs /><RealisticPart part={part} sim={{ brightness: 1 }} /></svg>,
+    );
+    // "Phone-camera view": faint violet glow while conducting.
+    expect(lit).toContain('#b06cf0');
+    expect(lit).toContain('url(#rsGlow)');
+  });
+
+  it('renders the IR phototransistor as a dark two-lead package with no glow', () => {
+    const model = circuitToBreadboard({
+      title: 'ir receiver',
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'RIR1', kind: 'ir_phototransistor', value: '', nodes: ['VCC', 'VSENSE'] },
+        { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VSENSE', '0'] },
+      ],
+    });
+    const part = model.parts.find((p) => p.kind === 'ir_phototransistor');
+    const markup = renderToStaticMarkup(
+      <svg><PartDefs /><RealisticPart part={part} sim={{ amps: 0.001, volts: 3, ohms: 500 }} /></svg>,
+    );
+    expect(markup).toContain('#2a2f3d');
+    expect(markup).not.toContain('url(#rsGlow)');
+  });
+
   it('anchors peripheral pads on their body terminals but keeps MCU pads collinear', () => {
     const slot = { x: 0, y: 0, width: 448, height: 120 };
     // Peripherals: pads sit on the body (servo top-edge connector at y=58,
@@ -443,6 +482,8 @@ describe('library part thumbnails', () => {
     expect(renderToStaticMarkup(<PartThumbnail kind="schottky" />)).toContain('url(#rsPartSchottky)');
     expect(renderToStaticMarkup(<PartThumbnail kind="bridge_rectifier" />)).toContain('DB107');
     expect(renderToStaticMarkup(<PartThumbnail kind="solar_panel" />)).toContain('url(#rsPartSolar)');
+    expect(renderToStaticMarkup(<PartThumbnail kind="ir_led" />)).toContain('#2a2f3d');
+    expect(renderToStaticMarkup(<PartThumbnail kind="ir_phototransistor" />)).toContain('#2a2f3d');
   });
 
   it('renders the regulator thumbnail with three TO-220 leads', () => {

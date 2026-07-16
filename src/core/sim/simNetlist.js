@@ -29,6 +29,8 @@ const DIODE_MODELS = {
   DGRN: { is: 1e-20, n: 2, rs: 10, bv: 5, ibv: 10e-6 },
   DBLU: { is: 1e-20, n: 2, rs: 10, bv: 5, ibv: 10e-6 },
   DSCH: { is: 1e-8, n: 1.05, rs: 0.5, bv: 40, ibv: 1e-6 },
+  // 940nm IR emitter: Vf ≈ 1.3 V at 10 mA, well below a visible red LED.
+  DIR: { is: 1e-18, n: 1.4, rs: 6, bv: 5, ibv: 10e-6 },
   // PC817 optocoupler input LED (mirrors the DOPTOLED subcircuit model).
   DOPTOLED: { is: 1e-16, n: 1.8, rs: 2 },
 };
@@ -347,6 +349,9 @@ export const buildSimNetlist = (circuit, options = {}) => {
       case 'led':
         addDiode(ref, ref, kind, a, b, 'DRED');
         break;
+      case 'ir_led':
+        addDiode(ref, ref, kind, a, b, 'DIR');
+        break;
       case 'schottky':
         addDiode(ref, ref, kind, a, b, 'DSCH');
         break;
@@ -593,6 +598,10 @@ export const buildSimNetlist = (circuit, options = {}) => {
       case 'photoresistor':
         addVariableResistor(ref, ref, kind, indexOf(a), indexOf(b), 'photoresistor', {});
         controls.push({ ref, kind, type: 'slider', name: 'light', min: 0, max: 1, step: 0.01, value: 0.55, label: 'Light' });
+        break;
+      case 'ir_phototransistor':
+        addVariableResistor(ref, ref, kind, indexOf(a), indexOf(b), 'ir_phototransistor', {});
+        controls.push({ ref, kind, type: 'slider', name: 'ir', min: 0, max: 1, step: 0.01, value: 0.1, label: 'IR light' });
         break;
       case 'thermistor':
         addVariableResistor(ref, ref, kind, indexOf(a), indexOf(b), 'thermistor', { r25: parseOhms(value, 10e3) });

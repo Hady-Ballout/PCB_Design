@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   CHAT_STORAGE_KEY,
+  COMPOSER_MODES,
   NO_PREFERENCE_ANSWER,
+  buildAssistContext,
   buildConversationContext,
   chatTitleFromPrompt,
   composeClarifiedPrompt,
+  composePlanBuildPrompt,
   createChat,
   formatClarificationSummary,
   loadChatStore,
@@ -182,6 +185,76 @@ describe('chat store', () => {
     expect(formatClarificationSummary(questions, answers)).toBe(
       `Clarifications: What supply? -> USB 5V; Blink rate? -> ${NO_PREFERENCE_ANSWER}`,
     );
+  });
+
+  it('persists the composer mode per chat and coerces junk to implement', () => {
+    expect(COMPOSER_MODES).toEqual(['plan', 'ask', 'implement']);
+    expect(createChat({ id: 'mode-chat', now: 10 }).draftMode).toBe('implement');
+
+    const storage = memoryStorage();
+    const planChat = { ...createChat({ id: 'plan-chat', now: 10 }), draftMode: 'plan' };
+    const junkChat = { ...createChat({ id: 'junk-chat', now: 10 }), draftMode: 'yolo' };
+    const legacyChat = { ...createChat({ id: 'legacy-chat', now: 10 }) };
+    delete legacyChat.draftMode;
+    storage.setItem(CHAT_STORAGE_KEY, JSON.stringify({ chats: [planChat, junkChat, legacyChat], activeChatId: planChat.id }));
+
+    const [plan, junk, legacy] = loadChatStore(storage).chats;
+    expect(plan.draftMode).toBe('plan');
+    expect(junk.draftMode).toBe('implement');
+    expect(legacy.draftMode).toBe('implement');
+  });
+
+  it('persists plan state and assist mode on assistant messages only', () => {
+    const storage = memoryStorage();
+    const chat = {
+      ...createChat({ id: 'plan-msg-chat', now: 10 }),
+      messages: [
+        { id: 'm1', role: 'assistant', content: 'The plan:', createdAt: 10, mode: 'plan', plan: { forPrompt: 'blink an LED', status: 'proposed' } },
+        { id: 'm2', role: 'assistant', content: 'Built plan', createdAt: 11, plan: { forPrompt: 'blink', status: 'built' } },
+        { id: 'm3', role: 'assistant', content: 'Weird', createdAt: 12, mode: 'yolo', plan: { forPrompt: 'x', status: 'wat' } },
+        { id: 'm4', role: 'assistant', content: 'Not a plan', createdAt: 13, plan: 'nope' },
+        { id: 'm5', role: 'user', content: 'Ignored on user turns', createdAt: 14, mode: 'ask', plan: { forPrompt: 'y', status: 'proposed' } },
+      ],
+    };
+    storage.setItem(CHAT_STORAGE_KEY, JSON.stringify({ chats: [chat], activeChatId: chat.id }));
+
+    const [proposed, built, weird, notPlan, userTurn] = loadChatStore(storage).chats[0].messages;
+    expect(proposed.plan).toEqual({ forPrompt: 'blink an LED', status: 'proposed' });
+    expect(proposed.mode).toBe('plan');
+    expect(built.plan.status).toBe('built');
+    // Unknown statuses coerce to proposed; unknown modes are dropped.
+    expect(weird.plan.status).toBe('proposed');
+    expect(weird.mode).toBeUndefined();
+    expect(notPlan.plan).toBeUndefined();
+    expect(userTurn.plan).toBeUndefined();
+    expect(userTurn.mode).toBeUndefined();
+  });
+
+  it('composes the build-this generation prompt from the approved plan', () => {
+    expect(composePlanBuildPrompt('blink an LED', ' - 555 timer\n - R1 10k ')).toBe([
+      'Original request: blink an LED',
+      'Approved design plan:',
+      '- 555 timer\n - R1 10k',
+      'Build this circuit now, following the approved plan.',
+    ].join('\n'));
+  });
+
+  it('keeps assistant text-only turns in assist context but not generation context', () => {
+    const messages = [
+      { role: 'user', content: 'Make a filter' },
+      { role: 'assistant', content: 'Here is a plan.', mode: 'plan' },
+      { role: 'assistant', content: 'Ready', circuit: { title: 'Filter' } },
+    ];
+
+    expect(buildAssistContext(messages)).toEqual([
+      { role: 'user', content: 'Make a filter' },
+      { role: 'assistant', content: 'Here is a plan.' },
+      { role: 'assistant', content: 'Ready', circuit: { title: 'Filter' } },
+    ]);
+    expect(buildConversationContext(messages)).toEqual([
+      { role: 'user', content: 'Make a filter' },
+      { role: 'assistant', content: 'Ready', circuit: { title: 'Filter' } },
+    ]);
   });
 
   it('migrates and repairs saved diagrams without changing the circuit model', () => {

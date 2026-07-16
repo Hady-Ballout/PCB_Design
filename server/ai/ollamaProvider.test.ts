@@ -6,6 +6,7 @@ import {
   buildOllamaRequestBody,
   parseCircuitResponse,
   streamCircuitWithOllama,
+  streamOpenAiCompatibleContent,
 } from './ollamaProvider.js';
 
 const validCircuit = {
@@ -340,6 +341,17 @@ describe('Ollama circuit output', () => {
     expect(prompt).toContain('never a GPIO pin');
     expect(prompt).toContain('LiquidCrystal_I2C');
     expect(prompt).toContain('Adafruit_NeoPixel');
+  });
+
+  it('teaches the IR discrete parts in the schema and prompt', () => {
+    const kinds = CIRCUIT_SCHEMA.properties.components.items.properties.kind.enum as readonly string[];
+    ['ir_led', 'ir_phototransistor'].forEach((kind) => expect(kinds).toContain(kind));
+    const body = buildOllamaRequestBody('Build an IR beam-break sensor', [], true);
+    const prompt = body.messages[0].content;
+    expect(prompt).toContain('.model DIR');
+    expect(prompt).toContain('ir_phototransistor');
+    // Steers demodulated remote-control asks to the TSOP module instead.
+    expect(prompt).toContain('ir_receiver');
   });
 
   it('rejects a wiring-only module whose nodes array has the wrong length', () => {
@@ -855,5 +867,99 @@ describe('Ollama circuit output', () => {
       code: 'provider_response',
       message: expect.stringContaining('max_tokens was exhausted'),
     });
+  });
+});
+
+const sseConfig = { provider: 'zai', baseUrl: 'https://api.example.com/v1', model: 'glm-5.2', apiKey: 'key' };
+
+const sseBody = {
+  model: 'glm-5.2',
+  stream: true,
+  format: {},
+  options: { num_ctx: 8192, num_predict: 4096, temperature: 0 },
+  messages: [{ role: 'user', content: 'hi' }],
+};
+
+const sseChunk = (delta: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+  `data: ${JSON.stringify({ choices: [{ delta, ...extra }] })}`;
+
+const sseResponse = (lines: string[]) => new Response(
+  `${lines.join('\n')}\n`,
+  { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+);
+
+describe('streamOpenAiCompatibleContent', () => {
+  it('forwards reasoning deltas, accumulates content, and requests stream mode', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(sseResponse([
+      ': keepalive comment',
+      sseChunk({ reasoning_content: 'The user wants ' }),
+      sseChunk({ reasoning_content: 'an RC filter.' }),
+      '',
+      'not json noise',
+      sseChunk({ content: '{"reply":' }),
+      sseChunk({ content: '"done"}' }),
+      'data: [DONE]',
+    ]));
+    vi.stubGlobal('fetch', fetchMock);
+    const onThinking = vi.fn();
+    const onContent = vi.fn();
+
+    const content = await streamOpenAiCompatibleContent(sseConfig, sseBody, { onThinking, onContent });
+
+    expect(content).toBe('{"reply":"done"}');
+    expect(onThinking.mock.calls.map(([delta]) => delta)).toEqual(['The user wants ', 'an RC filter.']);
+    expect(onContent).toHaveBeenLastCalledWith('{"reply":"done"}');
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(requestBody.stream).toBe(true);
+  });
+
+  it('accepts a plain JSON body from gateways that ignore stream mode', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(openAiResponse('full answer')));
+    const onContent = vi.fn();
+
+    const content = await streamOpenAiCompatibleContent(sseConfig, sseBody, { onContent });
+
+    expect(content).toBe('full answer');
+    expect(onContent).toHaveBeenCalledWith('full answer');
+  });
+
+  it('reports a stream that ends with reasoning but no content as a provider problem', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(sseResponse([
+      sseChunk({ reasoning_content: 'thinking forever' }, { finish_reason: 'length' }),
+      'data: [DONE]',
+    ])));
+
+    await expect(streamOpenAiCompatibleContent(sseConfig, sseBody)).rejects.toMatchObject({
+      code: 'provider_response',
+      message: expect.stringContaining('max_tokens was exhausted'),
+    });
+  });
+
+  it('surfaces in-stream provider errors', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(sseResponse([
+      `data: ${JSON.stringify({ error: 'quota exceeded' })}`,
+    ])));
+
+    await expect(streamOpenAiCompatibleContent(sseConfig, sseBody)).rejects.toThrow('quota exceeded');
+  });
+
+  it('streams thinking through the circuit generation path', async () => {
+    vi.stubEnv('AI_PROVIDER', 'zai');
+    vi.stubEnv('AI_API_URL', 'https://api.example.com/v1');
+    vi.stubEnv('AI_MODEL', 'glm-5.2');
+    vi.stubEnv('AI_API_KEY', 'key');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(sseResponse([
+      sseChunk({ reasoning_content: 'Choosing R and C values.' }),
+      sseChunk({ content: JSON.stringify(validAiResponse) }),
+      'data: [DONE]',
+    ])));
+    const onContent = vi.fn();
+    const onThinking = vi.fn();
+
+    await expect(streamCircuitWithOllama('Make an RC filter', [], null, onContent, null, onThinking))
+      .resolves.toMatchObject(parsedAiResponse);
+
+    expect(onThinking).toHaveBeenCalledWith('Choosing R and C values.', { attempt: 0, correcting: false });
+    expect(onContent).toHaveBeenCalledWith(JSON.stringify(validAiResponse), { attempt: 0, correcting: false });
   });
 });
