@@ -111,6 +111,15 @@ const regulatorVoltage = (value) => {
   return cleanVoltageValue(text).match(/\d+(?:\.\d+)?/)?.[0] || '5';
 };
 
+// Mirrors buckVolts in sim/simValues.js. The LM2596 part number is stripped
+// first so its digits ("2596") never get mistaken for the output voltage.
+// Round-tripped through Number so "LM2596-5.0" emits "5", not "5.0".
+const buckVoltage = (value) => {
+  const text = String(value || '').toLowerCase().replace(/lm25\d\d[a-z]*/g, '');
+  const match = text.match(/\d+(?:\.\d+)?/)?.[0];
+  return match ? String(Number(match)) : '5';
+};
+
 const regulatorOutputNode = (nodes = []) => {
   const namedOutput = nodes.find((node) => /^v?out/i.test(node));
   return namedOutput || nodes.at(-1) || 'VOUT';
@@ -702,6 +711,7 @@ export const toSpice = (circuit) => {
     if (part.kind === 'timer_555') lines.push(`${ref} ${part.nodes.join(' ')} TIMER555`);
     if (part.kind === 'optocoupler') lines.push(`${ref} ${part.nodes.join(' ')} PC817`);
     if (part.kind === 'regulator') lines.push(`${ref} ${regulatorOutputNode(part.nodes)} 0 DC ${regulatorVoltage(part.value)}`);
+    if (part.kind === 'buck_converter') lines.push(`${ref} ${b} 0 DC ${buckVoltage(part.value)}`);
     if (part.kind === 'zener') lines.push(`${ref} ${a} ${b} ${zenerModelName(part.value)}`);
     if (part.kind === 'photoresistor' || part.kind === 'thermistor' || part.kind === 'ir_phototransistor') lines.push(`${ref} ${a} ${b} ${resistiveValue(part.value, '10k')}`);
     if (part.kind === 'buzzer') lines.push(`${ref} ${a} ${b} ${resistiveValue(part.value, '1k')}`);

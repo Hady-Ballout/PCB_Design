@@ -6,6 +6,7 @@ import {
   parseOhms,
   parseSourceWaveform,
   parseVolts,
+  buckVolts,
   regulatorVolts,
   zenerVolts,
 } from './simValues.js';
@@ -94,6 +95,16 @@ describe('regulatorVolts / zenerVolts', () => {
     expect(zenerVolts('5.1V')).toBe(5.1);
     expect(zenerVolts('unknown')).toBe(5.1);
     expect(zenerVolts('12V 1W')).toBe(12);
+  });
+});
+
+describe('buckVolts', () => {
+  it('strips the LM2596 part number before matching the output voltage', () => {
+    expect(buckVolts('LM2596-5.0')).toBe(5);
+    expect(buckVolts('LM2596-3.3')).toBe(3.3);
+    expect(buckVolts('LM2596')).toBe(5);
+    expect(buckVolts('5V')).toBe(5);
+    expect(buckVolts('')).toBe(5);
   });
 });
 

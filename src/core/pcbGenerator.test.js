@@ -498,6 +498,22 @@ describe('tier-2 SPICE support', () => {
     notes: [],
   };
 
+  it('emits the buck converter as one ideal DC source line on its OUT pin', () => {
+    const spice = toSpice({
+      title: 'Buck regulated rail',
+      type: 'power',
+      supplyVoltage: 12,
+      nodes: ['VIN', 'SW', '0', 'VOUT'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VIN', '0'] },
+        { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'VOUT', '0'] },
+      ],
+      notes: [],
+    });
+    const u1Lines = spice.split('\n').filter((line) => /^V_U1\s/i.test(line));
+    expect(u1Lines).toEqual(['V_U1 SW 0 DC 5']);
+  });
+
   it('emits the optocoupler as one X line plus the PC817 subcircuit', () => {
     const spice = toSpice(optoCircuit);
     expect(spice).toContain('XU1 ANO 0 0 BZLOW PC817');

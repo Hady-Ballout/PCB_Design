@@ -123,7 +123,7 @@ export const createSimulation = (circuit, options = {}) => {
     || device.type === 'sensor_out'
     || device.type === 'sensor_source'
     || device.kind === 'fuse'
-    || (device.type === 'vsource' && device.kind === 'regulator' && device.inNode != null));
+    || (device.type === 'vsource' && (device.kind === 'regulator' || device.kind === 'buck_converter') && device.inNode != null));
   const diodeById = new Map(devices.filter((device) => device.type === 'diode').map((device) => [device.id, device]));
   for (const sensor of devices.filter((device) => device.type === 'sensor_out')) {
     sensor.shunt = devices.find((device) => device.id === sensor.shuntId) ?? null;
@@ -695,8 +695,10 @@ export const createSimulation = (circuit, options = {}) => {
           changed = true;
         }
       } else {
-        // Regulator dropout: output tracks min(vnom, vIN − 1.5), never negative.
-        const next = Math.min(device.vnom, Math.max(0, atX(device.inNode) - 1.5));
+        // Regulator/buck dropout: output tracks min(vnom, vIN − headroom),
+        // never negative. Headroom defaults to the linear regulator's 1.5 V;
+        // the buck converter opts into a wider 2 V margin (device.headroom).
+        const next = Math.min(device.vnom, Math.max(0, atX(device.inNode) - (device.headroom ?? 1.5)));
         if (Math.abs((device.overrideVolts ?? device.vnom) - next) > 1e-3) {
           device.overrideVolts = next;
           changed = true;

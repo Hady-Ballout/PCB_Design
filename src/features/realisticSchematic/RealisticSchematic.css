@@ -1,13 +1,12 @@
-/* Realistic-schematic view: brutalist chrome around the breadboard photo. */
+/* Realistic-schematic view: fills the editor window directly — no border of
+   its own, so the window frame is the single box around the breadboard. */
 .realistic-schematic {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 480px;
   min-width: 0;
-  border-radius: 8px;
   overflow: hidden;
-  border: 2px solid #111111;
   background: var(--color-canvas);
 }
 
@@ -16,6 +15,10 @@
   background: var(--color-surface);
   border-bottom: 2px solid #111111;
   display: flex;
+  /* Wrap when the window is too narrow to hold every action on one line, so the
+     trailing window controls (maximize/close) drop to a new row instead of
+     being clipped by the window's overflow:hidden. */
+  flex-wrap: wrap;
   flex: 0 0 auto;
   gap: 6px;
   padding: 6px 10px;
@@ -62,8 +65,21 @@
   white-space: nowrap;
 }
 
+/* Icon-only actions: center the glyph and keep a square-ish footprint. */
+.realistic-describe,
+.realistic-download {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  padding: 5px 6px;
+}
+
 .realistic-describe {
   margin-left: auto;
+}
+
+.realistic-describe.copied {
+  background: #d3f9d8;
 }
 
 /* Net legend: one clickable chip per net, swatch matches the wire color. */
@@ -504,7 +520,8 @@
   100% { transform: translate(0, 0); }
 }
 
-.realistic-vmap.active {
+.realistic-vmap.active,
+.realistic-legend-toggle.active {
   background: #ffd43b;
 }
 

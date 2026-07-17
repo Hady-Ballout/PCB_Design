@@ -75,6 +75,15 @@ export const regulatorVolts = (value) => {
 
 export const zenerVolts = (value) => firstNumber(value) ?? 5.1;
 
+// Mirrors buckVoltage in pcbGenerator.js so the live sim and the SPICE deck
+// agree on what an "LM2596-5.0" puts out. The part number is stripped first
+// so its digits ("2596") never get mistaken for the output voltage.
+export const buckVolts = (value) => {
+  const text = String(value ?? '').toLowerCase().replace(/lm25\d\d[a-z]*/g, '');
+  const match = text.match(/\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : 5;
+};
+
 // SPICE numeric literal inside SINE(...)/PULSE(...) argument lists: standard
 // SI suffixes where "m" IS milli (SPICE convention, unlike resistor values).
 const parseSpiceNumber = (token) => {

@@ -5,6 +5,7 @@
 
 import { MCU_KINDS, WIRING_ONLY_KINDS, kindLabel } from '../componentKinds.js';
 import {
+  buckVolts,
   parseAmps,
   parseFarads,
   parseHenries,
@@ -341,6 +342,23 @@ export const buildSimNetlist = (circuit, options = {}) => {
         // when the input pin is wired; an unpowered regulator stays ideal to
         // match toSpice (warning above covers the realism gap).
         Object.assign(devices.at(-1), { inNode: inConnected ? indexOf(a) : null, vnom });
+        break;
+      }
+      case 'buck_converter': {
+        // LM2596 fixed-output switcher: modeled as a single ideal DC source
+        // on the OUT (switch) pin — the external inductor (a 1 mΩ short at
+        // DC in this engine) carries it to the output rail, and the catch
+        // schottky stays reverse-biased. FB and ON_OFF are unsimulated
+        // signal pins, mirroring the regulator's own IN/GND/OUT model.
+        const inConnected = !isUnconnectedTerminal(a, ref, 1);
+        if (!inConnected) {
+          warnOnce('buck_unpowered', `${ref} (${kindLabel(kind)}) has no input supply wired — output modeled as ideal anyway`);
+        }
+        const vnom = buckVolts(value);
+        addVsource(ref, ref, kind, indexOf(b), GROUND, parseSourceWaveform(`DC ${vnom}`));
+        // Dropout sensing (event-updated): a switcher needs more input/output
+        // margin than a linear regulator, hence the wider 2 V headroom.
+        Object.assign(devices.at(-1), { inNode: inConnected ? indexOf(a) : null, vnom, headroom: 2 });
         break;
       }
       case 'diode':

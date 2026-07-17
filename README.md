@@ -40,7 +40,7 @@ src/
     auth/      auth.jsx + auth.css (self-contained; talks to /api/auth/*)
     chat/      chatStore.js, chatFormat.js, ChatPanel.jsx
     schematic/ CircuitDiagram.jsx, symbols.jsx, geometry.js
-    editors/   editorConfig.js (SPICE/JSON/Canvas editor windows live in app/App.jsx)
+    editors/   editorConfig.js (Code + Realistic schematic tabs; retired SPICE/JSON/Canvas render code stays in app/App.jsx)
     waveform/  WaveformChart.jsx
 
 server/

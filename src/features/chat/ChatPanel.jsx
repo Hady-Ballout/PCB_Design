@@ -236,7 +236,6 @@ export function ChatPanel({
               {activeChat?.messages.map((message) => (
                 <article className={`chat-message ${message.role}`} key={message.id}>
                   <div className="chat-message-meta">
-                    <strong>{message.role === 'user' ? 'You' : 'AI'}</strong>
                     <time>{formatChatTime(message.createdAt)}</time>
                   </div>
                   <p className={message.mode ? 'chat-multiline' : ''}>{message.content}</p>
@@ -266,7 +265,6 @@ export function ChatPanel({
               ))}
               {isClarifying && (
                 <article className="chat-message assistant pending">
-                  <div className="chat-message-meta"><strong>AI</strong></div>
                   <p>
                     Preparing a few quick questions...{' '}
                     <span className="typing-dots" aria-hidden="true"><i /><i /><i /></span>
@@ -276,7 +274,6 @@ export function ChatPanel({
               )}
               {isAssisting && (
                 <article className="chat-message assistant pending">
-                  <div className="chat-message-meta"><strong>AI</strong></div>
                   <p>
                     {composerMode === 'plan' ? 'Drafting a design plan...' : 'Thinking...'}{' '}
                     <span className="typing-dots" aria-hidden="true"><i /><i /><i /></span>
@@ -286,7 +283,6 @@ export function ChatPanel({
               )}
               {isGenerating && (
                 <article className="chat-message assistant pending">
-                  <div className="chat-message-meta"><strong>AI</strong></div>
                   <GenerationStatus stage={generationStage} />
                   <ThinkingWindow text={thinkingText} />
                 </article>

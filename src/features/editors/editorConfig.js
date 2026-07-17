@@ -1,10 +1,9 @@
 // Shared editor-window labels and split-pane persistence.
+// The SPICE, JSON, Canvas, and Block schematic tabs were retired from the
+// launchbar; their render code and the SPICE data/simulation pipeline stay in
+// App.jsx (dead but restorable) so only these two views can be opened.
 export const EDITOR_VIEW_LABELS = {
-  spice: 'SPICE',
-  json: 'JSON',
   code: 'Code',
-  canvas: 'Canvas',
-  blockSchematic: 'Block schematic',
   realisticSchematic: 'Realistic schematic',
 };
 

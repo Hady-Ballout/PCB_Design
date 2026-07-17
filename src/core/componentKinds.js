@@ -32,6 +32,14 @@ export const COMPONENT_KINDS = {
     spicePrefix: 'V', pins: 3, symbolType: 'generic', label: 'Voltage regulator',
     fixedPins: ['IN', 'GND', 'OUT'],
   },
+  // LM2596 step-down switcher, TO-220-5, fixed-output variants only (output
+  // volts parse from the value, e.g. "LM2596-5.0"). Like the linear regulator
+  // the SPICE image is one ideal DC source — placed on the OUT (switch) pin;
+  // the external inductor / catch schottky / caps are separate parts.
+  buck_converter: {
+    spicePrefix: 'V', pins: 5, symbolType: 'generic', label: 'Buck converter (LM2596)',
+    fixedPins: ['VIN', 'OUT', 'GND', 'FB', 'ON_OFF'],
+  },
   voltage_source: { spicePrefix: 'V', pins: 2, symbolType: 'voltage_source', label: 'Voltage source' },
   signal_source: { spicePrefix: 'V', pins: 2, symbolType: 'voltage_source', label: 'Signal source' },
   // DC source variant: feeds the breadboard rails like a battery pack (drawn

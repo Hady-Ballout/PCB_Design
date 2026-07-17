@@ -21,6 +21,7 @@ import {
   MCU_KINDS,
   kindLabel,
 } from './componentKinds.js';
+import { buckVolts, parseVolts } from './sim/simValues.js';
 
 const RESISTIVE_KINDS = new Set(['resistor', 'load', 'photoresistor', 'thermistor', 'ir_phototransistor', 'potentiometer']);
 const DRIVER_KINDS = new Set(['bjt_npn', 'bjt_pnp', 'mosfet_n', 'mosfet_p']);
@@ -158,6 +159,15 @@ export const buildCircuitGraph = (circuit) => {
     if (part.kind === 'regulator') {
       const out = part.nodes[2];
       if (out && String(out) !== '0') supplyNets.add(String(out));
+    }
+    if (part.kind === 'buck_converter') {
+      // OUT (nodes[1]) is the switch node, not a true DC rail, but reach()
+      // crosses inductors unconditionally (see `crossings`) so marking it as
+      // a supply net is what lets supply reachability propagate through the
+      // LC filter to the actual output rail for free — the same trick the
+      // linear regulator's OUT pin above relies on.
+      const sw = part.nodes[1];
+      if (sw && String(sw) !== '0') supplyNets.add(String(sw));
     }
   }
 
@@ -435,6 +445,21 @@ const TOPOLOGY_RULES = [
         const anodeGroundOnly = (anodeSide.hitsGround || anodeNet === '0') && !anodeSide.hitsSupply;
         const cathodeSupplyOnly = (cathodeSide.hitsSupply || graph.supplyNets.has(cathodeNet)) && !cathodeSide.hitsGround && cathodeNet !== '0';
         if (anodeGroundOnly && cathodeSupplyOnly) {
+          // A correctly wired buck-converter catch (freewheeling) schottky is
+          // ["0", SW]: anode on ground, cathode on the switch node. SW is
+          // marked a supply net (see buildCircuitGraph) so reach() can
+          // propagate supply reachability through the inductor to the actual
+          // output rail — but that same marking makes this diode's cathode
+          // look "supply-only" to the check above, tripping a false reversed-
+          // diode positive. Skip whenever the cathode net carries a
+          // buck_converter OUT pin (pinIndex 1) AND the part under test is a
+          // rectifier kind (diode/schottky). This exemption is deliberately
+          // NOT extended to led/ir_led: an LED wired the same way is a real
+          // miswire (LEDs aren't catch diodes) and must still be flagged.
+          const isRectifierKind = part.kind === 'diode' || part.kind === 'schottky';
+          const cathodeIsBuckSwitchNode = isRectifierKind && pinsOn(graph, cathodeNet)
+            .some((pin) => pin.kind === 'buck_converter' && pin.pinIndex === 1);
+          if (cathodeIsBuckSwitchNode) continue;
           found.push(violation(
             'led_polarity', 'error', [part.ref], [anodeNet, cathodeNet],
             `${part.ref} (${kindLabel(part.kind)}) is reversed: its anode faces ground and its cathode faces the supply, so it will never conduct.`,
@@ -693,6 +718,123 @@ const TOPOLOGY_RULES = [
             'electrolytic_cap_polarity', 'warning', [part.ref], [plusNet, minusNet],
             `${part.ref} (electrolytic capacitor) looks reversed: its first node faces ground while its second faces the supply.`,
             `Swap ${part.ref}'s nodes so the positive terminal (first node) faces the higher potential.`,
+          ));
+        }
+      }
+      return found;
+    },
+  },
+  {
+    // A buck converter's OUT (switch) pin is an ideal DC source in the SPICE
+    // image, but physically it needs an external LC filter to become a real
+    // DC rail: no inductor on OUT means nothing turns the switching
+    // waveform into DC.
+    id: 'buck_missing_inductor',
+    severity: 'error',
+    check: (graph, circuit) => {
+      const found = [];
+      for (const part of circuit.components) {
+        if (part.kind !== 'buck_converter') continue;
+        const outNet = String(part.nodes[1] ?? '');
+        if (!outNet || isUnconnectedTerminal(outNet, part.ref, 2)) continue;
+        const hasInductor = pinsOn(graph, outNet).some((pin) => pin.kind === 'inductor');
+        if (hasInductor) continue;
+        found.push(violation(
+          'buck_missing_inductor', 'error', [part.ref], [outNet],
+          `${part.ref} (${kindLabel(part.kind)}) has no inductor on its OUT (switch) net — a buck converter needs an external LC filter to turn the switched node into a DC rail.`,
+          `Wire an inductor (e.g. 33uH) from ${part.ref}'s OUT to the output rail, plus a schottky diode from 0 to the OUT net (cathode at OUT) and an output capacitor.`,
+        ));
+      }
+      return found;
+    },
+  },
+  {
+    // With the LC inductor present, the switch node also needs a catch
+    // (freewheeling) diode: without one, inductor current has nowhere to go
+    // the instant the internal switch turns off.
+    id: 'buck_missing_catch_diode',
+    severity: 'error',
+    check: (graph, circuit) => {
+      const found = [];
+      for (const part of circuit.components) {
+        if (part.kind !== 'buck_converter') continue;
+        const outNet = String(part.nodes[1] ?? '');
+        if (!outNet || isUnconnectedTerminal(outNet, part.ref, 2)) continue;
+        const hasInductor = pinsOn(graph, outNet).some((pin) => pin.kind === 'inductor');
+        if (!hasInductor) continue; // buck_missing_inductor already covers this circuit
+        const hasCatchDiode = pinsOn(graph, outNet).some((pin) =>
+          (pin.kind === 'schottky' || pin.kind === 'diode') && pin.pinIndex === 1);
+        if (hasCatchDiode) continue;
+        found.push(violation(
+          'buck_missing_catch_diode', 'error', [part.ref], [outNet],
+          `${part.ref} (${kindLabel(part.kind)}) has an inductor on OUT but no catch diode — when the internal switch turns off, the inductor current has no freewheel path.`,
+          `Add a schottky diode with nodes ["0", "${outNet}"] (cathode at ${outNet}).`,
+        ));
+      }
+      return found;
+    },
+  },
+  {
+    // FB unconnected or shorted straight to the raw switch node are the only
+    // two unambiguous misroutes worth flagging — verifying FB actually
+    // reaches the filtered output rail would require modeling the resistive
+    // feedback divider, which is out of scope here.
+    id: 'buck_fb_misrouted',
+    severity: 'warning',
+    check: (graph, circuit) => {
+      const found = [];
+      for (const part of circuit.components) {
+        if (part.kind !== 'buck_converter') continue;
+        const outNet = String(part.nodes[1] ?? '');
+        const fbNet = String(part.nodes[3] ?? '');
+        const fbUnconnected = !fbNet || isUnconnectedTerminal(fbNet, part.ref, 4);
+        const outConnected = outNet && !isUnconnectedTerminal(outNet, part.ref, 2);
+        const fbOnSwitchNode = !fbUnconnected && outConnected && fbNet === outNet;
+        if (!fbUnconnected && !fbOnSwitchNode) continue;
+        found.push(violation(
+          'buck_fb_misrouted', 'warning', [part.ref], fbUnconnected ? [] : [fbNet],
+          fbUnconnected
+            ? `${part.ref} (${kindLabel(part.kind)}) has its FB pin unconnected — the regulator has no feedback and cannot regulate its output.`
+            : `${part.ref} (${kindLabel(part.kind)}) has FB tied to the raw switch node (OUT) instead of the filtered output rail — it will sense the unfiltered switching waveform, not the regulated voltage.`,
+          `Wire ${part.ref}'s FB pin to the output rail on the far side of the inductor (after the LC filter), not to OUT directly.`,
+        ));
+      }
+      return found;
+    },
+  },
+  {
+    // A buck converter needs at least ~2V of headroom between VIN and the
+    // regulated output to stay in regulation; warn (never error, since the
+    // datasheet dropout varies) when every source reachable from VIN falls
+    // short.
+    id: 'buck_insufficient_headroom',
+    severity: 'warning',
+    check: (graph, circuit) => {
+      const found = [];
+      for (const part of circuit.components) {
+        if (part.kind !== 'buck_converter') continue;
+        const vinNet = String(part.nodes[0] ?? '');
+        if (!vinNet || isUnconnectedTerminal(vinNet, part.ref, 1)) continue;
+        const vinReach = graph.reach(vinNet, { skipRefs: [part.ref] });
+        let maxVolts = null;
+        const sourceRefs = [];
+        for (const other of circuit.components) {
+          if (other.kind !== 'voltage_source' && other.kind !== 'solar_panel') continue;
+          const posNet = String(other.nodes?.[0] ?? '');
+          if (!posNet || !vinReach.nets.has(posNet)) continue;
+          const volts = parseVolts(other.value, null);
+          if (volts === null) continue;
+          sourceRefs.push(other.ref);
+          if (maxVolts === null || volts > maxVolts) maxVolts = volts;
+        }
+        if (maxVolts === null) continue; // no source found on VIN: skip entirely
+        const outVolts = buckVolts(part.value);
+        const needed = outVolts + 2;
+        if (maxVolts < needed) {
+          found.push(violation(
+            'buck_insufficient_headroom', 'warning', [part.ref, ...sourceRefs], [vinNet],
+            `${part.ref} (${kindLabel(part.kind)}) regulates to ${outVolts}V but the highest source reaching its VIN is only ${maxVolts}V — a buck converter needs at least 2V of input headroom above its output.`,
+            `Supply at least ${needed}V to ${part.ref}'s VIN, or use a lower-output buck variant.`,
           ));
         }
       }

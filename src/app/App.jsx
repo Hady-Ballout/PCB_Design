@@ -57,8 +57,8 @@ function App() {
   const [diagramTool, setDiagramTool] = useState('select');
   const [diagramSelection, setDiagramSelection] = useState(null);
   const [pendingTerminal, setPendingTerminal] = useState(null);
-  const [openEditorViews, setOpenEditorViews] = useState(['spice']);
-  const [activeEditorView, setActiveEditorView] = useState('spice');
+  const [openEditorViews, setOpenEditorViews] = useState(['realisticSchematic']);
+  const [activeEditorView, setActiveEditorView] = useState('realisticSchematic');
   const [maximizedEditorView, setMaximizedEditorView] = useState(null);
   const [editorSplit, setEditorSplit] = useState(loadEditorSplit);
   const [resizingAxis, setResizingAxis] = useState(null);
@@ -851,7 +851,7 @@ function App() {
     const isRevision = Boolean(currentDesign);
 
     setGeneratingChatId(chatId);
-    openEditorView('spice');
+    openEditorView('realisticSchematic');
     updateChat(chatId, (chat) => ({
       ...chat,
       updatedAt: Date.now(),
@@ -1087,7 +1087,7 @@ function App() {
   const openChat = (chatId) => {
     setChatStore((current) => ({ ...current, activeChatId: chatId }));
     setChatPanelView('conversation');
-    openEditorView('spice');
+    openEditorView('realisticSchematic');
     window.location.hash = '';
     setPage('workspace');
   };
@@ -1107,7 +1107,7 @@ function App() {
 
     setNewChatPrompt('');
     setChatPanelView('conversation');
-    openEditorView('spice');
+    openEditorView('realisticSchematic');
     await beginPrompt(chat, submittedPrompt);
   };
 
@@ -1461,6 +1461,7 @@ function App() {
             >
               Download
             </button>
+            {renderWindowControls('code', 'code-window-controls')}
           </div>
         </div>
         {result && !firmwareTarget && !pendingCodeChange ? (
@@ -1524,10 +1525,51 @@ function App() {
           issues={circuitQualityIssues(result)}
           firmware={editableCode || result?.code || ''}
           onCompileFirmware={compileFirmware}
+          windowControls={renderWindowControls('realisticSchematic', 'realistic-window-controls')}
         />
       )}
     </div>
   );
+
+  // The window's maximize/close controls (the per-window titlebar was removed).
+  // They render at the right end of each view's toolbar/action row — after the
+  // Download button — and stay visible when the window is maximized because the
+  // toolbar is part of the window.
+  const renderWindowControls = (view, extraClass = '') => {
+    const isMaximized = maximizedEditorView === view;
+    return (
+      <div className={`editor-window-controls ${extraClass}`}>
+        <button
+          className="editor-window-control"
+          onClick={() => toggleMaximizeEditorView(view)}
+          type="button"
+          aria-pressed={isMaximized}
+          aria-label={`${isMaximized ? 'Restore' : 'Maximize'} ${EDITOR_VIEW_LABELS[view]}`}
+          title={isMaximized ? 'Restore' : 'Maximize'}
+        >
+          {isMaximized ? (
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+              <rect x="2.5" y="5" width="8.5" height="8.5" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M5.5 5V3.2A1.7 1.7 0 0 1 7.2 1.5h6A1.3 1.3 0 0 1 14.5 2.8v6a1.7 1.7 0 0 1-1.7 1.7H11" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+              <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+          )}
+        </button>
+        <button
+          className="editor-window-control editor-window-close"
+          onClick={() => closeEditorView(view)}
+          type="button"
+          aria-label={`Close ${EDITOR_VIEW_LABELS[view]}`}
+          title={`Close ${EDITOR_VIEW_LABELS[view]}`}
+        >
+          &times;
+        </button>
+      </div>
+    );
+  };
 
   const renderEditorWindow = (view) => {
     const isMaximized = maximizedEditorView === view;
@@ -1537,41 +1579,6 @@ function App() {
         key={view}
         onMouseDown={() => setActiveEditorView(view)}
       >
-        <header className="editor-window-titlebar">
-          <strong>{EDITOR_VIEW_LABELS[view]}</strong>
-          <div className="editor-window-controls">
-            <button
-              className="editor-window-control"
-              onMouseDown={(event) => event.stopPropagation()}
-              onClick={() => toggleMaximizeEditorView(view)}
-              type="button"
-              aria-pressed={isMaximized}
-              aria-label={`${isMaximized ? 'Restore' : 'Maximize'} ${EDITOR_VIEW_LABELS[view]}`}
-              title={isMaximized ? 'Restore' : 'Maximize'}
-            >
-              {isMaximized ? (
-                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
-                  <rect x="2.5" y="5" width="8.5" height="8.5" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
-                  <path d="M5.5 5V3.2A1.7 1.7 0 0 1 7.2 1.5h6A1.3 1.3 0 0 1 14.5 2.8v6a1.7 1.7 0 0 1-1.7 1.7H11" fill="none" stroke="currentColor" strokeWidth="1.5" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
-                  <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
-                </svg>
-              )}
-            </button>
-            <button
-              className="editor-window-control editor-window-close"
-              onMouseDown={(event) => event.stopPropagation()}
-              onClick={() => closeEditorView(view)}
-              type="button"
-              aria-label={`Close ${EDITOR_VIEW_LABELS[view]}`}
-              title={`Close ${EDITOR_VIEW_LABELS[view]}`}
-            >
-              &times;
-            </button>
-          </div>
-        </header>
         {view === 'spice' && renderSpiceView()}
         {view === 'json' && renderJsonView()}
         {view === 'code' && renderCodeView()}
@@ -1768,7 +1775,7 @@ function App() {
           {openEditorViews.length === 0 ? (
             <section className="workbench-empty">
               <h3>All editor windows are closed</h3>
-              <p>Open Spice or Canvas from the bar above.</p>
+              <p>Open Code or Realistic schematic from the bar above.</p>
             </section>
           ) : (
             renderEditorLayout()

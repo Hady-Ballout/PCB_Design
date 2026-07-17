@@ -68,7 +68,7 @@ const mount = (props) => {
   document.body.appendChild(container);
   root = createRoot(container);
   act(() => root.render(<RealisticSchematic circuit={dividerCircuit} {...props} />));
-  const svg = container.querySelector('svg');
+  const svg = container.querySelector('svg.realistic-canvas');
   svg.getBoundingClientRect = () => ({
     left: 0, top: 0, right: model.board.width, bottom: model.board.height,
     width: model.board.width, height: model.board.height, x: 0, y: 0, toJSON() {},
@@ -347,7 +347,7 @@ describe('live simulation (Run mode)', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     act(() => root.render(<RealisticSchematic circuit={circuit} />));
-    const svg = container.querySelector('svg');
+    const svg = container.querySelector('svg.realistic-canvas');
     const bounds = circuitToBreadboard(circuit).board;
     svg.getBoundingClientRect = () => ({
       left: 0, top: 0, right: bounds.width, bottom: bounds.height,
@@ -357,6 +357,14 @@ describe('live simulation (Run mode)', () => {
       container.querySelector('.realistic-run').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     return svg;
+  };
+
+  // The net legend is hidden by default; click the toolbar "Nets" toggle to reveal
+  // the legend chips these tests read live voltages from.
+  const openLegend = () => {
+    act(() => {
+      container.querySelector('.realistic-legend-toggle').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
   };
 
   it('shows the Run toggle and a live status chip once running', () => {
@@ -400,6 +408,7 @@ describe('live simulation (Run mode)', () => {
 
   it('appends live voltages to the net legend chips', () => {
     mountRunning(dividerCircuit);
+    openLegend();
     const chips = [...container.querySelectorAll('.realistic-legend-chip')];
     const vout = chips.find((chip) => chip.textContent.includes('VOUT'));
     expect(vout.textContent).toContain('2.50V');
@@ -430,6 +439,7 @@ describe('live simulation (Run mode)', () => {
         { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VPIR', '0'] },
       ],
     });
+    openLegend();
     const pirChip = () => [...container.querySelectorAll('.realistic-legend-chip')]
       .find((chip) => chip.textContent.includes('VPIR')).textContent;
     flushFrames(4);
@@ -452,13 +462,14 @@ describe('live simulation (Run mode)', () => {
         { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['VY', '0'] },
       ],
     });
+    openLegend();
     const chipFor = (net) => [...container.querySelectorAll('.realistic-legend-chip')]
       .find((chip) => chip.textContent.includes(net)).textContent;
     flushFrames(4);
     expect(chipFor('VX')).toContain('2.50V'); // centered
 
     const joystick = container.querySelector('[aria-label*="J1"]');
-    const svg = container.querySelector('svg');
+    const svg = container.querySelector('svg.realistic-canvas');
     firePointer(joystick, 'pointerdown', { clientX: 100, clientY: 100 });
     // Full rightward deflection (+40 board px = x → 1.0), y unchanged.
     firePointer(svg, 'pointermove', { clientX: 140, clientY: 100 });
@@ -505,7 +516,7 @@ describe('live simulation (Run mode)', () => {
     firePointer(five, 'pointerdown', { clientX: 5, clientY: 5 });
     flushFrames(4);
     expect([...container.querySelectorAll('[data-keypad-key]')].find((el) => el.dataset.keypadKey === '5').getAttribute('fill')).toBe('#12161a');
-    firePointer(container.querySelector('svg'), 'pointerup', { clientX: 5, clientY: 5 });
+    firePointer(container.querySelector('svg.realistic-canvas'), 'pointerup', { clientX: 5, clientY: 5 });
     flushFrames(4);
     expect([...container.querySelectorAll('[data-keypad-key]')].find((el) => el.dataset.keypadKey === '5').getAttribute('fill')).toBe('#2c3238');
   });
@@ -537,7 +548,7 @@ describe('live simulation (Run mode)', () => {
     expect(readout()).toBe('X 0  Y 0');
 
     const sensor = container.querySelector('[aria-label*="M1"]');
-    const svg = container.querySelector('svg');
+    const svg = container.querySelector('svg.realistic-canvas');
     firePointer(sensor, 'pointerdown', { clientX: 100, clientY: 100 });
     // +40 board px right, +10 down → 160 and 40 counts at 4 counts/px.
     firePointer(svg, 'pointermove', { clientX: 140, clientY: 110 });
@@ -580,6 +591,7 @@ describe('live simulation (Run mode)', () => {
       ],
     });
     expect(container.querySelector('.realistic-sim-banner').textContent).toContain('U1 (Arduino Uno) has no firmware');
+    openLegend();
     const chips = [...container.querySelectorAll('.realistic-legend-chip')];
     const vcc = chips.find((chip) => chip.textContent.includes('VCC'));
     expect(vcc.textContent).toContain('5.00V');
@@ -609,7 +621,7 @@ describe('live simulation (Run mode)', () => {
     act(() => root.render(
       <RealisticSchematic circuit={circuit} firmware="void setup(){}" onCompileFirmware={onCompileFirmware} />,
     ));
-    const svg = container.querySelector('svg');
+    const svg = container.querySelector('svg.realistic-canvas');
     const bounds = circuitToBreadboard(circuit).board;
     svg.getBoundingClientRect = () => ({
       left: 0, top: 0, right: bounds.width, bottom: bounds.height,

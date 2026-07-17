@@ -81,6 +81,31 @@ describe('buildSimNetlist', () => {
     expect(netlist.warnings.some((w) => w.code === 'kind_not_simulated')).toBe(false);
   });
 
+  it('models the buck converter as an ideal source on its OUT (switch) pin', () => {
+    const netlist = buildSimNetlist(circuitOf(withSupply([
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VCC', 'SW', '0', 'VOUT', '0'] },
+    ])));
+    expect(netlist.ok).toBe(true);
+    const source = netlist.devices.find((device) => device.id === 'U1' && device.type === 'vsource');
+    expect(source.np).toBe(netlist.nodeIndex.get('SW'));
+    expect(source.nm).toBe(GROUND);
+    expect(source.vnom).toBe(5);
+    expect(source.headroom).toBe(2);
+    expect(source.inNode).toBe(netlist.nodeIndex.get('VCC'));
+    expect(netlist.warnings.some((w) => w.code === 'buck_unpowered')).toBe(false);
+  });
+
+  it('warns and drops inNode when the buck converter has no input supply wired', () => {
+    const netlist = buildSimNetlist(circuitOf([
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['NC_U1_1', 'SW', '0', 'NC_U1_4', 'NC_U1_5'] },
+    ]));
+    expect(netlist.ok).toBe(true);
+    const source = netlist.devices.find((device) => device.id === 'U1' && device.type === 'vsource');
+    expect(source.inNode).toBe(null);
+    expect(source.vnom).toBe(5);
+    expect(netlist.warnings.some((w) => w.code === 'buck_unpowered')).toBe(true);
+  });
+
   it('flags MCU boards without dropping the rest; active kinds simulate', () => {
     const netlist = buildSimNetlist(circuitOf(withSupply([
       { ref: 'U1', kind: 'esp32', value: '', nodes: Array.from({ length: 12 }, (_, i) => `NC_U1_${i + 1}`) },

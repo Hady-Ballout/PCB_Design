@@ -460,8 +460,9 @@ h3 {
   margin: 6px 0 0;
 }
 
-/* Flat messages: no bubble frame. Sender is shown by alignment (AI left,
-   You right) and a soft tint on your own messages. */
+/* Boxed messages: sender is shown by alignment (AI left, You right) and by
+   tint — a soft yellow box for your own messages, a neutral surface box for
+   the AI's replies. The sender labels ("You"/"AI") were removed. */
 .chat-message {
   align-self: flex-start;
   animation: message-in 300ms cubic-bezier(0.2, 1, 0.5, 1) both;
@@ -486,6 +487,13 @@ h3 {
 .chat-message.user {
   align-self: flex-end;
   background: var(--nb-yellow-soft);
+  border-radius: 10px;
+  padding: 8px 11px;
+}
+
+.chat-message.assistant {
+  background: var(--color-surface-soft);
+  border: 1px solid var(--color-border-soft);
   border-radius: 10px;
   padding: 8px 11px;
 }
@@ -1065,6 +1073,8 @@ h3 {
   display: flex;
   flex-direction: column;
   min-height: calc(100vh - 48px);
+  /* Tabs sit flush at the very top of the panel — no gap above them. */
+  padding-top: 0;
 }
 
 /* ── Editor tab strip ── */
@@ -1255,11 +1265,12 @@ h3 {
   min-height: 300px;
 }
 
+/* The editor window has no frame of its own — the surrounding .main-panel is
+   the single box. The titlebar + section border-bottoms act as dividers, so
+   the schematic no longer reads as a box-inside-a-box-inside-a-box. */
 .editor-window {
   background: var(--color-canvas);
-  border: 2px solid #111111;
   border-radius: 10px;
-  box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1267,31 +1278,9 @@ h3 {
   overflow: hidden;
 }
 
-/* The focused window's shadow turns blue — the brutalist "active" tell. */
+/* The focused window is signalled by its titlebar tint (below), not a frame. */
 .editor-window.active {
-  box-shadow: 5px 5px 0 var(--nb-blue);
-}
-
-.editor-window-titlebar {
-  align-items: center;
-  background: var(--color-surface);
-  border-bottom: 2px solid #111111;
-  display: flex;
-  flex: 0 0 auto;
-  justify-content: space-between;
-  min-height: 34px;
-  padding: 0 5px 0 12px;
-}
-
-.editor-window.active .editor-window-titlebar {
-  background: var(--nb-blue-soft);
-}
-
-.editor-window-titlebar strong {
-  font-size: 12.5px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  box-shadow: none;
 }
 
 .editor-window-controls {
@@ -1343,6 +1332,13 @@ h3 {
 
 .code-window-body {
   overflow: auto;
+}
+
+/* Canvas views (realistic schematic) fill the window edge-to-edge — the inner
+   view supplies its own section chrome, so extra body padding would just
+   reintroduce a visible gap/box between frames. */
+.canvas-window-body {
+  padding: 0;
 }
 
 .editor-window-code {

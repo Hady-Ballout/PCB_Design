@@ -369,6 +369,37 @@ describe('createSimulation — active devices (M3)', () => {
     expect(volts(sagging, 'VOUT')).toBeLessThan(2.6);
   });
 
+  it('models the buck converter as an ideal source on the switch node, carried to VOUT by the inductor', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VIN', '0'] },
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'VOUT', '0'] },
+      { ref: 'L1', kind: 'inductor', value: '100uH', nodes: ['SW', 'VOUT'] },
+      { ref: 'D1', kind: 'schottky', value: '', nodes: ['0', 'SW'] },
+      { ref: 'C1', kind: 'capacitor', value: '220uF', nodes: ['VOUT', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VOUT', '0'] },
+    ]));
+    expect(engine.solveDC()).toBe(true);
+    expect(volts(engine, 'VOUT')).toBeGreaterThan(5 - 1e-2);
+    expect(volts(engine, 'VOUT')).toBeLessThan(5 + 1e-2);
+    // The catch schottky stays reverse-biased — negligible current.
+    const diode = engine.observables().get('D1');
+    expect(Math.abs(diode.amps)).toBeLessThan(1e-6);
+  });
+
+  it('sags the buck converter output below Vin − 2V headroom', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5.5V', nodes: ['VIN', '0'] },
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'VOUT', '0'] },
+      { ref: 'L1', kind: 'inductor', value: '100uH', nodes: ['SW', 'VOUT'] },
+      { ref: 'D1', kind: 'schottky', value: '', nodes: ['0', 'SW'] },
+      { ref: 'C1', kind: 'capacitor', value: '220uF', nodes: ['VOUT', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VOUT', '0'] },
+    ]));
+    expect(engine.solveDC()).toBe(true);
+    expect(volts(engine, 'VOUT')).toBeGreaterThan(3.4);
+    expect(volts(engine, 'VOUT')).toBeLessThan(3.6);
+  });
+
   it('reports the buzzer frequency from a 555 tone', () => {
     // RA=RB=10k, C=10nF → f = 1.44/((RA+2RB)C) ≈ 4.8 kHz; buzzer across OUT.
     const engine = createSimulation(circuitOf([
@@ -991,7 +1022,11 @@ describe('createSimulation — pre-flight and robustness', () => {
       const ref = `P${index + 1}`;
       // Each part gets private nets except pin 2, which grounds it — keeps the
       // system connected without wiring ideal sources against each other.
-      const nodes = Array.from({ length: pinCount }, (_, pin) => (pin === 1 ? '0' : `N_${ref}_${pin}`));
+      // The buck converter is the one kind whose pin 2 (index 1) is its ideal
+      // source's own OUT node — grounding it directly would short the source
+      // against itself, so it grounds its actual GND pin (index 2) instead.
+      const groundPin = kind === 'buck_converter' ? 2 : 1;
+      const nodes = Array.from({ length: pinCount }, (_, pin) => (pin === groundPin ? '0' : `N_${ref}_${pin}`));
       return { ref, kind, value: '', nodes };
     });
     components.push({ ref: 'VMAIN', kind: 'voltage_source', value: '5V', nodes: ['RAIL', '0'] });

@@ -41,6 +41,7 @@ const DEFAULT_VALUE_BY_KIND = {
   bjt_npn: '2N2222', bjt_pnp: '2N2907',
   opamp: 'LM358', comparator: 'LM358',
   voltage_source: '5V', signal_source: 'SINE(0 1 1k)', regulator: '5V', solar_panel: '6V',
+  buck_converter: 'LM2596-5.0',
   arduino_uno: 'Uno R3', raspberry_pi: 'Pi 5', esp32: 'DevKit V1',
 };
 
@@ -71,7 +72,7 @@ const midpoint = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
 const netDisplayName = (net) => (net === GROUND_NET ? 'GND' : net);
 
-export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayoutChange, issues, firmware, onCompileFirmware }) {
+export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayoutChange, issues, firmware, onCompileFirmware, windowControls }) {
   const model = useMemo(
     () => circuitToBreadboard(circuit, reconcileOverrides(overrides, circuit) ?? {}),
     [circuit, overrides],
@@ -88,6 +89,7 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
   const [libraryAt, setLibraryAt] = useState(null); // client {x,y} anchor for the component library, or null
   const [running, setRunning] = useState(false); // live-simulation mode
   const [voltageOverlay, setVoltageOverlay] = useState(false); // tint carriers by live voltage
+  const [showLegend, setShowLegend] = useState(false); // net legend is hidden until toggled on
   const [compiling, setCompiling] = useState(false);
   const [compileError, setCompileError] = useState(null);
   const [mcu, setMcu] = useState(null); // { hex } | { program } for the Uno bridge
@@ -680,19 +682,52 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
         <button type="button" onClick={() => zoomAround(centerAnchor(), 1 / 1.25)}>−</button>
         <button type="button" onClick={() => zoomAround(centerAnchor(), 1.25)}>+</button>
         <button type="button" onClick={() => setView(IDENTITY_VIEW)}>Fit</button>
+        {model.nets.length > 0 && (
+          <button
+            type="button"
+            className={`realistic-legend-toggle ${showLegend ? 'active' : ''}`}
+            aria-pressed={showLegend}
+            onClick={() => setShowLegend((value) => !value)}
+            title={showLegend ? 'Hide the net legend' : 'Show the net legend'}
+          >
+            {showLegend ? 'Hide nets' : 'Nets'}
+          </button>
+        )}
         <span className="realistic-zoom-readout">{Math.round(view.s * 100)}%</span>
         <span className="realistic-readout">{readoutFor(model, effective, running ? simFrame : null) ?? 'Click a part or wire'}</span>
         <button
           type="button"
-          className="realistic-describe"
+          className={`realistic-describe ${copied ? 'copied' : ''}`}
           onClick={copyDescription}
+          aria-label={copied ? 'Description copied' : 'Copy description'}
           title="Copy a plain-text description of this build to paste into an AI for verification"
         >
-          {copied ? 'Copied!' : 'Copy description'}
+          {copied ? (
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
+              <path d="M5 13l4 4L19 7" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
+              <rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" strokeWidth="2" />
+              <path d="M5 15V5a2 2 0 0 1 2-2h8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
         </button>
-        <button type="button" className="realistic-download" onClick={downloadSvg}>Download SVG</button>
+        <button
+          type="button"
+          className="realistic-download"
+          onClick={downloadSvg}
+          aria-label="Download SVG"
+          title="Download SVG"
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
+            <path d="M12 3v11m0 0l-4-4m4 4l4-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M5 19h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+        </button>
+        {windowControls}
       </div>
-      {model.nets.length > 0 && (
+      {showLegend && model.nets.length > 0 && (
         <div className="realistic-legend" role="group" aria-label="Nets">
           {model.nets.map(({ net, color }) => {
             const active = selection?.type === 'net' && selection.net === net;

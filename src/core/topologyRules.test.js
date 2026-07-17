@@ -134,6 +134,34 @@ describe('led_polarity', () => {
     ]));
     expect(idsOf(result)).not.toContain('led_polarity');
   });
+
+  it('skips a correctly wired buck converter catch diode even when loadless', () => {
+    // Loadless is the case the exemption exists for: with nothing pulling
+    // VOUT to ground, the naive anode-ground/cathode-supply check would
+    // otherwise misread this correct catch schottky as reversed (see the
+    // buck_converter describe block for the mechanism).
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VIN', '0'] },
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'VOUT', '0'] },
+      { ref: 'L1', kind: 'inductor', value: '33uH', nodes: ['SW', 'VOUT'] },
+      { ref: 'D1', kind: 'schottky', value: '1N5819', nodes: ['0', 'SW'] },
+    ]));
+    expect(idsOf(result)).not.toContain('led_polarity');
+  });
+
+  it('still flags an LED miswired onto the buck switch node', () => {
+    // The catch-diode exemption is scoped to rectifier kinds (diode/schottky)
+    // only. An LED wired the same way — anode grounded, cathode on the raw
+    // switch node — is a genuine miswire (LEDs aren't catch diodes) and must
+    // still trip led_polarity.
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VIN', '0'] },
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'VOUT', '0'] },
+      { ref: 'L1', kind: 'inductor', value: '33uH', nodes: ['SW', 'VOUT'] },
+      { ref: 'DL1', kind: 'led', value: 'red', nodes: ['0', 'SW'] },
+    ]));
+    expect(idsOf(result)).toContain('led_polarity');
+  });
 });
 
 describe('IR discrete parts', () => {
@@ -652,6 +680,145 @@ describe('electrolytic_cap_polarity', () => {
       { ref: 'C1', kind: 'capacitor', value: '10uF', footprint: 'Capacitor_THT:CP_Radial_D5.0mm_P2.50mm', nodes: ['VCC', '0'] },
     ]));
     expect(idsOf(result)).not.toContain('electrolytic_cap_polarity');
+  });
+});
+
+describe('buck_converter (LM2596)', () => {
+  const buckBase = () => ([
+    { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VIN', '0'] },
+  ]);
+
+  it('flags a buck OUT net with no inductor', () => {
+    const result = checkCircuitTopology(circuitOf([
+      ...buckBase(),
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'VOUT', '0'] },
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'buck_missing_inductor');
+    expect(hit).toBeDefined();
+    expect(hit.severity).toBe('error');
+    // No inductor yet, so the catch-diode rule must not pile on.
+    expect(idsOf(result)).not.toContain('buck_missing_catch_diode');
+  });
+
+  it('accepts a buck OUT net with an inductor and catch diode', () => {
+    const result = checkCircuitTopology(circuitOf([
+      ...buckBase(),
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'VOUT', '0'] },
+      { ref: 'L1', kind: 'inductor', value: '33uH', nodes: ['SW', 'VOUT'] },
+      { ref: 'D1', kind: 'schottky', value: '1N5819', nodes: ['0', 'SW'] },
+      { ref: 'C_OUT', kind: 'capacitor', value: '220uF', nodes: ['VOUT', '0'] },
+    ]));
+    expect(idsOf(result)).not.toContain('buck_missing_inductor');
+  });
+
+  it('flags an inductor with no catch diode', () => {
+    const result = checkCircuitTopology(circuitOf([
+      ...buckBase(),
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'VOUT', '0'] },
+      { ref: 'L1', kind: 'inductor', value: '33uH', nodes: ['SW', 'VOUT'] },
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'buck_missing_catch_diode');
+    expect(hit).toBeDefined();
+    expect(hit.severity).toBe('error');
+    // The inductor is present, so the missing-inductor rule must not pile on.
+    expect(idsOf(result)).not.toContain('buck_missing_inductor');
+  });
+
+  it('accepts an inductor with a catch diode present', () => {
+    const result = checkCircuitTopology(circuitOf([
+      ...buckBase(),
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'VOUT', '0'] },
+      { ref: 'L1', kind: 'inductor', value: '33uH', nodes: ['SW', 'VOUT'] },
+      { ref: 'D1', kind: 'schottky', value: '1N5819', nodes: ['0', 'SW'] },
+    ]));
+    expect(idsOf(result)).not.toContain('buck_missing_catch_diode');
+  });
+
+  it('warns when FB is unconnected', () => {
+    const result = checkCircuitTopology(circuitOf([
+      ...buckBase(),
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'NC_U1_4', '0'] },
+      { ref: 'L1', kind: 'inductor', value: '33uH', nodes: ['SW', 'VOUT'] },
+      { ref: 'D1', kind: 'schottky', value: '1N5819', nodes: ['0', 'SW'] },
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'buck_fb_misrouted');
+    expect(hit).toBeDefined();
+    expect(hit.severity).toBe('warning');
+  });
+
+  it('warns when FB is tied to the raw switch node', () => {
+    const result = checkCircuitTopology(circuitOf([
+      ...buckBase(),
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'SW', '0'] },
+      { ref: 'L1', kind: 'inductor', value: '33uH', nodes: ['SW', 'VOUT'] },
+      { ref: 'D1', kind: 'schottky', value: '1N5819', nodes: ['0', 'SW'] },
+    ]));
+    expect(idsOf(result)).toContain('buck_fb_misrouted');
+  });
+
+  it('accepts FB wired to the filtered output rail', () => {
+    const result = checkCircuitTopology(circuitOf([
+      ...buckBase(),
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'VOUT', '0'] },
+      { ref: 'L1', kind: 'inductor', value: '33uH', nodes: ['SW', 'VOUT'] },
+      { ref: 'D1', kind: 'schottky', value: '1N5819', nodes: ['0', 'SW'] },
+    ]));
+    expect(idsOf(result)).not.toContain('buck_fb_misrouted');
+  });
+
+  it('warns when the input source has insufficient headroom', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '6V', nodes: ['VIN', '0'] },
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'VOUT', '0'] },
+      { ref: 'L1', kind: 'inductor', value: '33uH', nodes: ['SW', 'VOUT'] },
+      { ref: 'D1', kind: 'schottky', value: '1N5819', nodes: ['0', 'SW'] },
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'buck_insufficient_headroom');
+    expect(hit).toBeDefined();
+    expect(hit.severity).toBe('warning');
+  });
+
+  it('accepts sufficient input headroom', () => {
+    const result = checkCircuitTopology(circuitOf([
+      ...buckBase(),
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'VOUT', '0'] },
+      { ref: 'L1', kind: 'inductor', value: '33uH', nodes: ['SW', 'VOUT'] },
+      { ref: 'D1', kind: 'schottky', value: '1N5819', nodes: ['0', 'SW'] },
+    ]));
+    expect(idsOf(result)).not.toContain('buck_insufficient_headroom');
+  });
+
+  it('skips the headroom check when no source is found on VIN', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'VOUT', '0'] },
+      { ref: 'L1', kind: 'inductor', value: '33uH', nodes: ['SW', 'VOUT'] },
+      { ref: 'D1', kind: 'schottky', value: '1N5819', nodes: ['0', 'SW'] },
+    ]));
+    expect(idsOf(result)).not.toContain('buck_insufficient_headroom');
+  });
+
+  it('produces zero violations for the full canonical buck circuit', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VIN', '0'] },
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'VOUT', '0'] },
+      { ref: 'L1', kind: 'inductor', value: '33uH', nodes: ['SW', 'VOUT'] },
+      { ref: 'D1', kind: 'schottky', value: '1N5819', nodes: ['0', 'SW'] },
+      { ref: 'C_IN', kind: 'capacitor', value: '100uF', nodes: ['VIN', '0'] },
+      { ref: 'C_OUT', kind: 'capacitor', value: '220uF', nodes: ['VOUT', '0'] },
+      { ref: 'RLOAD', kind: 'load', value: '1k', nodes: ['VOUT', '0'] },
+    ]));
+    expect(result.violations).toEqual([]);
+  });
+
+  it('trips led_no_series_resistor for an LED wired straight onto the filtered output rail (proves supply-net propagation through the inductor)', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VIN', '0'] },
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'VOUT', '0'] },
+      { ref: 'L1', kind: 'inductor', value: '33uH', nodes: ['SW', 'VOUT'] },
+      { ref: 'D1', kind: 'schottky', value: '1N5819', nodes: ['0', 'SW'] },
+      { ref: 'DLED1', kind: 'led', value: 'red', nodes: ['VOUT', '0'] },
+    ]));
+    expect(idsOf(result)).toContain('led_no_series_resistor');
   });
 });
 
