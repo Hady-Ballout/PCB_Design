@@ -146,6 +146,7 @@ const INLINE_BODY_BY_KIND = {
   ir_receiver: 'to92',
   hall_sensor: 'to92',
   regulator: 'to220',
+  buck_converter: 'to220',
 };
 
 const LEAD_SPAN = 2; // default columns between a two-lead part's legs

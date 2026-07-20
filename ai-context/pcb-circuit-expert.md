@@ -58,6 +58,7 @@ Allowed component kinds:
 - `mosfet_p`
 - `opamp`
 - `regulator`
+- `buck_converter`
 - `voltage_source`
 - `signal_source`
 - `load`
@@ -156,6 +157,7 @@ Use these node orders consistently:
 | `signal_source` | `[positive, negative]` |
 | `load` | `[positive_or_input, return]` |
 | `regulator` | `[input, ground, output]` |
+| `buck_converter` | `[VIN, OUT, GND, FB, ON_OFF]` (exactly 5 nodes) |
 | `opamp` | `[non_inverting, inverting, output, positive_supply, negative_supply]` |
 | `stepper_motor` | `[A, B, C, D, COM]` (exactly 5 nodes; COM to 5V) |
 | `stepper_driver` | `[IN1, IN2, IN3, IN4, VCC, GND, OUTA, OUTB, OUTC, OUTD]` (exactly 10 nodes) |
@@ -394,6 +396,19 @@ Structure: input, ground, output regulator with capacitors from input to ground 
 - Typical `COUT`: `100nF` plus `1uF` to `10uF`.
 - Avoid ignoring dropout voltage and power dissipation.
 
+### 12 V to 5 V Buck Converter (LM2596)
+
+Structure: `VIN -- (CIN to 0) -- U1.VIN`, `U1.OUT -- LOUT -- VOUT`, `schottky DCATCH[0, VOUT]` (cathode on VOUT), `COUT[VOUT, 0]`, `U1.FB -- VOUT`, `U1.ON_OFF -- 0`.
+
+- Fixed node order `[VIN, OUT, GND, FB, ON_OFF]` (exactly 5 nodes).
+- Value names the output, e.g. `"LM2596-5.0"` or `"LM2596-3.3"`.
+- Typical `CIN` (input capacitor): `100uF`.
+- Typical `LOUT` (inductor): `33uH` to `100uH`.
+- Typical `COUT` (output capacitor): `220uF`.
+- `FB` connects to the output rail (`VOUT`); `ON_OFF` is active-low, tie to `0` to run.
+- Keep the input at least 2V above the output (e.g. 12V in for a 5V output).
+- In SPICE, `buck_converter` is exactly one ideal-source line on its `OUT` node: `V<REF> <OUT node> 0 DC <output volts>`; never emit lines for `VIN`/`GND`/`FB`/`ON_OFF`. The inductor, schottky, and capacitors are ordinary element lines.
+
 ### MCU-Driven LED
 
 Structure: `U1(D13) -- RLED -- DLED1 -- 0`, with `U1(GND) -- 0`.
@@ -486,6 +501,7 @@ D8-D11 (`SIN1`-`SIN4`) carry only the driver's logic inputs; the coil current fl
 - Small-signal diode: `Diode_THT:D_DO-35_SOD27_P7.62mm_Horizontal`
 - TO-92 BJT: `Package_TO_SOT_THT:TO-92_Inline`
 - TO-220 regulator or power MOSFET: `Package_TO_SOT_THT:TO-220-3_Vertical`
+- TO-220-5 buck converter (LM2596): `Package_TO_SOT_THT:TO-220-5_Vertical`
 - Two-pin header: `Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical`
 - Three-pin header: `Connector_PinHeader_2.54mm:PinHeader_1x03_P2.54mm_Vertical`
 - DIP-8 op amp: `Package_DIP:DIP-8_W7.62mm`

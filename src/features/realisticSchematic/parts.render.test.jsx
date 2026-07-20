@@ -441,6 +441,22 @@ describe('realistic part rendering', () => {
       expect(markup).toContain(label));
   });
 
+  it('renders a buck converter as a five-pin TO-220-5 body', () => {
+    const { model, markup } = renderModel({
+      title: 'LM2596 5V buck',
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VIN', '0'] },
+        { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'VOUT', '0', 'FB', 'EN'] },
+        { ref: 'COUT', kind: 'capacitor', value: '100uF', nodes: ['VOUT', '0'] },
+        { ref: 'RLOAD', kind: 'load', value: '1k', nodes: ['VOUT', '0'] },
+      ],
+    });
+    const buck = model.parts.find((part) => part.ref === 'U1');
+    expect(buck.body).toBe('to220');
+    expect(markup).toContain('>U1</text>');
+    expect(markup).toContain('LM2596-5.0');
+  });
+
   it('falls back to the labeled module box for unknown kinds', () => {
     const { markup } = renderModel({
       title: 'Mystery',
@@ -491,6 +507,18 @@ describe('library part thumbnails', () => {
     const body = markup.split('</defs>')[1];
     expect(body.match(/<path /g)).toHaveLength(3);
     expect(body).toContain('7805');
+    // Guards the To220Body generalization: the 3-pin package still uses the
+    // original 26-wide body/tab geometry (mid ± 13), not the widened 5-pin one.
+    expect(body).toMatch(/width="26"/);
+  });
+
+  it('renders the buck converter thumbnail with five TO-220-5 leads', () => {
+    const markup = renderToStaticMarkup(<PartThumbnail kind="buck_converter" />);
+    const body = markup.split('</defs>')[1];
+    expect(body.match(/<path /g)).toHaveLength(5);
+    expect(body).toContain('LM2596-5.0');
+    // Widened body/tab geometry: (5-1)*6+10 = 34.
+    expect(body).toMatch(/width="34"/);
   });
 });
 

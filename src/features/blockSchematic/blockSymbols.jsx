@@ -66,6 +66,13 @@ function symbolPaths(kind) {
       );
     case 'regulator':
       return <path d="M12 4h24v16h-24z M4 9h8 M4 15h8 M36 12h8" />;
+    case 'buck_converter':
+      return (
+        <>
+          <path d="M12 4h24v16h-24z M4 8h8 M4 16h8 M36 12h8" />
+          <path d="M15 15l5 -6 M20 15h2 c1.5 -3.5 3 -3.5 4.5 0 c1.5 -3.5 3 -3.5 4.5 0" />
+        </>
+      );
     case 'arduino_uno':
       return (
         <>

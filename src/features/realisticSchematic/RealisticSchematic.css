@@ -13,7 +13,7 @@
 .realistic-toolbar {
   align-items: center;
   background: var(--color-surface);
-  border-bottom: 2px solid #111111;
+  border-bottom: 2px solid var(--color-ink);
   display: flex;
   /* Wrap when the window is too narrow to hold every action on one line, so the
      trailing window controls (maximize/close) drop to a new row instead of
@@ -25,11 +25,11 @@
 }
 
 .realistic-toolbar button {
-  background: #ffffff;
-  border: 2px solid #111111;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
   border-radius: 6px;
-  box-shadow: 2px 2px 0 #111111;
-  color: #111111;
+  box-shadow: 2px 2px 0 var(--color-shadow);
+  color: var(--color-ink);
   cursor: pointer;
   font-size: 12px;
   line-height: 1;
@@ -39,12 +39,12 @@
 }
 
 .realistic-toolbar button:hover:not(:disabled) {
-  box-shadow: 3px 3px 0 #111111;
+  box-shadow: 3px 3px 0 var(--color-shadow);
   transform: translate(-1px, -1px);
 }
 
 .realistic-toolbar button:active:not(:disabled) {
-  box-shadow: 1px 1px 0 #111111;
+  box-shadow: 1px 1px 0 var(--color-shadow);
   transform: translate(1px, 1px);
 }
 
@@ -79,13 +79,13 @@
 }
 
 .realistic-describe.copied {
-  background: #d3f9d8;
+  background: var(--color-success-bg);
 }
 
 /* Net legend: one clickable chip per net, swatch matches the wire color. */
 .realistic-legend {
   background: var(--color-surface);
-  border-bottom: 2px solid #111111;
+  border-bottom: 2px solid var(--color-ink);
   display: flex;
   flex: 0 0 auto;
   flex-wrap: wrap;
@@ -95,10 +95,10 @@
 
 .realistic-legend-chip {
   align-items: center;
-  background: #ffffff;
-  border: 2px solid #111111;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
   border-radius: 999px;
-  color: #111111;
+  color: var(--color-ink);
   cursor: pointer;
   display: inline-flex;
   font-size: 11px;
@@ -115,10 +115,11 @@
 
 .realistic-legend-chip.active {
   background: var(--nb-yellow);
+  color: var(--color-on-accent);
 }
 
 .realistic-legend-swatch {
-  border: 1px solid #111111;
+  border: 1px solid var(--color-ink);
   border-radius: 50%;
   display: inline-block;
   height: 8px;
@@ -152,7 +153,7 @@
 
 .rs-issues {
   background: var(--color-surface);
-  border-bottom: 2px solid #111111;
+  border-bottom: 2px solid var(--color-ink);
   flex: 0 0 auto;
   font-size: 12px;
 }
@@ -184,7 +185,7 @@
 }
 
 .rs-issue-tag {
-  border: 2px solid #111111;
+  border: 2px solid var(--color-ink);
   border-radius: 6px;
   flex: 0 0 auto;
   font-size: 10px;
@@ -205,22 +206,22 @@
 
 .rs-issue-fixed .rs-issue-tag {
   background: var(--color-success-bg);
-  color: #111111;
+  color: var(--color-ink);
 }
 
 .rs-issue-body {
-  color: #111111;
+  color: var(--color-ink);
   font-weight: 600;
 }
 
 .rs-issue-fix {
-  color: #444444;
+  color: var(--color-text-muted);
   font-weight: 500;
 }
 
 /* Neutral bench mat so the realistic component colors read clearly. */
 .realistic-scroll {
-  background: #efe9dc;
+  background: var(--color-bench);
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -245,7 +246,7 @@
    rubber-band line to the hole they will connect to. */
 .rs-pin-handle {
   fill: var(--nb-blue);
-  stroke: #ffffff;
+  stroke: var(--color-chip);
   stroke-width: 1.5;
   cursor: crosshair;
 }
@@ -276,7 +277,7 @@
   display: flex;
   flex-direction: column;
   background: var(--color-panel);
-  border: 2px solid #111111;
+  border: 2px solid var(--color-ink);
   border-radius: 8px;
   box-shadow: var(--shadow-lg);
   overflow: hidden;
@@ -287,7 +288,7 @@
 .realistic-library-header {
   align-items: center;
   background: var(--color-surface);
-  border-bottom: 2px solid #111111;
+  border-bottom: 2px solid var(--color-ink);
   display: flex;
   justify-content: space-between;
   padding: 8px 10px;
@@ -313,7 +314,7 @@
 
 .realistic-library-search {
   border: 0;
-  border-bottom: 2px solid #111111;
+  border-bottom: 2px solid var(--color-ink);
   color: var(--color-text);
   flex: 0 0 auto;
   font-size: 12px;
@@ -353,10 +354,10 @@
 
 .realistic-library-item {
   align-items: center;
-  background: #ffffff;
-  border: 2px solid #111111;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
   border-radius: 6px;
-  box-shadow: 2px 2px 0 #111111;
+  box-shadow: 2px 2px 0 var(--color-shadow);
   color: var(--color-text);
   cursor: pointer;
   display: flex;
@@ -370,12 +371,12 @@
 
 .realistic-library-item:hover {
   background: var(--nb-yellow-soft);
-  box-shadow: 3px 3px 0 #111111;
+  box-shadow: 3px 3px 0 var(--color-shadow);
   transform: translate(-1px, -1px);
 }
 
 .realistic-library-item:active {
-  box-shadow: 1px 1px 0 #111111;
+  box-shadow: 1px 1px 0 var(--color-shadow);
   transform: translate(1px, 1px);
 }
 
@@ -385,7 +386,7 @@
 }
 
 .realistic-library-item:disabled {
-  box-shadow: 2px 2px 0 #111111;
+  box-shadow: 2px 2px 0 var(--color-shadow);
   cursor: default;
   transform: none;
 }
@@ -421,12 +422,13 @@
 /* --- live simulation (Run mode) ------------------------------------------ */
 
 .realistic-run.running {
-  background: #ffd43b;
+  background: var(--nb-yellow);
+  color: var(--color-on-accent);
 }
 
 .realistic-sim-status {
-  background: #d3f9d8;
-  border: 2px solid #111111;
+  background: var(--color-success-bg);
+  border: 2px solid var(--color-ink);
   border-radius: 999px;
   font-size: 11px;
   font-weight: 700;
@@ -435,20 +437,20 @@
 }
 
 .realistic-sim-status.warn {
-  background: #ffe3e3;
+  background: var(--color-error-bg);
 }
 
 /* Warning / error strips under the issues panel while simulating. */
 .realistic-sim-banner {
-  background: #fff3bf;
-  border-bottom: 2px solid #111111;
+  background: var(--color-warning-bg);
+  border-bottom: 2px solid var(--color-ink);
   flex: 0 0 auto;
   font-size: 12px;
   padding: 6px 10px;
 }
 
 .realistic-sim-banner.error {
-  background: #ffe3e3;
+  background: var(--color-error-bg);
   font-weight: 600;
 }
 
@@ -461,7 +463,7 @@
    temperature, pot wiper). */
 .rs-stimulus-panel {
   background: var(--color-surface);
-  border-bottom: 2px solid #111111;
+  border-bottom: 2px solid var(--color-ink);
   display: flex;
   flex: 0 0 auto;
   flex-wrap: wrap;
@@ -522,18 +524,19 @@
 
 .realistic-vmap.active,
 .realistic-legend-toggle.active {
-  background: #ffd43b;
+  background: var(--nb-yellow);
+  color: var(--color-on-accent);
 }
 
 .realistic-audio-toggle.muted {
-  background: #e9ecef;
+  background: var(--color-surface);
   color: var(--color-text-muted);
 }
 
 /* Serial monitor strip (Uno firmware simulation). */
 .realistic-serial {
   background: var(--color-surface);
-  border-bottom: 2px solid #111111;
+  border-bottom: 2px solid var(--color-ink);
   flex: 0 0 auto;
 }
 
@@ -544,10 +547,10 @@
 }
 
 .realistic-serial-bar button {
-  background: #ffffff;
-  border: 2px solid #111111;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
   border-radius: 6px;
-  box-shadow: 2px 2px 0 #111111;
+  box-shadow: 2px 2px 0 var(--color-shadow);
   cursor: pointer;
   font-size: 11px;
   line-height: 1;
@@ -568,10 +571,10 @@
 }
 
 .rs-stimulus-row button {
-  background: #ffffff;
-  border: 2px solid #111111;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
   border-radius: 6px;
-  box-shadow: 2px 2px 0 #111111;
+  box-shadow: 2px 2px 0 var(--color-shadow);
   cursor: pointer;
   font-size: 11px;
   line-height: 1;
@@ -579,7 +582,7 @@
 }
 
 .rs-stimulus-row button:active {
-  box-shadow: 1px 1px 0 #111111;
+  box-shadow: 1px 1px 0 var(--color-shadow);
   transform: translate(1px, 1px);
 }
 
@@ -590,8 +593,8 @@
 }
 
 .realistic-serial-input input {
-  background: #ffffff;
-  border: 2px solid #111111;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
   border-radius: 6px;
   flex: 1;
   font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
@@ -601,10 +604,10 @@
 }
 
 .realistic-serial-input button {
-  background: #ffffff;
-  border: 2px solid #111111;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
   border-radius: 6px;
-  box-shadow: 2px 2px 0 #111111;
+  box-shadow: 2px 2px 0 var(--color-shadow);
   cursor: pointer;
   font-size: 11px;
   line-height: 1;

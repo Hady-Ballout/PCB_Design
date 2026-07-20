@@ -45,6 +45,8 @@ import {
   wireId,
 } from '../features/schematic/geometry.js';
 import { AuthProvider, useAuth, HomePage, LoginPage, SignupPage, VerifyPage } from '../features/auth/auth.jsx';
+import { applyTheme, loadTheme, saveTheme } from './theme.js';
+import { ThemeToggle } from './ThemeToggle.jsx';
 import '../features/auth/auth.css';
 
 function App() {
@@ -73,6 +75,7 @@ function App() {
   // when the request settles — never written to the chat store.
   const [thinkingState, setThinkingState] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
+  const [theme, setTheme] = useState(loadTheme);
   const messagesEndRef = useRef(null);
   const spiceEditorRef = useRef(null);
   const resizeDragRef = useRef(null);
@@ -217,6 +220,12 @@ function App() {
       }
     });
   };
+
+  useEffect(() => {
+    applyTheme(theme);
+    saveTheme(theme);
+  }, [theme]);
+  const toggleTheme = () => setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1666,18 +1675,26 @@ function App() {
     );
   };
 
+  // Pages without the workspace user bar get a fixed floating toggle instead.
+  const withFloatingThemeToggle = (pageNode) => (
+    <>
+      <ThemeToggle theme={theme} onToggle={toggleTheme} floating />
+      {pageNode}
+    </>
+  );
+
   if (loading) return <div className="loading-screen">Loading...</div>;
 
   const visiblePage = user && AUTH_PAGES.has(page) ? 'workspace' : page;
 
-  if (!user && !PUBLIC_PAGES.has(visiblePage)) return <HomePage />;
-  if (visiblePage === 'home') return <HomePage />;
-  if (visiblePage === 'login') return <LoginPage />;
-  if (visiblePage === 'signup') return <SignupPage />;
-  if (visiblePage === 'verify') return <VerifyPage />;
+  if (!user && !PUBLIC_PAGES.has(visiblePage)) return withFloatingThemeToggle(<HomePage />);
+  if (visiblePage === 'home') return withFloatingThemeToggle(<HomePage />);
+  if (visiblePage === 'login') return withFloatingThemeToggle(<LoginPage />);
+  if (visiblePage === 'signup') return withFloatingThemeToggle(<SignupPage />);
+  if (visiblePage === 'verify') return withFloatingThemeToggle(<VerifyPage />);
 
   if (visiblePage === 'waveform') {
-    return (
+    return withFloatingThemeToggle(
       <main className="app-shell waveform-page-shell">
         <section className="waveform-page">
           <header className="waveform-page-header">
@@ -1721,6 +1738,7 @@ function App() {
   return (
     <main className="app-shell">
       <div className="user-bar app-user-bar">
+        <ThemeToggle theme={theme} onToggle={toggleTheme} />
         <span>{user.email}</span>
         <button type="button" onClick={logout}>Log out</button>
       </div>

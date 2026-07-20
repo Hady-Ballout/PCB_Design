@@ -4,7 +4,7 @@
   width: 100%;
   min-height: 480px;
   background: var(--color-diagram-bg);
-  border: 2px solid #111111;
+  border: 2px solid var(--color-ink);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -28,12 +28,12 @@
 
 .block-node {
   min-width: 190px;
-  border: 2px solid #111111;
+  border: 2px solid var(--color-ink);
   border-radius: 10px;
-  background: #ffffff;
+  background: var(--color-chip);
   color: var(--color-text);
   font: 12px var(--font-sans);
-  box-shadow: 4px 4px 0 #111111;
+  box-shadow: 4px 4px 0 var(--color-shadow);
   overflow: hidden;
 }
 
@@ -43,14 +43,14 @@
   gap: 2px;
   padding: 8px 12px;
   background: var(--nb-yellow-soft);
-  border-bottom: 2px solid #111111;
+  border-bottom: 2px solid var(--color-ink);
 }
 
 .block-node-symbol {
   display: block;
   width: 48px;
   height: 24px;
-  color: #111111;
+  color: var(--color-ink);
 }
 
 .block-node-sub {
@@ -84,13 +84,13 @@
 .block-node-pin-dot {
   width: 8px;
   height: 8px;
-  border: 1px solid #111111;
+  border: 1px solid var(--color-ink);
   border-radius: 50%;
   background: var(--nb-blue);
 }
 
 .block-node-pin.unconnected .block-node-pin-dot {
-  background: #ffffff;
+  background: var(--color-chip);
 }
 
 /* Overlap both handles on the pin dot; keep them small and unobtrusive. */
@@ -98,7 +98,7 @@
   width: 8px;
   height: 8px;
   right: 12px;
-  background: #111111;
+  background: var(--color-ink);
   border: none;
 }
 
@@ -113,7 +113,7 @@
 .ground-node-symbol {
   width: 32px;
   height: 26px;
-  stroke: #111111;
+  stroke: var(--color-ink);
   stroke-width: 2;
 }
 
@@ -126,6 +126,6 @@
   width: 8px;
   height: 8px;
   top: 0;
-  background: #111111;
+  background: var(--color-ink);
   border: none;
 }

@@ -378,6 +378,42 @@ describe('Ollama circuit output', () => {
     }));
   });
 
+  it('rejects a buck_converter whose nodes array has the wrong length', () => {
+    expect(() => parseCircuitResponse(JSON.stringify({
+      reply: 'Buck converter circuit.',
+      circuit: {
+        title: 'Buck converter',
+        type: 'power',
+        supplyVoltage: 12,
+        nodes: ['VIN', 'VOUT', '0'],
+        components: [
+          { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VIN', '0'], footprint: '' },
+          // 4 nodes instead of the fixed 5 [VIN, OUT, GND, FB, ON_OFF].
+          { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'VOUT', '0', 'VOUT'], footprint: '' },
+        ],
+        notes: [],
+      },
+      spice: '* Buck converter\nV1 VIN 0 DC 12\nVU1 VOUT 0 DC 5\n.end',
+    }))).toThrowError(expect.objectContaining({
+      code: 'schema_validation',
+      message: expect.stringContaining('exactly 5 nodes for kind buck_converter in the order [VIN, OUT, GND, FB, ON_OFF]'),
+    }));
+  });
+
+  it('teaches the buck_converter kind and canonical wiring in the schema and prompt', () => {
+    const kinds = CIRCUIT_SCHEMA.properties.components.items.properties.kind.enum as readonly string[];
+    expect(kinds).toContain('buck_converter');
+    const body = buildOllamaRequestBody('Step 12V down to 5V with a buck converter', [], true);
+    const prompt = body.messages[0].content;
+    // Fixed-pin contract auto-derives from the registry.
+    expect(prompt).toContain('buck_converter (5 nodes): VIN, OUT, GND, FB, ON_OFF');
+    // Manual canonical-wiring rule.
+    expect(prompt).toContain('LM2596');
+    expect(prompt).toContain('inductor (33uH to 100uH)');
+    expect(prompt).toContain('schottky catch diode from 0 to the OUT net');
+    expect(prompt).toContain('at least 2V above the output');
+  });
+
   it('teaches the tier-2 module kinds in the schema and prompt', () => {
     const kinds = CIRCUIT_SCHEMA.properties.components.items.properties.kind.enum as readonly string[];
     ['optocoupler', 'current_sensor', 'keypad', 'joystick', 'rtc_module', 'sd_card', 'rfid_reader', 'mouse_sensor', 'soil_moisture', 'gas_sensor', 'baro_sensor', 'adc_module']

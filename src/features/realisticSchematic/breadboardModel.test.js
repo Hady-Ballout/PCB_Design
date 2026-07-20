@@ -106,6 +106,17 @@ const regulatorCircuit = {
   ],
 };
 
+const buckConverterCircuit = {
+  title: 'LM2596 5V buck',
+  nodes: ['VIN', 'VOUT', 'FB', 'EN', '0'],
+  components: [
+    { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VIN', '0'] },
+    { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'VOUT', '0', 'FB', 'EN'] },
+    { ref: 'COUT', kind: 'capacitor', value: '100uF', nodes: ['VOUT', '0'] },
+    { ref: 'RLOAD', kind: 'load', value: '1k', nodes: ['VOUT', '0'] },
+  ],
+};
+
 const buttonCircuit = {
   title: 'Button pull-up',
   nodes: ['VCC', 'BTN', '0'],
@@ -286,6 +297,19 @@ describe('circuitToBreadboard', () => {
       expect(hole.column).toBe(regulator.holes[0].column + index);
     });
     assertBoardMatchesNetlist(regulatorCircuit, model);
+  });
+
+  it('places a buck converter as a five-pin TO-220 on consecutive columns of one strip', () => {
+    const model = circuitToBreadboard(buckConverterCircuit);
+    const buck = model.parts.find((part) => part.ref === 'U1');
+    expect(buck.body).toBe('to220');
+    expect(buck.pinNets).toEqual(['VIN', 'VOUT', '0', 'FB', 'EN']);
+    expect(buck.holes).toHaveLength(5);
+    buck.holes.forEach((hole, index) => {
+      expect(hole.strip).toBe(buck.holes[0].strip);
+      expect(hole.column).toBe(buck.holes[0].column + index);
+    });
+    assertBoardMatchesNetlist(buckConverterCircuit, model);
   });
 
   it('places a pushbutton straddling the trench with both pins on the bottom strip', () => {

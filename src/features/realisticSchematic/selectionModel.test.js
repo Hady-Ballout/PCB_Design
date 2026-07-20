@@ -82,6 +82,7 @@ describe('pinLabelsFor', () => {
     expect(pinLabelsFor({ kind: 'timer_555' })).toEqual(['GND', 'TRIG', 'OUT', 'RESET', 'CTRL', 'THRES', 'DISCH', 'VCC']);
     expect(pinLabelsFor({ kind: 'temp_sensor' })).toEqual(['VCC', 'OUT', 'GND']);
     expect(pinLabelsFor({ kind: 'regulator' })).toEqual(['IN', 'GND', 'OUT']);
+    expect(pinLabelsFor({ kind: 'buck_converter' })).toEqual(['VIN', 'OUT', 'GND', 'FB', 'ON_OFF']);
     expect(pinLabelsFor({ kind: 'relay_module' })).toEqual(['VCC', 'GND', 'IN', 'COM', 'NO', 'NC']);
     // …the tier-1 kinds ride the same fixedPins spread, no per-kind entries…
     expect(pinLabelsFor({ kind: 'stepper_driver' })).toEqual(['IN1', 'IN2', 'IN3', 'IN4', 'VCC', 'GND', 'OUTA', 'OUTB', 'OUTC', 'OUTD']);

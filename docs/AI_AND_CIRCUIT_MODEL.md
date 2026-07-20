@@ -96,11 +96,11 @@ code can go stale until the next AI generation (known limitation). The
 Allowed `kind` values are the single source of truth in `src/core/componentKinds.js`
 (`ALLOWED_KINDS`). The AI schema `enum` and the "Allowed component kinds" / fixed-pin
 guidance in the system prompt (`server/ai/ollamaProvider.ts`) are **generated from it**, so
-adding a kind to the registry automatically offers it to the model. The current 66 kinds:
+adding a kind to the registry automatically offers it to the model. The current 68 kinds:
 
 - **Core (14):** `resistor`, `capacitor`, `inductor`, `diode`, `led`, `bjt_npn`, `bjt_pnp`,
   `mosfet_n`, `mosfet_p`, `opamp`, `regulator`, `voltage_source`, `signal_source`, `load`.
-- **Extended (50):** `zener`, `photoresistor`, `thermistor`, `ir_led`, `ir_phototransistor`,
+- **Extended (51):** `zener`, `photoresistor`, `thermistor`, `ir_led`, `ir_phototransistor`,
   `buzzer`, `crystal`,
   `temp_sensor`, `comparator`, `pushbutton`, `potentiometer`, `switch_spdt`, `rgb_led`,
   `seven_segment`, `timer_555`, `ultrasonic_sensor`, `dht_sensor`, `oled_display`,
@@ -109,9 +109,9 @@ adding a kind to the registry automatically offers it to the model. The current 
   `ir_receiver`, `shift_register`, `optocoupler`, `current_sensor`, `keypad`, `joystick`,
   `rtc_module`, `sd_card`, `rfid_reader`, `mouse_sensor`, `soil_moisture`, `gas_sensor`,
   `baro_sensor`, `adc_module`, `schottky`, `bridge_rectifier`, `fuse`, `vibration_motor`,
-  `sound_sensor`, `hall_sensor`, `solar_panel`. Several of these are simulated rather
-  than wiring-only: `optocoupler` emits one X line against the built-in `PC817`
-  subcircuit, `current_sensor` a single derived `<REF>_S` milliohm shunt line,
+  `sound_sensor`, `hall_sensor`, `solar_panel`, `buck_converter`. Several of these are
+  simulated rather than wiring-only: `optocoupler` emits one X line against the built-in
+  `PC817` subcircuit, `current_sensor` a single derived `<REF>_S` milliohm shunt line,
   `bridge_rectifier` four derived `<REF>_A..D` diode lines (compound pattern),
   `schottky` a D line with the `DSCH` model, `ir_led` a D line with the low-Vf `DIR`
   model (940 nm emitter, Vf ≈ 1.3 V — LED family everywhere else: series-resistor and
@@ -119,8 +119,11 @@ adding a kind to the registry automatically offers it to the model. The current 
   "phone-camera" glow on a smoked lens), `ir_phototransistor` a resistive R line that
   the live sim replaces with an **IR light slider**-driven variable resistance
   (dark ≈ 10 MΩ → saturated ≈ 500 Ω, the photoresistor pattern; use it in a divider),
-  `fuse`/`vibration_motor` resistive R lines,
-  and `solar_panel` a plain `V... DC` line (full source treatment — see below).
+  `fuse`/`vibration_motor` resistive R lines, `solar_panel` a plain `V... DC` line (full
+  source treatment — see below), and `buck_converter` (LM2596, TO-220-5, fixed pins
+  `VIN`/`OUT`/`GND`/`FB`/`ON_OFF`) an ideal DC source on its `OUT` (switch) pin — same
+  one-line SPICE image as `regulator`, plus a wider dropout headroom in the live sim
+  (see the sim-fidelity table below).
 - **Microcontroller boards (3):** `arduino_uno`, `raspberry_pi`, `esp32`.
 
 Microcontroller boards (`arduino_uno`, `raspberry_pi`, `esp32`) use fixed positional pin
@@ -144,7 +147,9 @@ as a photovoltaic pack feeding a power rail via the same `batteries` path as
 `SolarPanelPack`). The SPICE parser's V-line branch preserves richer 2-lead source kinds
 on reparse (`keepsSourceKind` in `circuitSync.js`) so a solar panel survives round-trips
 instead of degrading to `voltage_source`; the D-line branch likewise recognizes `DSCH`
-for schottky.
+for schottky. Multi-pin ideal-source kinds are excluded (`keepsSourceKind` requires 2
+pins), so a hand-edited SPICE deck reparses a `regulator` or `buck_converter` V-line as
+a plain `voltage_source` — a known parity limitation; the circuit JSON stays canonical.
 
 The Raspberry Pi's pin list was extended from 10 to 14 pins (GPIO8-11, its SPI0
 CE0/MISO/MOSI/SCLK) — MCU pins are only ever **appended** so saved circuits stay
@@ -271,6 +276,19 @@ transistor anywhere. Every net checks out; the GPIO cannot switch the load.
   demand a flyback diode); `fuse` conducts unconditionally in `crossings()` (even under
   `crossResistors: false`) so it never masks a missing series resistor;
   `bridge_rectifier` conducts across all pins under `crossDiodes` like `rgb_led`.
+- `buck_converter`'s OUT (switch, `nodes[1]`) pin joins `supplyNets` — mirroring the
+  regulator's own OUT pin — so `reach()` propagates supply reachability through the
+  external inductor to the actual filtered output rail. That same marking makes a
+  correctly wired catch (freewheeling) `schottky`/`diode` from `0` to OUT look like a
+  reversed diode to `led_polarity`'s generic check, so the rule exempts a rectifier kind
+  (`diode`/`schottky` only — never `led`/`ir_led`, which would be a real miswire) wired
+  that way. Four buck-specific rules cover the rest of the LC filter:
+  `buck_missing_inductor` (error, no inductor on OUT) and `buck_missing_catch_diode`
+  (error, inductor present but no catch diode — staged so it never piles onto
+  `buck_missing_inductor`), `buck_fb_misrouted` (warning: FB unconnected or shorted
+  straight to the raw switch node instead of the filtered rail), and
+  `buck_insufficient_headroom` (warning: no source reachable from VIN clears
+  `buckVolts(value) + 2` volts).
 - The optocoupler's output pins live in a separate `ISOLATOR_OUTPUT_PINS` table:
   `hasDriverOutputOn` consults it (suppressing `gpio_direct_load` on the isolated side)
   but the flyback skip does **not** — a motor on a bare opto output still gets flagged.
@@ -350,6 +368,7 @@ page agree numerically. Where they intentionally differ:
 | 555 | TIMER555 subcircuit (hysteretic switches, fixed 5 V trip points) | behavioral SR latch reading real thresholds off the internal 5k/10k CTRL ladder (external CTRL parts shift the trip points); OUT drives VCC−1.7/0.1 V behind 10 Ω, DISCH 25 Ω/open |
 | optocoupler | PC817 subcircuit (on/off switch, no CTR) | same on/off semantics (SW VT=1.1 VH=0.15 on the LED junction); CTR-proportional output remains a possible future refinement |
 | regulator | ideal DC source on OUT, IN ignored | same, **plus dropout**: output tracks min(Vnom, vIN − 1.5) when IN is wired; unpowered stays ideal with the `regulator_unpowered` warning |
+| buck_converter | ideal DC source on OUT (switch) pin, VIN ignored | same, **plus dropout**: output tracks min(Vnom, vIN − 2) when VIN is wired (wider 2 V headroom than the linear regulator's 1.5 V); unpowered stays ideal with the `buck_unpowered` warning |
 | relay_module | wiring-only comment | **behavioral**: COM–NO closes / COM–NC opens when powered (>4 V) and IN > 2.5 V (2.2 V drop-out hysteresis), coil loads the supply 70 Ω energized / 10 kΩ idle; indicator LED lights on the board |
 | Tier-2a sensors (temp_sensor, pir_sensor, soil_moisture, gas_sensor, sound_sensor, hall_sensor) | wiring-only comments | **behavioral stimulus-driven sources** gated on module power (>2.5 V): TMP36 OUT = 0.5 + 10 mV/°C (slider), PIR OUT 3.3/0.05 V (click the dome to toggle motion), soil AOUT 2.8→1.2 V vs moisture, gas/sound AO = 0.4 + 3.6·level with a push-pull DO that flips at level 0.5; the hall is an open-collector switch (click to toggle the magnet; power gate ignored — documented simplification). The remaining modules (ultrasonic, DHT, displays, SPI/I2C breakouts…) ride the Arduino firmware bridge instead — their outputs are protocols, not voltages (Tier 2b/2c below); only `sd_card` remains wiring-only |
 | stepper_driver (ULN2003) | wiring-only comment | **behavioral (Tier 2c)**: four independent open-collector Darlington switches — each OUT pulls to GND through 10 Ω (≈0.9 V sat across a 50 Ω coil) while its IN node reads > 2.5 V (2.3 V release hysteresis, the relay pattern ×4); 10 kΩ input ties keep floating INs solvable. Works with or without firmware — the INs are just node voltages |
@@ -362,7 +381,7 @@ page agree numerically. Where they intentionally differ:
 | buzzer / motors | plain resistors | plain resistors **plus observables**: buzzer frequency detection (rising-1V-crossing timestamps → Web Audio tone in the UI); values containing `passive`/`piezo` sound only with a detected waveform, while active or legacy-unlabeled buzzers use 2.4 kHz for DC drive. The Run gesture unlocks browser audio before firmware compilation, and the toolbar provides a persisted mute toggle. Motor `speed01` comes from drive voltage vs rated (6 V dc / 3 V vibration) → spin/shake animation |
 | analysis | one-shot `.tran 0.1ms 20ms` + `.op` | backward-Euler from a zero state (power-on transient is visible), real-time-paced with a per-frame budget and a speed chip |
 
-Event-state devices (comparator, 555 latch, opto switch, regulator dropout) update
+Event-state devices (comparator, 555 latch, opto switch, regulator/buck dropout) update
 **between** timesteps from the committed solution — hysteresis prevents chatter, and DC
 solves run a bounded settle loop (solve → update states → re-solve, ≤10 rounds). Circuits
 containing only event devices stay static (`isDynamic` false): they re-settle on every

@@ -831,19 +831,26 @@ function To92Body({ part, points }) {
   );
 }
 
+// TO-220 body, generalized for any lead count: 3 pins (regulator) or 5 pins
+// (buck converter TO-220-5). `mid` is the mean pin x (identical to the middle
+// pin for an odd, evenly spaced count — placeInline always allocates
+// consecutive columns), and the body/tab width grows to keep all leads under
+// the package. 3-pin geometry is unchanged (width stays at the 26 floor).
 function To220Body({ part, points }) {
   const dir = bodyDir(part.strip);
-  const mid = points[1].x;
+  const mid = points.reduce((sum, point) => sum + point.x, 0) / points.length;
   const y = Math.min(...points.map((point) => point.y)) + dir * 20;
+  const width = Math.max(26, (points.length - 1) * 6 + 10);
+  const half = width / 2;
   return (
     <g>
       {points.map((point, index) => (
-        <path key={index} d={`M ${point.x} ${point.y} L ${mid + (index - 1) * 6} ${y + 10}`} {...LEAD_STROKE} />
+        <path key={index} d={`M ${point.x} ${point.y} L ${mid + (index - (points.length - 1) / 2) * 6} ${y + 10}`} {...LEAD_STROKE} />
       ))}
-      <rect x={mid - 13} y={y - 16} width={26} height={7} rx={1} fill="url(#rsPartTab)" stroke="#7c848b" strokeWidth="0.4" />
+      <rect x={mid - half} y={y - 16} width={width} height={7} rx={1} fill="url(#rsPartTab)" stroke="#7c848b" strokeWidth="0.4" />
       <circle cx={mid} cy={y - 12.5} r={2} fill="#e9edf0" stroke="#7c848b" strokeWidth="0.4" />
-      <rect x={mid - 13} y={y - 10} width={26} height={20} rx={1.5} fill="url(#rsPartTo92)" stroke="#000" strokeWidth="0.5" />
-      <text x={mid} y={y + 1} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: 5.5, fill: '#cfd4d8' }}>{part.value}</text>
+      <rect x={mid - half} y={y - 10} width={width} height={20} rx={1.5} fill="url(#rsPartTo92)" stroke="#000" strokeWidth="0.5" />
+      <text x={mid} y={y + 1} textAnchor="middle" style={{ ...LABEL_STYLE, fontSize: (part.value?.length ?? 0) > 6 ? 5 : 5.5, fill: '#cfd4d8' }}>{part.value}</text>
       <RefLabel x={mid} y={y - 20} text={part.ref} />
     </g>
   );
@@ -2315,6 +2322,7 @@ const THUMBNAIL_SPECS = {
   mosfet_p: { part: thumbPart('mosfet_p', 'to92', [3, 4, 5]), viewBox: '163 52 60 38' },
   temp_sensor: { part: thumbPart('temp_sensor', 'to92', [3, 4, 5]), viewBox: '163 52 60 38' },
   regulator: { part: thumbPart('regulator', 'to220', [3, 4, 5], '7805'), viewBox: '162 44 62 44' },
+  buck_converter: { part: thumbPart('buck_converter', 'to220', [3, 4, 5, 6, 7], 'LM2596-5.0'), viewBox: '162 40 92 48' },
   opamp: dipThumb('opamp', 'LM358'),
   comparator: dipThumb('comparator'),
   timer_555: dipThumb('timer_555'),

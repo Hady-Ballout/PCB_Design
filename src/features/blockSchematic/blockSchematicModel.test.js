@@ -94,6 +94,16 @@ describe('blockSchematicModel', () => {
     expect(pinLabel(opamp, 3)).toBe('OUT');
     expect(humanComponentName(opamp)).toBe('Op-Amp');
   });
+
+  it('labels buck converter pins and names the component', () => {
+    const buckConverter = { ref: 'U1', kind: 'buck_converter', value: 'LM2596', nodes: ['VIN', 'OUT', 'GND', 'FB', 'ON_OFF'] };
+    expect(humanComponentName(buckConverter)).toBe('Buck Converter');
+    expect(pinLabel(buckConverter, 1)).toBe('VIN');
+    expect(pinLabel(buckConverter, 2)).toBe('OUT');
+    expect(pinLabel(buckConverter, 3)).toBe('GND');
+    expect(pinLabel(buckConverter, 4)).toBe('FB');
+    expect(pinLabel(buckConverter, 5)).toBe('ON/OFF');
+  });
 });
 
 describe('microcontroller blocks', () => {
