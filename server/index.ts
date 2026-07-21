@@ -12,6 +12,8 @@ import { compileSketch } from './compile/compiler.js';
 import { buildStreamingSpice } from './circuit/streamingCircuit.js';
 import { initDb } from './auth/db.js';
 import { handleSignup, handleLogin, handleVerifyEmail, handleMe, verifyJwt } from './auth/auth.js';
+import { handleBillingStatus, handleCreateCheckout, handleCreatePortal, handleStripeWebhook } from './billing/billing.js';
+import { QuotaError, checkAndConsumeQuota } from './billing/quota.js';
 import type { ChatMemory, ChatMessage, Circuit, CurrentDesign, JwtPayload, StreamState } from './types.js';
 
 loadEnv();
@@ -70,6 +72,35 @@ const readJsonBody = async (request: IncomingMessage): Promise<Record<string, un
 };
 
 const statusFor = (error: unknown): number => (error instanceof HttpError ? error.statusCode : 500);
+
+// Stripe signature verification hashes the exact payload bytes, so the
+// webhook body must be read raw — never through readJsonBody.
+const readRawBody = async (request: IncomingMessage): Promise<Buffer> => {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of request) {
+    total += (chunk as Buffer).length;
+    if (total > MAX_BODY_BYTES) {
+      request.destroy();
+      throw new HttpError(413, 'Request body is too large.');
+    }
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks);
+};
+
+// Quota exhaustion is an upsell, not an error: the client renders the 402
+// payload as an upgrade prompt.
+const sendQuotaExceeded = (response: ServerResponse, error: QuotaError): void => {
+  sendJson(response, 402, {
+    code: 'quota_exceeded',
+    error: error.message,
+    plan: error.plan,
+    meter: error.meter,
+    limit: error.limit,
+    usage: error.usage,
+  });
+};
 
 const startJsonStream = (response: ServerResponse): void => {
   response.writeHead(200, {
@@ -183,9 +214,52 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
     return;
   }
 
+  // Authenticated by Stripe's signature, not a JWT — must sit above the gate.
+  if (request.url === '/api/stripe/webhook' && request.method === 'POST') {
+    try {
+      const rawBody = await readRawBody(request);
+      const result = await handleStripeWebhook(rawBody, request.headers['stripe-signature'] as string | undefined);
+      sendJson(response, result.status, result.body);
+    } catch (error) {
+      sendJson(response, statusFor(error), { error: (error as Error).message });
+    }
+    return;
+  }
+
   const user = getUser(request);
   if (!user) {
     sendJson(response, 401, { error: 'Authentication required.' });
+    return;
+  }
+
+  if (request.url === '/api/billing/checkout' && request.method === 'POST') {
+    try {
+      const body = await readJsonBody(request);
+      const result = await handleCreateCheckout(user, body);
+      sendJson(response, result.status, result.body);
+    } catch (error) {
+      sendJson(response, statusFor(error), { error: (error as Error).message });
+    }
+    return;
+  }
+
+  if (request.url === '/api/billing/portal' && request.method === 'POST') {
+    try {
+      const result = await handleCreatePortal(user);
+      sendJson(response, result.status, result.body);
+    } catch (error) {
+      sendJson(response, statusFor(error), { error: (error as Error).message });
+    }
+    return;
+  }
+
+  if (request.url === '/api/billing/status' && request.method === 'GET') {
+    try {
+      const result = await handleBillingStatus(user);
+      sendJson(response, result.status, result.body);
+    } catch (error) {
+      sendJson(response, statusFor(error), { error: (error as Error).message });
+    }
     return;
   }
 
@@ -196,6 +270,16 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       if (!prompt) {
         sendJson(response, 400, { code: 'clarify_failed', error: 'Prompt is required.' });
         return;
+      }
+
+      try {
+        await checkAndConsumeQuota(user.id, 'assist');
+      } catch (quotaError) {
+        if (quotaError instanceof QuotaError) {
+          sendQuotaExceeded(response, quotaError);
+          return;
+        }
+        throw quotaError;
       }
 
       const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
@@ -232,6 +316,16 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         return;
       }
 
+      try {
+        await checkAndConsumeQuota(user.id, 'assist');
+      } catch (quotaError) {
+        if (quotaError instanceof QuotaError) {
+          sendQuotaExceeded(response, quotaError);
+          return;
+        }
+        throw quotaError;
+      }
+
       const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
       const currentDesign = (body.currentDesign as CurrentDesign)?.circuit ? body.currentDesign as CurrentDesign : null;
       const memory = normalizeChatMemory(body.memory as Partial<ChatMemory> | null);
@@ -260,6 +354,16 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       if (!prompt) {
         sendJson(response, 400, { error: 'Prompt is required.' });
         return;
+      }
+
+      try {
+        await checkAndConsumeQuota(user.id, 'generation');
+      } catch (quotaError) {
+        if (quotaError instanceof QuotaError) {
+          sendQuotaExceeded(response, quotaError);
+          return;
+        }
+        throw quotaError;
       }
 
       const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
