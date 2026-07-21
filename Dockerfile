@@ -17,9 +17,10 @@ RUN curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/inst
 
 WORKDIR /app
 
-# Install dependencies
+# Install dependencies. The server runs as TypeScript via tsx, which lives in
+# devDependencies — install it explicitly on top of the prod-only deps.
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev && npm install --no-save tsx@^4.23.0
 
 # Copy server source
 COPY server/ ./server/
@@ -31,4 +32,4 @@ ENV HOST=0.0.0.0
 
 EXPOSE 8787
 
-CMD ["node", "server/index.js"]
+CMD ["npx", "tsx", "server/index.ts"]
