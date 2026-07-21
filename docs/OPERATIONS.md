@@ -24,7 +24,7 @@ the frontend expects `VITE_API_URL` (see below) or same-origin `/api`.
 | `OLLAMA_CONTEXT_DIAGNOSTICS` | `1` to log per-request turn count/revision flag |
 | `AI_PROVIDER`, `AI_API_URL`, `AI_MODEL`, `AI_API_KEY`, `AI_MAX_TOKENS` | switch to an OpenAI-compatible provider (e.g. Z.ai/GLM) instead of Ollama |
 | `ZAI_THINKING_TYPE`, `ZAI_REASONING_EFFORT` | Z.ai-specific tuning |
-| `PORT`, `HOST`, `CORS_ORIGIN` | API server bind + allowed frontend origin |
+| `PORT`, `HOST`, `CORS_ORIGIN` | API server bind + allowed frontend origin(s); `CORS_ORIGIN` accepts a comma-separated allowlist (`server/cors.ts`) — the matching request origin is echoed back per-response, and the **first** entry is the canonical frontend URL used in verification-email links |
 | `JWT_SECRET` | **required** — the server refuses to start if it is unset |
 | `MAX_BODY_BYTES` | max request body size before a `413` is returned (default `4 MiB`) |
 | `DATABASE_URL` | Postgres/Neon connection string; **omit for local dev** to use the in-memory user store seeded with a local admin (see `docs/BACKEND.md`) |

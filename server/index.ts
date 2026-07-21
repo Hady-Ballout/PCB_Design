@@ -1,5 +1,6 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { loadEnv } from './env.js';
+import { parseAllowedOrigins, resolveCorsOrigin } from './cors.js';
 import { buildCircuitResponse, reconcileCircuitRevision } from './circuit/circuitResponse.js';
 import { normalizeChatMemory, sanitizeConversationHistory, updateChatMemory } from './ai/chatMemory.js';
 import { streamCircuitWithOllama } from './ai/ollamaProvider.js';
@@ -22,7 +23,7 @@ if (!process.env.JWT_SECRET) {
 
 const port = Number(process.env.PORT || process.env.API_PORT || 8787);
 const host = process.env.HOST || '127.0.0.1';
-const corsOrigin = process.env.CORS_ORIGIN || 'http://127.0.0.1:5174';
+const allowedOrigins = parseAllowedOrigins(process.env.CORS_ORIGIN);
 const aiProviderName = (): string => process.env.AI_PROVIDER || 'ollama';
 const aiModelName = (): string => (
   process.env.AI_PROVIDER && process.env.AI_PROVIDER !== 'ollama'
@@ -31,9 +32,9 @@ const aiModelName = (): string => (
 );
 
 const sendJson = (response: ServerResponse, status: number, body: unknown): void => {
+  // Access-Control-Allow-Origin is set per-request in the server handler.
   response.writeHead(status, {
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': corsOrigin,
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
   });
@@ -74,7 +75,6 @@ const startJsonStream = (response: ServerResponse): void => {
   response.writeHead(200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
-    'Access-Control-Allow-Origin': corsOrigin,
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
   });
@@ -120,6 +120,12 @@ function getUser(request: IncomingMessage): JwtPayload | null {
 }
 
 const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
+  // The allowlist may hold several origins, but the header only permits one —
+  // echo back the request's own origin when it is allowed. setHeader values
+  // merge into every later writeHead that doesn't name the same header.
+  response.setHeader('Access-Control-Allow-Origin', resolveCorsOrigin(allowedOrigins, request.headers.origin));
+  response.setHeader('Vary', 'Origin');
+
   if (request.method === 'OPTIONS') {
     sendJson(response, 204, {});
     return;
