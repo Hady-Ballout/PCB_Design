@@ -145,6 +145,7 @@ export function ChatPanel({
   generate,
   generationBusy,
   error,
+  errorCode,
 }) {
   return (
     <aside className={`side-panel chat-panel-${chatPanelView}`}>
@@ -314,7 +315,13 @@ export function ChatPanel({
                 </button>
               </div>
             </form>
-            {error && <p className="inline-error chat-error">{error}</p>}
+            {errorCode === 'quota_exceeded' ? (
+              <div className="quota-upsell">
+                <h4>Monthly AI limit reached</h4>
+                <p>{error}</p>
+                <a className="btn btn-primary" href="#pricing">See plans</a>
+              </div>
+            ) : error && <p className="inline-error chat-error">{error}</p>}
           </section>
         </>
       )}

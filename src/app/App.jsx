@@ -45,9 +45,12 @@ import {
   wireId,
 } from '../features/schematic/geometry.js';
 import { AuthProvider, useAuth, HomePage, LoginPage, SignupPage, VerifyPage } from '../features/auth/auth.jsx';
+import { PricingPage } from '../features/billing/PricingPage.jsx';
+import { fetchBillingStatus, openBillingPortal } from '../features/billing/billing.js';
 import { applyTheme, loadTheme, saveTheme } from './theme.js';
 import { ThemeToggle } from './ThemeToggle.jsx';
 import '../features/auth/auth.css';
+import '../features/billing/billing.css';
 
 function App() {
   const { user, loading, logout } = useAuth();
@@ -76,6 +79,10 @@ function App() {
   const [thinkingState, setThinkingState] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [theme, setTheme] = useState(loadTheme);
+  // null while logged out or when the backend has billing disabled — the
+  // usage badge and upgrade/manage buttons simply don't render then.
+  const [billingStatus, setBillingStatus] = useState(null);
+  const [billingNotice, setBillingNotice] = useState('');
   const messagesEndRef = useRef(null);
   const spiceEditorRef = useRef(null);
   const resizeDragRef = useRef(null);
@@ -271,6 +278,52 @@ function App() {
       }
     }
   }, [loading, user, page]);
+
+  // Plan + usage for the user bar; refreshed after generations and checkout.
+  useEffect(() => {
+    if (!user) {
+      setBillingStatus(null);
+      return undefined;
+    }
+    let cancelled = false;
+    fetchBillingStatus().then((status) => { if (!cancelled) setBillingStatus(status); });
+    return () => { cancelled = true; };
+  }, [user]);
+
+  // Stripe Checkout returns to '#billing=success' / '#billing=cancel'. The
+  // webhook (not this redirect) grants the plan, so on success we show a
+  // notice and re-poll the status once the webhook has had a moment to land.
+  useEffect(() => {
+    if (!user) return undefined;
+    const hash = window.location.hash;
+    if (hash !== '#billing=success' && hash !== '#billing=cancel') return undefined;
+    window.location.hash = '';
+    if (hash === '#billing=cancel') return undefined;
+
+    setBillingNotice('Payment received — activating your plan...');
+    const timeoutId = setTimeout(() => {
+      fetchBillingStatus().then((status) => {
+        setBillingStatus(status);
+        setBillingNotice(status && status.plan !== 'free'
+          ? `You're on the ${status.plan === 'team' ? 'Team' : 'Pro'} plan now. Happy building!`
+          : 'Payment received — your plan will activate shortly.');
+      });
+    }, 2500);
+    return () => clearTimeout(timeoutId);
+  }, [user]);
+
+  const refreshBillingStatus = () => {
+    if (user) fetchBillingStatus().then(setBillingStatus);
+  };
+
+  const manageSubscription = async () => {
+    try {
+      const { url } = await openBillingPortal();
+      window.location.assign(url);
+    } catch (portalError) {
+      setBillingNotice(portalError.message);
+    }
+  };
 
   useEffect(() => {
     const active = chatStore.chats.find((c) => c.id === chatStore.activeChatId);
@@ -692,7 +745,16 @@ function App() {
           });
         } else {
           data = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(data.error || `Request failed with HTTP ${response.status}.`);
+          if (!response.ok) {
+            if (response.status === 402 && data.code === 'quota_exceeded') {
+              const quotaError = new Error(
+                `You've used all ${data.limit} free assistant calls this month.`
+              );
+              quotaError.quota = data;
+              throw quotaError;
+            }
+            throw new Error(data.error || `Request failed with HTTP ${response.status}.`);
+          }
         }
       } finally {
         clearTimeout(timeoutId);
@@ -703,6 +765,7 @@ function App() {
         ...chat,
         updatedAt: Date.now(),
         error: '',
+        errorCode: '',
         messages: [
           ...chat.messages,
           {
@@ -716,11 +779,13 @@ function App() {
         ],
       }));
     } catch (assistError) {
+      const quota = assistError.quota;
       updateChat(chatId, (chat) => ({
         ...chat,
         updatedAt: Date.now(),
         error: assistError.message,
-        messages: [
+        errorCode: quota ? 'quota_exceeded' : '',
+        messages: quota ? chat.messages : [
           ...chat.messages,
           {
             id: messageId(),
@@ -865,6 +930,7 @@ function App() {
       ...chat,
       updatedAt: Date.now(),
       error: '',
+      errorCode: '',
       editableSpice: isRevision
         ? chat.editableSpice
         : '* AI is preparing the circuit...\n* Components will appear here as they are generated.',
@@ -890,6 +956,13 @@ function App() {
 
       if (!response.ok) {
         const failed = await response.json().catch(() => ({}));
+        if (response.status === 402 && failed.code === 'quota_exceeded') {
+          const quotaError = new Error(
+            `You've used all ${failed.limit} AI generations included in the ${failed.plan} plan this month.`
+          );
+          quotaError.quota = failed;
+          throw quotaError;
+        }
         throw new Error(failed.error || `Generation failed with HTTP ${response.status}.`);
       }
       const contentType = response.headers.get('content-type') || '';
@@ -951,10 +1024,13 @@ function App() {
         kicadSyncError: '',
         circuitJsonSyncError: '',
         error: '',
+        errorCode: '',
       }));
+      refreshBillingStatus();
       window.location.hash = '';
       setPage('workspace');
     } catch (requestError) {
+      const quota = requestError.quota;
       updateChat(chatId, (chat) => ({
         ...chat,
         updatedAt: Date.now(),
@@ -963,7 +1039,9 @@ function App() {
           ? JSON.stringify(currentDesign.circuit, null, 2)
           : chat.editableCircuitJson,
         error: requestError.message,
-        messages: [
+        errorCode: quota ? 'quota_exceeded' : '',
+        // Quota exhaustion renders as an upsell card, not a failure message.
+        messages: quota ? chat.messages : [
           ...chat.messages,
           {
             id: messageId(),
@@ -973,6 +1051,7 @@ function App() {
           },
         ],
       }));
+      if (quota) refreshBillingStatus();
     } finally {
       setGeneratingChatId(null);
       clearThinking();
@@ -1692,6 +1771,7 @@ function App() {
   if (visiblePage === 'login') return withFloatingThemeToggle(<LoginPage />);
   if (visiblePage === 'signup') return withFloatingThemeToggle(<SignupPage />);
   if (visiblePage === 'verify') return withFloatingThemeToggle(<VerifyPage />);
+  if (visiblePage === 'pricing') return withFloatingThemeToggle(<PricingPage />);
 
   if (visiblePage === 'waveform') {
     return withFloatingThemeToggle(
@@ -1739,6 +1819,18 @@ function App() {
     <main className="app-shell">
       <div className="user-bar app-user-bar">
         <ThemeToggle theme={theme} onToggle={toggleTheme} />
+        {billingNotice && <span className="billing-banner">{billingNotice}</span>}
+        {billingStatus && billingStatus.limits?.generations !== null && (
+          <span
+            className={`usage-badge${billingStatus.usage.generations >= billingStatus.limits.generations ? ' exhausted' : ''}`}
+            title="AI circuit generations used this month"
+          >
+            {billingStatus.usage.generations} / {billingStatus.limits.generations} generations
+          </span>
+        )}
+        {billingStatus && (billingStatus.plan === 'free'
+          ? <button type="button" onClick={() => { window.location.hash = 'pricing'; }}>Upgrade</button>
+          : <button type="button" onClick={manageSubscription}>Manage subscription</button>)}
         <span>{user.email}</span>
         <button type="button" onClick={logout}>Log out</button>
       </div>
@@ -1771,6 +1863,7 @@ function App() {
           generate={generate}
           generationBusy={generationBusy}
           error={error}
+          errorCode={activeChat?.errorCode || ''}
         />
 
         <section className="main-panel editor-workbench">
