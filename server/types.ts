@@ -284,6 +284,13 @@ export interface LocalUser {
   verified: boolean;
   verify_token: string | null;
   created_at: string;
+  stripe_customer_id: string | null;
+  plan: string;
+  plan_status: string | null;
+  plan_period_end: string | null;
+  usage_generations: number;
+  usage_assists: number;
+  usage_month: string | null;
 }
 
 export interface QueryResult<T = Record<string, unknown>> {
