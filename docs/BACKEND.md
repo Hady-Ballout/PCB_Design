@@ -17,11 +17,18 @@ A single `createServer` callback does manual `request.url`/`request.method` matc
 | `/api/auth/me` | GET | via header | |
 | `/api/clarify-circuit` | POST | **yes** | streams NDJSON, pre-generation question round |
 | `/api/assist-circuit` | POST | **yes** | streams NDJSON, Plan/Ask conversational reply |
-| `/api/generate-circuit` | POST | **yes** (`Authorization: Bearer <jwt>`) | streams NDJSON |
-| `/api/simulate-circuit` | POST | **yes** | runs Ngspice |
+| `/api/generate-circuit` | POST | **yes** (`Authorization: Bearer <jwt>`) | streams NDJSON, consumes the **generation** quota |
+| `/api/simulate-circuit` | POST | **yes** | runs Ngspice (unmetered) |
+| `/api/stripe/webhook` | POST | Stripe signature | raw body; registered **above** the JWT gate |
+| `/api/billing/checkout` | POST | **yes** | `{plan, interval}` → hosted Checkout URL |
+| `/api/billing/portal` | POST | **yes** | hosted Customer Portal URL |
+| `/api/billing/status` | GET | **yes** | `{plan, planStatus, periodEnd, usage, limits}` |
 
-Every route below `/api/auth/*` requires a valid JWT (`getUser` via `verifyJwt`); there is
-no anonymous circuit generation path.
+Every route below `/api/auth/*` (except the Stripe webhook, which is authenticated by its
+signature) requires a valid JWT (`getUser` via `verifyJwt`); there is no anonymous circuit
+generation path. `/api/clarify-circuit` and `/api/assist-circuit` consume the shared
+**assist** quota meter (enforced for Free-tier users only). Quota exhaustion returns HTTP
+`402 {code: 'quota_exceeded', plan, meter, limit, usage}` before any stream starts.
 
 All three AI chat endpoints stream NDJSON and share a `{type: 'thinking', delta}` event:
 live model reasoning tokens (GLM `reasoning_content` via the streaming SSE call in
@@ -75,6 +82,34 @@ a hard error only occurs when all `MAX_GENERATION_ATTEMPTS` (3) attempts failed 
   library). `signJwt`/`verifyJwt`, `handleSignup`, `handleLogin`, `handleVerifyEmail`,
   `handleMe`. JWTs expire after 7 days. Requires `JWT_SECRET` to be set.
 - **`brevo.ts`** — `sendVerificationEmail` via the Brevo transactional email API.
+
+## `server/billing`
+
+Stripe subscriptions (Free / Pro / Team) via hosted Checkout + Customer Portal. Design
+spec: `docs/superpowers/specs/2026-07-21-stripe-billing-design.md`.
+
+- **`plans.ts`** — tier limits (`PLAN_LIMITS`: free 5 gen + 20 assists/mo, pro 200 gen/mo,
+  team unlimited; `null` = unlimited), env-var price-ID mapping (`priceIdFor`,
+  `resolvePlanFromPriceId`), `isBillingEnabled()` (keyed on `STRIPE_SECRET_KEY` — unset
+  means billing routes 503 and quotas are skipped).
+- **`store.ts`** — typed access to the 7 billing columns on `users`
+  (`stripe_customer_id`, `plan`, `plan_status`, `plan_period_end`, `usage_generations`,
+  `usage_assists`, `usage_month`). Every SQL string has a matching branch in the
+  in-memory dev store in `server/auth/db.ts`.
+- **`quota.ts`** — `checkAndConsumeQuota(userId, 'generation'|'assist')`: counters reset
+  lazily on UTC month rollover (no cron), over-limit throws `QuotaError` → 402. Assists
+  are unmetered (and unwritten) for paid plans.
+- **`stripeClient.ts`** — lazy singleton of the official `stripe` SDK +
+  `verifyStripeWebhook` (signature check via `constructEvent`).
+- **`billing.ts`** — the route handlers. Checkout creates/reuses a Stripe customer
+  (`client_reference_id` = user id, success/cancel URLs on `APP_URL/#billing=...`).
+  **Plan state is written only by the webhook** (`applyStripeEvent`):
+  `checkout.session.completed` (retrieves the subscription, maps price → plan),
+  `customer.subscription.updated` (portal switches/renewals; terminal statuses
+  `canceled`/`incomplete_expired`/`unpaid` downgrade to free; `past_due` keeps access
+  during Stripe dunning), `customer.subscription.deleted` (→ free). Handlers are
+  idempotent; processing failures are logged and acknowledged with 200 so Stripe doesn't
+  retry a verified event forever; bad signatures get 400.
 
 ## `server/ai`
 

@@ -31,9 +31,30 @@ the frontend expects `VITE_API_URL` (see below) or same-origin `/api`.
 | `PG_CA_CERT`, `PG_SSL_NO_VERIFY` | Postgres TLS: certificate verification is **on** by default; point `PG_CA_CERT` at a CA bundle, or set `PG_SSL_NO_VERIFY=1` to disable verification (local/self-signed only) |
 | `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` | signup verification email |
 | `VITE_API_URL` | frontend's API base when not same-origin/proxied |
+| `STRIPE_SECRET_KEY` | Stripe API key (`sk_test_...` / `sk_live_...`); **unset = billing disabled** (routes 503, quotas skipped) |
+| `STRIPE_WEBHOOK_SECRET` | signing secret (`whsec_...`) of the webhook endpoint / `stripe listen` session |
+| `STRIPE_PRICE_PRO_MONTHLY`, `STRIPE_PRICE_PRO_YEARLY`, `STRIPE_PRICE_TEAM_MONTHLY`, `STRIPE_PRICE_TEAM_YEARLY` | the four recurring price IDs (`price_...`) from the Stripe dashboard |
+| `APP_URL` | canonical frontend URL used in Checkout success/cancel and Portal return URLs (e.g. `https://impedo.ai`) |
 
 Real `.env*` files are gitignored; `.env.local` and `.env.production` exist locally but
 aren't tracked content-wise beyond `.env.production/env.production`.
+
+## Stripe billing
+
+Sandbox first: build/test everything against test-mode keys and card `4242 4242 4242 4242`.
+
+**Dashboard setup (once per mode):** two Products (Impedo Pro $15/mo + $150/yr, Impedo
+Team $40/mo + $400/yr) → the four price IDs above; enable the Customer Portal (allow
+switching between the four prices + cancellation); add a webhook endpoint
+`https://<render-backend>/api/stripe/webhook` subscribed to `checkout.session.completed`,
+`customer.subscription.updated`, `customer.subscription.deleted` → `STRIPE_WEBHOOK_SECRET`.
+
+**Local webhooks:** `stripe listen --forward-to http://127.0.0.1:8787/api/stripe/webhook`
+prints a temporary `whsec_...` for `.env.local`.
+
+**Go-live checklist:** activate the Stripe account (business + bank details) → recreate
+the products/portal/webhook in live mode → swap the 7 `STRIPE_*`/`APP_URL` env vars on
+Render → one real-card end-to-end test.
 
 ## Testing
 
