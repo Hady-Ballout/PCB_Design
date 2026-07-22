@@ -18,7 +18,29 @@ if (!process.env.JWT_SECRET) {
 
 const port = Number(process.env.PORT || process.env.API_PORT || 8787);
 const host = process.env.HOST || '127.0.0.1';
-const corsOrigin = process.env.CORS_ORIGIN || 'http://127.0.0.1:5173';
+// CORS_ORIGIN may list several allowed origins, comma-separated. The
+// Access-Control-Allow-Origin header may only carry ONE origin, so we echo
+// back whichever configured origin matches the request (never the raw list —
+// a comma-joined value is invalid and browsers reject it, which surfaces to
+// the user as a bare "Network error").
+const corsOrigins = (process.env.CORS_ORIGIN || 'http://127.0.0.1:5173')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const resolveCorsOrigin = (request: IncomingMessage): string => {
+  const origin = request.headers.origin;
+  if (origin && corsOrigins.includes(origin)) return origin;
+  return corsOrigins[0] || '';
+};
+
+const applyCorsHeaders = (request: IncomingMessage, response: ServerResponse): void => {
+  response.setHeader('Access-Control-Allow-Origin', resolveCorsOrigin(request));
+  response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  response.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  // Responses vary by request Origin, so caches must key on it.
+  response.setHeader('Vary', 'Origin');
+};
 const aiProviderName = (): string => process.env.AI_PROVIDER || 'ollama';
 const aiModelName = (): string => (
   process.env.AI_PROVIDER && process.env.AI_PROVIDER !== 'ollama'
@@ -27,12 +49,9 @@ const aiModelName = (): string => (
 );
 
 const sendJson = (response: ServerResponse, status: number, body: unknown): void => {
-  response.writeHead(status, {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': corsOrigin,
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-  });
+  // CORS headers are applied once per request via applyCorsHeaders(); they
+  // survive writeHead because they were set with setHeader() beforehand.
+  response.writeHead(status, { 'Content-Type': 'application/json' });
   response.end(JSON.stringify(body));
 };
 
@@ -70,9 +89,6 @@ const startJsonStream = (response: ServerResponse): void => {
   response.writeHead(200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
-    'Access-Control-Allow-Origin': corsOrigin,
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
   });
 };
 
@@ -88,6 +104,8 @@ function getUser(request: IncomingMessage): JwtPayload | null {
 }
 
 const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
+  applyCorsHeaders(request, response);
+
   if (request.method === 'OPTIONS') {
     sendJson(response, 204, {});
     return;
