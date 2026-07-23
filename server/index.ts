@@ -11,7 +11,7 @@ import { compileSketch } from './compile/compiler.js';
 import { buildStreamingSpice } from './circuit/streamingCircuit.js';
 import { initDb } from './auth/db.js';
 import { handleSignup, handleLogin, handleVerifyEmail, handleMe, verifyJwt } from './auth/auth.js';
-import type { ChatMemory, ChatMessage, CurrentDesign, JwtPayload, PipelineEvent } from './types.js';
+import type { ChatMemory, ChatMessage, Circuit, CurrentDesign, JwtPayload, PipelineEvent } from './types.js';
 
 loadEnv();
 
@@ -317,7 +317,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       // checker's surviving findings are surfaced in the UI, never fatal.
       let issues: Array<Record<string, unknown>> = [];
       try {
-        issues = (checkCircuitTopology(circuit) as { violations: typeof issues }).violations;
+        issues = (checkCircuitTopology(circuit) as unknown as { violations: typeof issues }).violations;
       } catch (topologyError) {
         console.error(`[topology-check] ${(topologyError as Error).message}`);
       }
