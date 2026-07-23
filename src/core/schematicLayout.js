@@ -1,4 +1,6 @@
-export const LAYOUT_VERSION = 5;
+import { DEFAULT_PIN_COUNT_BY_KIND, SYMBOL_TYPE_BY_KIND } from './componentKinds.js';
+
+export const LAYOUT_VERSION = 6;
 export const GRID_SIZE = 20;
 export const COMPONENT_CLEARANCE = 24;
 export const WIRE_CLEARANCE = 16;
@@ -43,25 +45,7 @@ export class DiagramLayoutError extends Error {
   }
 }
 
-const symbolTypeByKind = {
-  voltage_source: 'voltage_source',
-  signal_source: 'voltage_source',
-  resistor: 'resistor',
-  load: 'resistor',
-  capacitor: 'capacitor',
-  inductor: 'inductor',
-  diode: 'diode',
-  led: 'led',
-  bjt_npn: 'bjt_npn',
-  bjt_pnp: 'bjt_pnp',
-  mosfet_n: 'generic',
-  mosfet_p: 'generic',
-  opamp: 'opamp',
-  regulator: 'generic',
-  arduino_uno: 'generic',
-  raspberry_pi: 'generic',
-  esp32: 'generic',
-};
+const symbolTypeByKind = SYMBOL_TYPE_BY_KIND;
 
 const snap = (value, grid = GRID_SIZE) => Math.round(value / grid) * grid;
 
@@ -234,6 +218,17 @@ const pinPoint = (component, pinIndex, node, netPosition) => {
     if (pinIndex === 4) return { x: component.x, y: component.y - component.height / 2 };
     if (pinIndex === 5) return { x: component.x, y: component.y + component.height / 2 };
   }
+  if (component.symbolType === 'mcu') {
+    // Tighter 18px pin pitch: MCU boards carry 10-12 pins that must fit the
+    // fixed slot height without stressing the overlap resolver.
+    const side = pinIndex % 2 === 1 ? -1 : 1;
+    const row = Math.floor((pinIndex - 1) / 2);
+    const rows = Math.ceil(component.pinCount / 2);
+    return {
+      x: component.x + side * component.width / 2,
+      y: component.y - ((rows - 1) * 18) / 2 + row * 18,
+    };
+  }
   if (component.pinCount <= 2) {
     if (component.orientation === 'vertical') {
       return { x: component.x, y: node === '0' ? component.y + component.height / 2 : component.y - component.height / 2 };
@@ -248,21 +243,30 @@ const pinPoint = (component, pinIndex, node, netPosition) => {
   const side = pinIndex % 2 === 1 ? -1 : 1;
   const row = Math.floor((pinIndex - 1) / 2);
   const rows = Math.ceil(component.pinCount / 2);
+  // Symmetric, grid-multiple row pitch so every pin lands on the routing grid
+  // and inside the body's side edges (the router cannot reach a pin floating
+  // past a corner). Kept in sync with the other pin-point copies.
   return {
     x: component.x + side * component.width / 2,
-    y: component.y - ((rows - 1) * 14) / 2 + row * 28,
+    y: component.y - ((rows - 1) * 40) / 2 + row * 40,
   };
 };
 
 const componentSize = (kind) => {
   const symbolType = symbolTypeByKind[kind] || 'generic';
-  // Boards carry 10-12 pins in the generic side-alternating layout, so they
-  // need a much taller body than the other 'generic' kinds (mosfet, regulator).
-  if (kind === 'arduino_uno' || kind === 'raspberry_pi' || kind === 'esp32') return { width: 150, height: 200, symbolType };
   if (symbolType === 'opamp') return { width: 150, height: 110, symbolType };
+  if (symbolType === 'mcu') return { width: 150, height: 118, symbolType };
   if (symbolType === 'bjt_npn' || symbolType === 'bjt_pnp') return { width: 118, height: 100, symbolType };
   if (symbolType === 'voltage_source' || symbolType === 'capacitor' || symbolType === 'diode' || symbolType === 'led') {
     return { width: 98, height: 112, symbolType };
+  }
+  // Generic multi-pin parts (boards, 555, 7-segment, sensor modules) alternate
+  // pins down both sides 40px apart, so the body grows with the pin count and
+  // the half-width stays a grid multiple, keeping every pin on the grid.
+  const pins = DEFAULT_PIN_COUNT_BY_KIND[kind] ?? 2;
+  if (pins > 3) {
+    const rows = Math.ceil(pins / 2);
+    return { width: pins >= 10 ? 160 : 120, height: (rows - 1) * 40 + 40, symbolType };
   }
   return { width: 108, height: 58, symbolType };
 };
@@ -690,14 +694,6 @@ const routeSection = (start, end, diagram, wire, routedWires) => {
     .filter((item) => !wire.node || item.node !== wire.node)
     .flatMap((item) => pathSegments(item.points || [])
     .map((segment) => ({ ...segment, wireId: item.id })));
-  // A pin on the outer face of a part sitting at the canvas edge (e.g. a
-  // left-side MCU pin in the leftmost slot column) escapes to a grid point
-  // inside the canvas margin. Widen the routable band just enough to reach the
-  // two endpoints; all other exploration stays inside the margin.
-  const routeMinX = Math.min(CANVAS_MARGIN, startGrid.x, endGrid.x);
-  const routeMinY = Math.min(CANVAS_MARGIN, startGrid.y, endGrid.y);
-  const routeMaxX = Math.max(diagram.width - CANVAS_MARGIN, startGrid.x, endGrid.x);
-  const routeMaxY = Math.max(diagram.height - CANVAS_MARGIN, startGrid.y, endGrid.y);
   const open = [{ ...startGrid, direction: '', cost: 0, score: Math.abs(startGrid.x - endGrid.x) + Math.abs(startGrid.y - endGrid.y) }];
   const best = new Map();
   const states = new Map();
@@ -731,8 +727,8 @@ const routeSection = (start, end, diagram, wire, routedWires) => {
       { x: current.x, y: current.y - grid, direction: 'v' },
     ];
     for (const neighbor of neighbors) {
-      if (neighbor.x < routeMinX || neighbor.y < routeMinY
-        || neighbor.x > routeMaxX || neighbor.y > routeMaxY) continue;
+      if (neighbor.x < CANVAS_MARGIN || neighbor.y < CANVAS_MARGIN
+        || neighbor.x > diagram.width - CANVAS_MARGIN || neighbor.y > diagram.height - CANVAS_MARGIN) continue;
       const segment = { from: current, to: neighbor };
       if (hardBodies.some((rect) => segmentIntersectsRect(segment.from, segment.to, rect))) continue;
       if (obstacles.some((rect) => segmentIntersectsRect(segment.from, segment.to, rect))) continue;
@@ -822,7 +818,7 @@ const routeOneWire = (diagram, wire, routedWires, target = null) => {
   const start = endpoints.start;
   const componentPins = new Set(diagram.components.flatMap((component) =>
     (component.pins || []).map((pin) => pointKey(pin))));
-  const sameNetWires = !wire.labelId && wire.node && wire.node !== '0'
+  const sameNetWires = wire.node
     ? routedWires.filter((item) => item.node === wire.node)
     : [];
   const sameNetPoints = sameNetWires.flatMap((item) => [

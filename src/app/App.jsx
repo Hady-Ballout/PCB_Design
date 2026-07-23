@@ -1,8 +1,13 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  COMPOSER_MODES,
+  buildAssistContext,
   buildConversationContext,
   chatTitleFromPrompt,
+  composeClarifiedPrompt,
+  composePlanBuildPrompt,
   createChat,
+  formatClarificationSummary,
   loadChatStore,
   migrateChatDiagram,
   saveChatStore,
@@ -47,6 +52,8 @@ import {
   wireId,
 } from '../features/schematic/geometry.js';
 import { AuthProvider, useAuth, HomePage, LoginPage, SignupPage, VerifyPage } from '../features/auth/auth.jsx';
+import { applyTheme, loadTheme, saveTheme } from './theme.js';
+import { ThemeToggle } from './ThemeToggle.jsx';
 import '../features/auth/auth.css';
 
 function App() {
@@ -60,8 +67,8 @@ function App() {
   const [canvasMode, setCanvasMode] = useState('kicad');
   const [diagramSelection, setDiagramSelection] = useState(null);
   const [pendingTerminal, setPendingTerminal] = useState(null);
-  const [openEditorViews, setOpenEditorViews] = useState(['spice']);
-  const [activeEditorView, setActiveEditorView] = useState('spice');
+  const [openEditorViews, setOpenEditorViews] = useState(['realisticSchematic']);
+  const [activeEditorView, setActiveEditorView] = useState('realisticSchematic');
   const [maximizedEditorView, setMaximizedEditorView] = useState(null);
   const [editorSplit, setEditorSplit] = useState(loadEditorSplit);
   const [resizingAxis, setResizingAxis] = useState(null);
@@ -70,12 +77,17 @@ function App() {
   const [page, setPage] = useState(pageFromHash);
   const [generatingChatId, setGeneratingChatId] = useState(null);
   const [generationStage, setGenerationStage] = useState(null);
+  const [clarifyingChatId, setClarifyingChatId] = useState(null);
+  const [assistingChatId, setAssistingChatId] = useState(null);
+  // Live model reasoning for the single in-flight AI request. Ephemeral: reset
+  // whenever the attempt changes (generation correction retry) and cleared
+  // when the request settles — never written to the chat store.
+  const [thinkingState, setThinkingState] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
+  const [theme, setTheme] = useState(loadTheme);
   const messagesEndRef = useRef(null);
   const spiceEditorRef = useRef(null);
   const resizeDragRef = useRef(null);
-  const editorWindowRectsRef = useRef(new Map());
-  const editorLayoutSignatureRef = useRef('');
   const activeChat = chatStore.chats.find((chat) => chat.id === chatStore.activeChatId) || chatStore.chats[0];
   const prompt = activeChat?.draft || '';
   const result = activeChat?.result || null;
@@ -94,7 +106,21 @@ function App() {
   const kicadSyncError = activeChat?.kicadSyncError || '';
   const circuitJsonSyncError = activeChat?.circuitJsonSyncError || '';
   const isGenerating = generatingChatId === activeChat?.id;
-  const generationBusy = Boolean(generatingChatId);
+  const isClarifying = clarifyingChatId === activeChat?.id;
+  const isAssisting = assistingChatId === activeChat?.id;
+  const generationBusy = Boolean(generatingChatId || clarifyingChatId || assistingChatId);
+  const thinkingText = thinkingState?.chatId === activeChat?.id ? thinkingState.text : '';
+
+  const appendThinking = (chatId, delta, attempt = 0) => {
+    if (!delta) return;
+    setThinkingState((prev) => (
+      prev && prev.chatId === chatId && prev.attempt === attempt
+        ? { chatId, attempt, text: prev.text + delta }
+        : { chatId, attempt, text: delta }
+    ));
+  };
+  const clearThinking = () => setThinkingState(null);
+  const composerMode = activeChat?.draftMode || 'implement';
   const sortedChats = useMemo(
     () => [...chatStore.chats].sort((a, b) => b.updatedAt - a.updatedAt),
     [chatStore.chats],
@@ -127,6 +153,7 @@ function App() {
     }));
   };
   const setPrompt = (value) => setChatField('draft', value);
+  const setComposerMode = (value) => setChatField('draftMode', COMPOSER_MODES.includes(value) ? value : 'implement');
   const setEditableSpice = (value) => setChatField('editableSpice', value);
   const setEditableCircuitJson = (value) => setChatField('editableCircuitJson', value);
   const setEditableCode = (value) => setChatField('editableCode', value);
@@ -169,6 +196,46 @@ function App() {
     });
   };
 
+  // Direct circuit edits (e.g. rewiring a pin in the breadboard view). Unlike
+  // applyDiagramChange we already hold the next circuit, so there is no diagram
+  // inverse — just gate on the electrical signature and run the same sync spine
+  // so SPICE/KiCad/JSON/schematic stay consistent.
+  const applyCircuitChange = (value) => {
+    updateActiveChat((chat) => {
+      if (!chat.result) return chat;
+      try {
+        const nextCircuit = typeof value === 'function' ? value(chat.result.circuit) : value;
+        if (!nextCircuit || circuitElectricalSignature(nextCircuit) === circuitElectricalSignature(chat.result.circuit)) {
+          return chat;
+        }
+        const synchronized = synchronizeResult(chat.result, nextCircuit, chat.editedDiagram || chat.result.diagram);
+        return {
+          ...chat,
+          updatedAt: Date.now(),
+          result: synchronized,
+          editedDiagram: synchronized.diagram,
+          editableSpice: synchronized.spice,
+          editableKicadNetlist: synchronized.kicadNetlist,
+          editableCircuitJson: JSON.stringify(synchronized.circuit, null, 2),
+          simulationRun: null,
+          simulationError: '',
+          spiceSyncError: '',
+          kicadSyncError: '',
+          circuitJsonSyncError: '',
+          error: '',
+        };
+      } catch (syncError) {
+        return { ...chat, error: syncError.message };
+      }
+    });
+  };
+
+  useEffect(() => {
+    applyTheme(theme);
+    saveTheme(theme);
+  }, [theme]);
+  const toggleTheme = () => setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       saveChatStore(chatStore);
@@ -183,82 +250,6 @@ function App() {
       // Resizing still works when browser storage is unavailable.
     }
   }, [editorSplit]);
-
-  // Windows-snap style layout animation: whenever the set of open windows (or
-  // the maximized one) changes, glide every surviving window from its old rect
-  // to its new one, and let brand-new windows rise in from below so added
-  // sections read as stacking downwards. Runs on every commit so the stored
-  // rects stay fresh through splitter drags and pages without windows, but
-  // only animates when the layout itself changed.
-  useLayoutEffect(() => {
-    const signature = `${openEditorViews.join(',')}|${maximizedEditorView || ''}|${page}|${user ? 'in' : 'out'}`;
-    const layoutChanged = signature !== editorLayoutSignatureRef.current;
-    editorLayoutSignatureRef.current = signature;
-    const animate = layoutChanged
-      && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    const rects = editorWindowRectsRef.current;
-    const seen = new Set();
-    document.querySelectorAll('[data-editor-view]').forEach((element) => {
-      if (typeof element.animate !== 'function') return;
-      const view = element.dataset.editorView;
-      seen.add(view);
-      if (!animate) {
-        // A transform mid-animation would corrupt the measurement; skip those.
-        if (!element.getAnimations().length) rects.set(view, element.getBoundingClientRect());
-        return;
-      }
-      element.getAnimations().forEach((animation) => animation.cancel());
-      const rect = element.getBoundingClientRect();
-      const before = rects.get(view);
-      rects.set(view, rect);
-      if (!rect.width || !rect.height) return;
-      if (!before) {
-        element.animate(
-          [
-            { opacity: 0, transform: 'translateY(32px) scale(0.98)' },
-            { opacity: 1, transform: 'none' },
-          ],
-          { duration: 260, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
-        );
-        return;
-      }
-      const deltaX = before.left - rect.left;
-      const deltaY = before.top - rect.top;
-      const scaleX = before.width / rect.width;
-      const scaleY = before.height / rect.height;
-      const moved = Math.abs(deltaX) > 0.5 || Math.abs(deltaY) > 0.5
-        || Math.abs(scaleX - 1) > 0.005 || Math.abs(scaleY - 1) > 0.005;
-      if (!moved) return;
-      element.animate(
-        [
-          {
-            transformOrigin: 'top left',
-            transform: `translate(${deltaX}px, ${deltaY}px) scale(${scaleX}, ${scaleY})`,
-          },
-          { transformOrigin: 'top left', transform: 'none' },
-        ],
-        { duration: 300, easing: 'cubic-bezier(0.2, 0, 0, 1)' },
-      );
-    });
-    // Forget closed windows so reopening one plays the entrance again.
-    [...rects.keys()].forEach((view) => {
-      if (!seen.has(view)) rects.delete(view);
-    });
-  });
-
-  // Viewport resizes reflow the windows without a React commit; re-measure so
-  // the next layout animation starts from where the windows actually are.
-  useEffect(() => {
-    const refreshRects = () => {
-      const rects = editorWindowRectsRef.current;
-      document.querySelectorAll('[data-editor-view]').forEach((element) => {
-        if (element.getAnimations?.().length) return;
-        rects.set(element.dataset.editorView, element.getBoundingClientRect());
-      });
-    };
-    window.addEventListener('resize', refreshRects);
-    return () => window.removeEventListener('resize', refreshRects);
-  }, []);
 
   useEffect(() => {
     const syncPageFromHash = () => {
@@ -316,7 +307,7 @@ function App() {
     }
   }, [result?.circuit]);
 
-  // Seed the editable firmware the same way — once, so hand edits stick.
+  // Same for the firmware code editor.
   useEffect(() => {
     if (result?.code && !editableCode) {
       setEditableCode(result.code);
@@ -535,12 +526,10 @@ function App() {
     event.preventDefault();
     const container = event.currentTarget.parentElement;
     event.currentTarget.setPointerCapture(event.pointerId);
-    resizeDragRef.current = { axis, container, target: null, frame: null };
+    resizeDragRef.current = { axis, container };
     setResizingAxis(axis);
   };
 
-  // The splitter eases toward the pointer each frame instead of jumping to it,
-  // which smooths pointer jitter into the damped glide Windows snap-resize has.
   const moveEditorResize = (event) => {
     const drag = resizeDragRef.current;
     if (!drag || !drag.container) return;
@@ -550,41 +539,15 @@ function App() {
       : ((event.clientY - bounds.top) / bounds.height) * 100;
     const minimum = drag.axis === 'columns' ? 25 : 32;
     const maximum = drag.axis === 'columns' ? 75 : 72;
-    let target = Math.min(maximum, Math.max(minimum, raw));
-    // Gentle magnet toward an even split, like Windows snap layouts.
-    if (Math.abs(target - 50) < 1.75) target = 50;
-    drag.target = target;
-    if (drag.frame != null) return;
-    const step = () => {
-      const active = resizeDragRef.current;
-      if (!active || active.target == null) return;
-      let settled = false;
-      setEditorSplit((current) => {
-        const value = current[active.axis];
-        const distance = active.target - value;
-        if (Math.abs(distance) < 0.05) {
-          settled = true;
-          return value === active.target ? current : { ...current, [active.axis]: active.target };
-        }
-        return { ...current, [active.axis]: value + distance * 0.35 };
-      });
-      active.frame = settled ? null : requestAnimationFrame(step);
-    };
-    drag.frame = requestAnimationFrame(step);
+    setEditorSplit((current) => ({
+      ...current,
+      [drag.axis]: Math.min(maximum, Math.max(minimum, raw)),
+    }));
   };
 
   const stopEditorResize = (event) => {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    const drag = resizeDragRef.current;
-    if (drag) {
-      if (drag.frame != null) cancelAnimationFrame(drag.frame);
-      if (drag.target != null) {
-        const axis = drag.axis;
-        const target = drag.target;
-        setEditorSplit((current) => ({ ...current, [axis]: target }));
-      }
     }
     resizeDragRef.current = null;
     setResizingAxis(null);
@@ -596,11 +559,16 @@ function App() {
       setError('Enter a circuit prompt before sending.');
       return;
     }
-    await submitToChat(activeChat, submittedPrompt);
+    await beginPrompt(activeChat, submittedPrompt);
   };
 
-  const submitToChat = async (chat, submittedPrompt) => {
+  // Phase 1 of every prompt: append the user message, then ask the AI for a
+  // round of clarifying questions. Generation only starts after the user
+  // answers (or skips) — unless the clarify call fails, in which case we fall
+  // back to direct generation so the feature can never block a prompt.
+  const beginPrompt = async (chat, submittedPrompt) => {
     const chatId = chat.id;
+    const mode = COMPOSER_MODES.includes(chat.draftMode) ? chat.draftMode : 'implement';
     const priorMessages = chat.messages;
     const currentDesign = chat.result
       ? {
@@ -610,9 +578,8 @@ function App() {
           code: chat.editableCode,
         }
       : null;
-    const isRevision = Boolean(currentDesign);
     const previousSpice = chat.editableSpice;
-    const previousCode = chat.editableCode;
+    const memory = chat.memory;
     const userMessage = {
       id: messageId(),
       role: 'user',
@@ -620,9 +587,6 @@ function App() {
       createdAt: Date.now(),
     };
 
-    setGeneratingChatId(chatId);
-    setGenerationStage('circuit');
-    openEditorView('spice');
     window.location.hash = '';
     setPage('workspace');
     updateChat(chatId, (chat) => ({
@@ -630,6 +594,297 @@ function App() {
       title: chat.messages.length ? chat.title : chatTitleFromPrompt(submittedPrompt),
       updatedAt: Date.now(),
       draft: '',
+      error: '',
+      // A new Plan/Implement prompt supersedes any question round still
+      // waiting for answers; an Ask question leaves the round answerable.
+      messages: [
+        ...chat.messages.map((message) => (
+          mode !== 'ask' && message.clarification?.status === 'pending'
+            ? { ...message, clarification: { ...message.clarification, status: 'skipped' } }
+            : message
+        )),
+        userMessage,
+      ],
+    }));
+
+    if (mode !== 'implement') {
+      await runAssist(chatId, mode, submittedPrompt, priorMessages, currentDesign, memory);
+      return;
+    }
+
+    setClarifyingChatId(chatId);
+    try {
+      const controller = new AbortController();
+      // Idle timeout: stream activity (thinking tokens) resets the clock, so
+      // a model that is visibly reasoning is not cut off at a fixed deadline.
+      let timeoutId = setTimeout(() => controller.abort(), 20000);
+      const resetIdleTimeout = () => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => controller.abort(), 20000);
+      };
+      let questions = [];
+      try {
+        const response = await fetch(`${API_BASE}/api/clarify-circuit`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({
+            prompt: submittedPrompt,
+            messages: buildConversationContext(priorMessages),
+            currentDesign,
+            memory,
+          }),
+          signal: controller.signal,
+        });
+        if (response.ok) {
+          const contentType = response.headers.get('content-type') || '';
+          const data = contentType.includes('application/x-ndjson')
+            ? await readGenerationStream(response, (event) => {
+                resetIdleTimeout();
+                if (event.type === 'thinking') appendThinking(chatId, event.delta);
+              })
+            : await response.json();
+          questions = Array.isArray(data.questions) ? data.questions : [];
+        }
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      if (questions.length) {
+        updateChat(chatId, (chat) => ({
+          ...chat,
+          updatedAt: Date.now(),
+          messages: [
+            ...chat.messages,
+            {
+              id: messageId(),
+              role: 'assistant',
+              content: 'A few quick questions before I design this:',
+              createdAt: Date.now(),
+              clarification: { forPrompt: submittedPrompt, questions, answers: {}, status: 'pending' },
+            },
+          ],
+        }));
+        return;
+      }
+    } catch (clarifyError) {
+      console.error(`Clarify round failed, generating directly: ${clarifyError.message}`);
+    } finally {
+      setClarifyingChatId(null);
+      clearThinking();
+    }
+
+    await runGeneration(chatId, submittedPrompt, priorMessages, currentDesign, previousSpice, memory);
+  };
+
+  // Plan/Ask modes: one conversational AI call, no clarify round, and no
+  // artifacts — the design, editors, and chat memory are never touched.
+  const runAssist = async (chatId, mode, submittedPrompt, priorMessages, currentDesign, memory) => {
+    setAssistingChatId(chatId);
+    try {
+      const controller = new AbortController();
+      // Plans run longer than clarify's 512 tokens, so 20s would be too
+      // tight. Idle timeout: stream activity (thinking tokens) resets the
+      // clock instead of capping the total request time.
+      let timeoutId = setTimeout(() => controller.abort(), 60000);
+      const resetIdleTimeout = () => {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => controller.abort(), 60000);
+      };
+      let data;
+      try {
+        const response = await fetch(`${API_BASE}/api/assist-circuit`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({
+            mode,
+            prompt: submittedPrompt,
+            messages: buildAssistContext(priorMessages),
+            currentDesign,
+            memory,
+          }),
+          signal: controller.signal,
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (response.ok && contentType.includes('application/x-ndjson')) {
+          data = await readGenerationStream(response, (event) => {
+            resetIdleTimeout();
+            if (event.type === 'thinking') appendThinking(chatId, event.delta);
+          });
+        } else {
+          data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || `Request failed with HTTP ${response.status}.`);
+        }
+      } finally {
+        clearTimeout(timeoutId);
+      }
+      const reply = String(data.reply || '').trim();
+      if (!reply) throw new Error('The assistant returned an empty reply.');
+      updateChat(chatId, (chat) => ({
+        ...chat,
+        updatedAt: Date.now(),
+        error: '',
+        messages: [
+          ...chat.messages,
+          {
+            id: messageId(),
+            role: 'assistant',
+            content: reply,
+            createdAt: Date.now(),
+            mode,
+            ...(mode === 'plan' ? { plan: { forPrompt: submittedPrompt, status: 'proposed' } } : {}),
+          },
+        ],
+      }));
+    } catch (assistError) {
+      updateChat(chatId, (chat) => ({
+        ...chat,
+        updatedAt: Date.now(),
+        error: assistError.message,
+        messages: [
+          ...chat.messages,
+          {
+            id: messageId(),
+            role: 'assistant',
+            content: `I couldn't ${mode === 'plan' ? 'draft a plan for' : 'answer'} that. Nothing was changed. (${assistError.message})`,
+            createdAt: Date.now(),
+          },
+        ],
+      }));
+    } finally {
+      setAssistingChatId(null);
+      clearThinking();
+    }
+  };
+
+  // "Build this" on a plan message: fold the plan into the generation prompt
+  // and run the normal circuit pipeline against the design as it is NOW (the
+  // click-time snapshot), skipping the clarify round — the plan already
+  // settled the open decisions.
+  const buildFromPlan = async (planMessageId) => {
+    const chat = activeChat;
+    if (!chat || generationBusy) return;
+    const message = chat.messages.find((entry) => entry.id === planMessageId);
+    if (!message?.plan || message.plan.status !== 'proposed') return;
+
+    const priorMessages = chat.messages;
+    const currentDesign = chat.result
+      ? {
+          circuit: chat.result.circuit,
+          spice: chat.editableSpice,
+          kicadNetlist: chat.editableKicadNetlist,
+          code: chat.editableCode,
+        }
+      : null;
+    const previousSpice = chat.editableSpice;
+    const memory = chat.memory;
+
+    updateChat(chat.id, (current) => ({
+      ...current,
+      updatedAt: Date.now(),
+      messages: [
+        ...current.messages.map((entry) => (
+          entry.id === planMessageId
+            ? { ...entry, plan: { ...entry.plan, status: 'built' } }
+            : entry
+        )),
+        {
+          id: messageId(),
+          role: 'user',
+          content: 'Build this plan.',
+          createdAt: Date.now(),
+        },
+      ],
+    }));
+
+    await runGeneration(
+      chat.id,
+      composePlanBuildPrompt(message.plan.forPrompt, message.content),
+      priorMessages,
+      currentDesign,
+      previousSpice,
+      memory,
+    );
+  };
+
+  const answerClarification = (clarificationMessageId, questionId, answer) => {
+    updateActiveChat((chat) => ({
+      ...chat,
+      messages: chat.messages.map((message) => (
+        message.id === clarificationMessageId && message.clarification?.status === 'pending'
+          ? {
+              ...message,
+              clarification: {
+                ...message.clarification,
+                answers: {
+                  ...message.clarification.answers,
+                  [questionId]: String(answer || '').slice(0, 200),
+                },
+              },
+            }
+          : message
+      )),
+    }));
+  };
+
+  // Phase 2: fold the answers into the generation prompt and run the normal
+  // circuit pipeline. Skipping submits every question as "No preference".
+  const submitClarificationAnswers = async (clarificationMessageId, skip = false) => {
+    const chat = activeChat;
+    if (!chat || generationBusy) return;
+    const message = chat.messages.find((entry) => entry.id === clarificationMessageId);
+    const clarification = message?.clarification;
+    if (!clarification || clarification.status !== 'pending') return;
+
+    const answers = skip ? {} : clarification.answers;
+    const priorMessages = chat.messages;
+    const currentDesign = chat.result
+      ? {
+          circuit: chat.result.circuit,
+          spice: chat.editableSpice,
+          kicadNetlist: chat.editableKicadNetlist,
+          code: chat.editableCode,
+        }
+      : null;
+    const previousSpice = chat.editableSpice;
+    const memory = chat.memory;
+
+    updateChat(chat.id, (current) => ({
+      ...current,
+      updatedAt: Date.now(),
+      messages: [
+        ...current.messages.map((entry) => (
+          entry.id === clarificationMessageId
+            ? { ...entry, clarification: { ...entry.clarification, answers, status: skip ? 'skipped' : 'answered' } }
+            : entry
+        )),
+        {
+          id: messageId(),
+          role: 'user',
+          content: formatClarificationSummary(clarification.questions, answers),
+          createdAt: Date.now(),
+        },
+      ],
+    }));
+
+    await runGeneration(
+      chat.id,
+      composeClarifiedPrompt(clarification.forPrompt, clarification.questions, answers),
+      priorMessages,
+      currentDesign,
+      previousSpice,
+      memory,
+    );
+  };
+
+  const runGeneration = async (chatId, generationPrompt, priorMessages, currentDesign, previousSpice, memory) => {
+    const isRevision = Boolean(currentDesign);
+
+    setGeneratingChatId(chatId);
+    setGenerationStage(null);
+    openEditorView('realisticSchematic');
+    updateChat(chatId, (chat) => ({
+      ...chat,
+      updatedAt: Date.now(),
       error: '',
       editableSpice: isRevision
         ? chat.editableSpice
@@ -640,7 +895,6 @@ function App() {
       simulationRun: null,
       simulationError: '',
       circuitJsonSyncError: '',
-      messages: [...chat.messages, userMessage],
     }));
 
     try {
@@ -648,10 +902,10 @@ function App() {
         method: 'POST',
         headers: authHeaders(),
         body: JSON.stringify({
-          prompt: submittedPrompt,
+          prompt: generationPrompt,
           messages: buildConversationContext(priorMessages),
           currentDesign,
-          memory: chat.memory,
+          memory,
         }),
       });
 
@@ -662,6 +916,12 @@ function App() {
       const contentType = response.headers.get('content-type') || '';
       const data = contentType.includes('application/x-ndjson')
         ? await readGenerationStream(response, (event) => {
+            if (event.type === 'thinking') {
+              // A new attempt (correction retry) restarts the reasoning, so
+              // appendThinking replaces the window instead of appending.
+              appendThinking(chatId, event.delta, event.attempt || 0);
+              return;
+            }
             if (event.type === 'stage') {
               setGenerationStage(event.stage);
               return;
@@ -678,11 +938,16 @@ function App() {
         : await response.json();
       if (data.error) throw new Error(data.error);
       const fallbackReply = `${isRevision ? 'Updated' : 'Generated'} ${data.circuit.title} with ${data.circuit.components.length} components. The latest circuit package is open in the workspace.`;
+      const issueErrors = (data.issues || []).filter((issue) => issue.severity === 'error');
+      const issueNote = issueErrors.length
+        ? `\n\nNote: ${issueErrors.length} design issue${issueErrors.length === 1 ? '' : 's'} remain${issueErrors.length === 1 ? 's' : ''} — open the breadboard view for details and suggested fixes.`
+        : '';
       const assistantMessage = {
         id: messageId(),
         role: 'assistant',
-        content: String(data.reply || '').trim() || fallbackReply,
+        content: (String(data.reply || '').trim() || fallbackReply) + issueNote,
         circuit: data.circuit,
+        issues: data.issues || [],
         createdAt: Date.now(),
       };
       updateChat(chatId, (chat) => ({
@@ -699,11 +964,11 @@ function App() {
         pendingKicadChange: currentDesign && currentDesign.kicadNetlist !== data.kicadNetlist
           ? { previous: currentDesign.kicadNetlist, proposed: data.kicadNetlist || '' }
           : null,
+        editableCircuitJson: JSON.stringify(data.circuit, null, 2),
         editableCode: data.code || '',
         pendingCodeChange: currentDesign && (currentDesign.code || '') !== (data.code || '')
           ? { previous: currentDesign.code || '', proposed: data.code || '' }
           : null,
-        editableCircuitJson: JSON.stringify(data.circuit, null, 2),
         editedDiagram: cloneDiagram(data.diagram),
         simulationRun: null,
         simulationError: '',
@@ -722,14 +987,13 @@ function App() {
         editableCircuitJson: currentDesign
           ? JSON.stringify(currentDesign.circuit, null, 2)
           : chat.editableCircuitJson,
-        editableCode: currentDesign ? currentDesign.code : previousCode,
         error: requestError.message,
         messages: [
           ...chat.messages,
           {
             id: messageId(),
             role: 'assistant',
-            content: `I could not generate the circuit: ${requestError.message}`,
+            content: `I couldn't produce a valid version of that request, so nothing was changed. Try rephrasing or simplifying the request. (${requestError.message})`,
             createdAt: Date.now(),
           },
         ],
@@ -737,6 +1001,7 @@ function App() {
     } finally {
       setGeneratingChatId(null);
       setGenerationStage(null);
+      clearThinking();
     }
   };
 
@@ -764,6 +1029,29 @@ function App() {
     } finally {
       setIsSimulating(false);
     }
+  };
+
+  // Compile the current sketch for the breadboard's live Uno emulation.
+  // Cached per chat by a cheap code hash so repeat Runs skip the server.
+  const compileFirmware = async (code) => {
+    let hash = 0;
+    for (let i = 0; i < code.length; i += 1) {
+      hash = ((hash << 5) - hash + code.charCodeAt(i)) | 0;
+    }
+    const cached = activeChat?.compiledFirmware;
+    if (cached && cached.hash === hash && cached.hex) {
+      return { ok: true, hex: cached.hex, errors: [] };
+    }
+    const response = await fetch(`${API_BASE}/api/compile-sketch`, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ code }),
+    });
+    const data = await response.json().catch(() => ({ ok: false, errors: [`Compilation failed with HTTP ${response.status}.`] }));
+    if (data.ok && data.hex) {
+      setChatField('compiledFirmware', { hash, hex: data.hex });
+    }
+    return { ok: Boolean(data.ok && data.hex), hex: data.hex ?? '', errors: data.errors ?? [data.error ?? 'Compilation failed.'] };
   };
 
   const addDiagramComponent = (type) => {
@@ -834,7 +1122,7 @@ function App() {
   const openChat = (chatId) => {
     setChatStore((current) => ({ ...current, activeChatId: chatId }));
     setChatPanelView('conversation');
-    openEditorView('spice');
+    openEditorView('realisticSchematic');
     window.location.hash = '';
     setPage('workspace');
   };
@@ -854,8 +1142,8 @@ function App() {
 
     setNewChatPrompt('');
     setChatPanelView('conversation');
-    openEditorView('spice');
-    await submitToChat(chat, submittedPrompt);
+    openEditorView('realisticSchematic');
+    await beginPrompt(chat, submittedPrompt);
   };
 
   const handleComposerKeyDown = (event) => {
@@ -888,16 +1176,19 @@ function App() {
       const previousSpice = chat.pendingSpiceChange?.previous;
       const previousKicad = chat.pendingKicadChange?.previous;
       const previousCode = chat.pendingCodeChange?.previous;
-      if (!chat.result || (!previousSpice && !previousKicad && previousCode == null)) {
-        return { ...chat, pendingSpiceChange: null, pendingKicadChange: null, pendingCodeChange: null };
-      }
+      const restoredCode = chat.pendingCodeChange ? previousCode || '' : null;
       if (!chat.result || (!previousSpice && !previousKicad)) {
         return {
           ...chat,
-          editableCode: previousCode != null ? previousCode : chat.editableCode,
           pendingSpiceChange: null,
           pendingKicadChange: null,
           pendingCodeChange: null,
+          ...(restoredCode != null
+            ? {
+                editableCode: restoredCode,
+                result: { ...chat.result, code: restoredCode },
+              }
+            : {}),
         };
       }
 
@@ -909,8 +1200,13 @@ function App() {
           ...chat,
           editableSpice: previousSpice || chat.editableSpice,
           editableKicadNetlist: previousKicad || chat.editableKicadNetlist,
-          editableCode: previousCode != null ? previousCode : chat.editableCode,
           editableCircuitJson: chat.result?.circuit ? JSON.stringify(chat.result.circuit, null, 2) : chat.editableCircuitJson,
+          ...(restoredCode != null
+            ? {
+                editableCode: restoredCode,
+                result: { ...chat.result, code: restoredCode },
+              }
+            : {}),
           pendingSpiceChange: null,
           pendingKicadChange: null,
           pendingCodeChange: null,
@@ -929,11 +1225,11 @@ function App() {
       );
       return {
         ...chat,
-        result: synchronized,
+        result: restoredCode != null ? { ...synchronized, code: restoredCode } : synchronized,
         editableSpice: previousSpice || synchronized.spice,
         editableKicadNetlist: previousKicad || synchronized.kicadNetlist,
-        editableCode: previousCode != null ? previousCode : chat.editableCode,
         editableCircuitJson: JSON.stringify(synchronized.circuit, null, 2),
+        editableCode: restoredCode != null ? restoredCode : chat.editableCode,
         editedDiagram: synchronized.diagram,
         pendingSpiceChange: null,
         pendingKicadChange: null,
@@ -1065,8 +1361,8 @@ function App() {
     <div className="editor-window-body canvas-window-body">
       {!result ? (
         <div className="editor-window-empty">
-          <strong>No schematic available</strong>
-          <p>Generate a circuit to open its KiCad schematic and editing canvas.</p>
+          <strong>No canvas available</strong>
+          <p>Generate a circuit to open its editable schematic canvas.</p>
         </div>
       ) : canvasMode === 'kicad' ? (
         <>
@@ -1201,39 +1497,45 @@ function App() {
     </div>
   );
 
-  const firmwareTarget = firmwareTargetForCircuit(result?.circuit);
-
-  const renderCodeView = () => (
-    <div className="editor-window-body code-window-body">
-      <div className="editor-header">
-        <div>
-          <h3>Firmware</h3>
-          <p>
-            {firmwareTarget
-              ? `${firmwareTarget.boardName} — ${firmwareTarget.language} (${firmwareTarget.filename})`
-              : result
-                ? 'This circuit has no microcontroller board.'
-                : 'Generate a circuit with a microcontroller board to get firmware.'}
-          </p>
+  const renderCodeView = () => {
+    const firmwareTarget = firmwareTargetForCircuit(result?.circuit);
+    return (
+      <div className="editor-window-body code-window-body">
+        <div className="editor-header">
+          <div>
+            <h3>Firmware code</h3>
+            <p>
+              {firmwareTarget
+                ? `${firmwareTarget.boardName} — ${firmwareTarget.language} (${firmwareTarget.filename})`
+                : result
+                  ? ''
+                  : 'Generate a circuit with a microcontroller board to get firmware.'}
+            </p>
+          </div>
+          <div className="spice-editor-actions">
+            <button
+              onClick={() => setEditableCode(result?.code || '')}
+              disabled={!result?.code || isGenerating || Boolean(pendingCodeChange)}
+            >
+              Reset
+            </button>
+            <button
+              onClick={() => downloadText(firmwareTarget?.filename || 'firmware.txt', editableCode, firmwareTarget?.mime || 'text/plain')}
+              disabled={!editableCode || isGenerating}
+            >
+              Download
+            </button>
+            {renderWindowControls('code', 'code-window-controls')}
+          </div>
         </div>
-        <div className="spice-editor-actions">
-          <button
-            onClick={() => setEditableCode(result?.code || '')}
-            disabled={!result || isGenerating || Boolean(pendingCodeChange)}
-          >
-            Reset
-          </button>
-          <button
-            onClick={() => downloadText(firmwareTarget?.filename || 'firmware.txt', editableCode, firmwareTarget?.mime || 'text/plain')}
-            disabled={!editableCode || isGenerating}
-          >
-            Download
-          </button>
-        </div>
-      </div>
-      {pendingCodeChange
-        ? renderChangedCode(editableCode, pendingCodeChangedLines, 'firmware')
-        : (
+        {result && !firmwareTarget && !pendingCodeChange ? (
+          <div className="editor-window-empty">
+            <strong>No firmware for this circuit</strong>
+            <p>This circuit has no microcontroller board.</p>
+          </div>
+        ) : pendingCodeChange ? (
+          renderChangedCode(editableCode, pendingCodeChangedLines, 'firmware')
+        ) : (
           <textarea
             className={`code-editor editor-window-code ${isGenerating ? 'live-code-editor' : ''}`}
             value={editableCode}
@@ -1245,8 +1547,9 @@ function App() {
             placeholder="Generate a circuit with a microcontroller board to see its firmware here."
           />
         )}
-    </div>
-  );
+      </div>
+    );
+  };
 
   const renderBlockSchematicView = () => (
     <div className="editor-window-body canvas-window-body">
@@ -1260,6 +1563,15 @@ function App() {
       )}
     </div>
   );
+
+  // Everything the generation pass learned about circuit quality: topology
+  // rule findings plus the server-side ERC, which was previously computed and
+  // then discarded without ever reaching the UI.
+  const circuitQualityIssues = (generation) => [
+    ...(generation?.issues || []),
+    ...(generation?.validation?.errors || []).map((message) => ({ id: 'erc', severity: 'error', message, fix: '' })),
+    ...(generation?.validation?.warnings || []).map((message) => ({ id: 'erc', severity: 'warning', message, fix: '' })),
+  ];
 
   const renderPcb3dView = () => (
     <div className="editor-window-body canvas-window-body">
@@ -1284,62 +1596,75 @@ function App() {
           <p>Generate a circuit to view its breadboard build.</p>
         </div>
       ) : (
-        <RealisticSchematic circuit={result.circuit} />
+        <RealisticSchematic
+          circuit={result.circuit}
+          overrides={activeChat?.editedBreadboard}
+          onCircuitChange={applyCircuitChange}
+          onLayoutChange={(value) => setChatField('editedBreadboard', value)}
+          issues={circuitQualityIssues(result)}
+          firmware={editableCode || result?.code || ''}
+          onCompileFirmware={compileFirmware}
+          windowControls={renderWindowControls('realisticSchematic', 'realistic-window-controls')}
+        />
       )}
     </div>
   );
+
+  // The window's maximize/close controls (the per-window titlebar was removed).
+  // They render at the right end of each view's toolbar/action row — after the
+  // Download button — and stay visible when the window is maximized because the
+  // toolbar is part of the window.
+  const renderWindowControls = (view, extraClass = '') => {
+    const isMaximized = maximizedEditorView === view;
+    return (
+      <div className={`editor-window-controls ${extraClass}`}>
+        <button
+          className="editor-window-control"
+          onClick={() => toggleMaximizeEditorView(view)}
+          type="button"
+          aria-pressed={isMaximized}
+          aria-label={`${isMaximized ? 'Restore' : 'Maximize'} ${EDITOR_VIEW_LABELS[view]}`}
+          title={isMaximized ? 'Restore' : 'Maximize'}
+        >
+          {isMaximized ? (
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+              <rect x="2.5" y="5" width="8.5" height="8.5" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M5.5 5V3.2A1.7 1.7 0 0 1 7.2 1.5h6A1.3 1.3 0 0 1 14.5 2.8v6a1.7 1.7 0 0 1-1.7 1.7H11" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
+              <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+          )}
+        </button>
+        <button
+          className="editor-window-control editor-window-close"
+          onClick={() => closeEditorView(view)}
+          type="button"
+          aria-label={`Close ${EDITOR_VIEW_LABELS[view]}`}
+          title={`Close ${EDITOR_VIEW_LABELS[view]}`}
+        >
+          &times;
+        </button>
+      </div>
+    );
+  };
 
   const renderEditorWindow = (view) => {
     const isMaximized = maximizedEditorView === view;
     return (
       <article
         className={`editor-window ${activeEditorView === view ? 'active' : ''} ${isMaximized ? 'maximized' : ''}`}
-        data-editor-view={view}
         key={view}
         onMouseDown={() => setActiveEditorView(view)}
       >
-        <header className="editor-window-titlebar">
-          <strong>{EDITOR_VIEW_LABELS[view]}</strong>
-          <div className="editor-window-controls">
-            <button
-              className="editor-window-control"
-              onMouseDown={(event) => event.stopPropagation()}
-              onClick={() => toggleMaximizeEditorView(view)}
-              type="button"
-              aria-pressed={isMaximized}
-              aria-label={`${isMaximized ? 'Restore' : 'Maximize'} ${EDITOR_VIEW_LABELS[view]}`}
-              title={isMaximized ? 'Restore' : 'Maximize'}
-            >
-              {isMaximized ? (
-                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
-                  <rect x="2.5" y="5" width="8.5" height="8.5" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
-                  <path d="M5.5 5V3.2A1.7 1.7 0 0 1 7.2 1.5h6A1.3 1.3 0 0 1 14.5 2.8v6a1.7 1.7 0 0 1-1.7 1.7H11" fill="none" stroke="currentColor" strokeWidth="1.5" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" focusable="false">
-                  <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
-                </svg>
-              )}
-            </button>
-            <button
-              className="editor-window-control editor-window-close"
-              onMouseDown={(event) => event.stopPropagation()}
-              onClick={() => closeEditorView(view)}
-              type="button"
-              aria-label={`Close ${EDITOR_VIEW_LABELS[view]}`}
-              title={`Close ${EDITOR_VIEW_LABELS[view]}`}
-            >
-              &times;
-            </button>
-          </div>
-        </header>
         {view === 'spice' && renderSpiceView()}
         {view === 'json' && renderJsonView()}
+        {view === 'code' && renderCodeView()}
         {view === 'canvas' && renderCanvasView()}
         {view === 'blockSchematic' && renderBlockSchematicView()}
         {view === 'realisticSchematic' && renderRealisticSchematicView()}
         {view === 'pcb3d' && renderPcb3dView()}
-        {view === 'code' && renderCodeView()}
       </article>
     );
   };
@@ -1421,18 +1746,26 @@ function App() {
     );
   };
 
+  // Pages without the workspace user bar get a fixed floating toggle instead.
+  const withFloatingThemeToggle = (pageNode) => (
+    <>
+      <ThemeToggle theme={theme} onToggle={toggleTheme} floating />
+      {pageNode}
+    </>
+  );
+
   if (loading) return <div className="loading-screen">Loading...</div>;
 
   const visiblePage = user && AUTH_PAGES.has(page) ? 'workspace' : page;
 
-  if (!user && !PUBLIC_PAGES.has(visiblePage)) return <HomePage />;
-  if (visiblePage === 'home') return <HomePage />;
-  if (visiblePage === 'login') return <LoginPage />;
-  if (visiblePage === 'signup') return <SignupPage />;
-  if (visiblePage === 'verify') return <VerifyPage />;
+  if (!user && !PUBLIC_PAGES.has(visiblePage)) return withFloatingThemeToggle(<HomePage />);
+  if (visiblePage === 'home') return withFloatingThemeToggle(<HomePage />);
+  if (visiblePage === 'login') return withFloatingThemeToggle(<LoginPage />);
+  if (visiblePage === 'signup') return withFloatingThemeToggle(<SignupPage />);
+  if (visiblePage === 'verify') return withFloatingThemeToggle(<VerifyPage />);
 
   if (visiblePage === 'waveform') {
-    return (
+    return withFloatingThemeToggle(
       <main className="app-shell waveform-page-shell">
         <section className="waveform-page">
           <header className="waveform-page-header">
@@ -1476,6 +1809,7 @@ function App() {
   return (
     <main className="app-shell">
       <div className="user-bar app-user-bar">
+        <ThemeToggle theme={theme} onToggle={toggleTheme} />
         <span>{user.email}</span>
         <button type="button" onClick={logout}>Log out</button>
       </div>
@@ -1493,6 +1827,15 @@ function App() {
           openChat={openChat}
           isGenerating={isGenerating}
           generationStage={generationStage}
+          isClarifying={isClarifying}
+          isAssisting={isAssisting}
+          composerMode={composerMode}
+          setComposerMode={setComposerMode}
+          buildFromPlan={buildFromPlan}
+          thinkingText={thinkingText}
+          answerClarification={answerClarification}
+          submitClarification={(clarificationMessageId) => submitClarificationAnswers(clarificationMessageId, false)}
+          skipClarification={(clarificationMessageId) => submitClarificationAnswers(clarificationMessageId, true)}
           messagesEndRef={messagesEndRef}
           prompt={prompt}
           setPrompt={setPrompt}
@@ -1522,7 +1865,7 @@ function App() {
           {openEditorViews.length === 0 ? (
             <section className="workbench-empty">
               <h3>All editor windows are closed</h3>
-              <p>Open Spice or Canvas from the bar above.</p>
+              <p>Open Code or Realistic schematic from the bar above.</p>
             </section>
           ) : (
             renderEditorLayout()

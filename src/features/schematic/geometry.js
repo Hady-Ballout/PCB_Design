@@ -24,9 +24,6 @@ export const ADD_COMPONENT_TOOLS = [
   { type: 'bjt', label: 'Add BJT' },
   { type: 'opamp', label: 'Add op amp' },
   { type: 'ground', label: 'Add ground' },
-  { type: 'arduino_uno', label: 'Add Arduino Uno' },
-  { type: 'raspberry_pi', label: 'Add Raspberry Pi' },
-  { type: 'esp32', label: 'Add ESP32' },
 ];
 
 export const diagramPath = (points) => points.map((point) => `${point.x},${point.y}`).join(' ');
@@ -81,9 +78,9 @@ export const symbolDefaults = {
   bjt: { kind: 'bjt_npn', symbolType: 'bjt_npn', width: 118, height: 100, orientation: 'horizontal', value: '2N2222', prefix: 'Q', nodes: 3 },
   opamp: { kind: 'opamp', symbolType: 'opamp', width: 150, height: 110, orientation: 'horizontal', value: 'LM358', prefix: 'XU', nodes: 5 },
   ground: { kind: 'ground', symbolType: 'ground', width: 72, height: 62, orientation: 'vertical', value: '0', prefix: 'GND', nodes: 1 },
-  arduino_uno: { kind: 'arduino_uno', symbolType: 'generic', width: 150, height: 200, orientation: 'horizontal', value: 'Uno R3', prefix: 'U', nodes: 12 },
-  raspberry_pi: { kind: 'raspberry_pi', symbolType: 'generic', width: 150, height: 200, orientation: 'horizontal', value: 'Pi 5', prefix: 'U', nodes: 10 },
-  esp32: { kind: 'esp32', symbolType: 'generic', width: 150, height: 200, orientation: 'horizontal', value: 'DevKit V1', prefix: 'U', nodes: 12 },
+  arduino_uno: { kind: 'arduino_uno', symbolType: 'generic', width: 160, height: 420, orientation: 'horizontal', value: 'Uno R3', prefix: 'U', nodes: 24 },
+  raspberry_pi: { kind: 'raspberry_pi', symbolType: 'generic', width: 160, height: 200, orientation: 'horizontal', value: 'Pi 5', prefix: 'U', nodes: 10 },
+  esp32: { kind: 'esp32', symbolType: 'generic', width: 160, height: 240, orientation: 'horizontal', value: 'DevKit V1', prefix: 'U', nodes: 12 },
 };
 
 export const svgPointer = (event, diagram) => {
@@ -172,6 +169,18 @@ export const componentPinPoint = (component, pinIndex) => {
     return { x: component.x, y: component.y - component.height / 2 };
   }
 
+  if (component.symbolType === 'mcu') {
+    // Tighter 18px pin pitch: MCU boards carry 10-12 pins that must fit the
+    // fixed slot height without stressing the overlap resolver.
+    const side = pinIndex % 2 === 1 ? -1 : 1;
+    const row = Math.floor((pinIndex - 1) / 2);
+    const rows = Math.ceil(component.pinCount / 2);
+    return {
+      x: component.x + side * (component.width / 2),
+      y: component.y - ((rows - 1) * 18) / 2 + row * 18,
+    };
+  }
+
   if (component.pinCount <= 2) {
     if (component.orientation === 'vertical') {
       return {
@@ -190,7 +199,7 @@ export const componentPinPoint = (component, pinIndex) => {
   const rows = Math.ceil(component.pinCount / 2);
   return {
     x: component.x + side * (component.width / 2),
-    y: component.y - ((rows - 1) * 14) / 2 + row * 28,
+    y: component.y - ((rows - 1) * 40) / 2 + row * 40,
   };
 };
 

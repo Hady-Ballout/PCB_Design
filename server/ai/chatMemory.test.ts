@@ -32,6 +32,23 @@ describe('chat memory', () => {
     expect(sanitized[0].content).toBe('Turn 4');
   });
 
+  it('drops assistant clarification turns that carry no circuit', () => {
+    const history = [
+      { role: 'user' as const, content: 'blink an LED' },
+      {
+        role: 'assistant' as const,
+        content: 'A few quick questions before I design this:',
+        clarification: { questions: [{ id: 'q1', question: 'Supply?', options: ['5V'] }] },
+      } as never,
+      { role: 'assistant' as const, content: 'Done', circuit: circuit as never },
+    ];
+
+    expect(sanitizeConversationHistory(history)).toEqual([
+      { role: 'user', content: 'blink an LED' },
+      { role: 'assistant', content: 'Done', circuit },
+    ]);
+  });
+
   it('retains older requirements while recording the latest confirmed design', () => {
     let memory = { summary: 'Latest request: Requirement 1', updatedAt: 1 };
     for (let index = 2; index <= 8; index += 1) {

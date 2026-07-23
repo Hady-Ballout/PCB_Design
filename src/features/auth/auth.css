@@ -15,7 +15,7 @@
 }
 
 .page-backdrop-grid {
-  background-image: radial-gradient(rgba(17, 17, 17, 0.1) 1.5px, transparent 1.5px);
+  background-image: radial-gradient(var(--color-dot-grid-strong) 1.5px, transparent 1.5px);
   background-size: 24px 24px;
   inset: 0;
   position: absolute;
@@ -23,7 +23,7 @@
 
 /* Decorative bordered shapes floating on the paper. */
 .page-backdrop-shape {
-  border: 3px solid #111111;
+  border: 3px solid var(--color-ink);
   position: absolute;
 }
 
@@ -88,11 +88,11 @@
 }
 
 .home-eyebrow {
-  background: #ffffff;
-  border: 2px solid #111111;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
   border-radius: 999px;
-  box-shadow: 3px 3px 0 #111111;
-  color: #111111;
+  box-shadow: 3px 3px 0 var(--color-shadow);
+  color: var(--color-ink);
   display: inline-block;
   font-size: 12px;
   font-weight: 800;
@@ -106,10 +106,10 @@
    slightly rotated off the grid. */
 .home-title {
   background: var(--nb-yellow);
-  border: 4px solid #111111;
+  border: 4px solid var(--color-ink);
   border-radius: 16px;
-  box-shadow: 10px 10px 0 #111111;
-  color: #111111;
+  box-shadow: 10px 10px 0 var(--color-shadow);
+  color: var(--color-on-accent);
   display: inline-block;
   font-family: var(--font-display);
   font-size: clamp(2.4rem, 6.5vw, 4rem);
@@ -146,10 +146,10 @@
 }
 
 .pipeline-step {
-  background: #ffffff;
-  border: 3px solid #111111;
+  background: var(--color-chip);
+  border: 3px solid var(--color-ink);
   border-radius: 14px;
-  box-shadow: 6px 6px 0 #111111;
+  box-shadow: 6px 6px 0 var(--color-shadow);
   padding: 24px 20px;
   position: relative;
   text-align: center;
@@ -158,12 +158,12 @@
 }
 
 .pipeline-step:hover {
-  box-shadow: 9px 9px 0 #111111;
+  box-shadow: 9px 9px 0 var(--color-shadow);
   transform: translate(-3px, -3px);
 }
 
 .pipeline-step h3 {
-  color: #111111;
+  color: var(--color-ink);
   font-size: 1rem;
   font-weight: 800;
   margin: 10px 0 6px;
@@ -179,10 +179,10 @@
 
 .pipeline-number {
   align-items: center;
-  border: 2px solid #111111;
+  border: 2px solid var(--color-ink);
   border-radius: 50%;
-  box-shadow: 2px 2px 0 #111111;
-  color: #111111;
+  box-shadow: 2px 2px 0 var(--color-shadow);
+  color: var(--color-on-accent);
   display: inline-flex;
   font-size: 0.95rem;
   font-weight: 800;
@@ -212,10 +212,157 @@
 
 .pipeline-arrow {
   align-self: center;
-  color: #111111;
+  color: var(--color-ink);
   font-size: 1.6rem;
   font-weight: 800;
   margin-top: 10px;
+}
+
+/* ── Home use-case showcase ── */
+
+.home-cases {
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+  margin-top: 110px;
+  max-width: 880px;
+  width: 100%;
+}
+
+.home-cases-header {
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.home-cases-title {
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 3.5vw, 2.1rem);
+  font-weight: 400;
+  margin: 0 0 14px;
+}
+
+.home-cases-subtitle {
+  color: var(--color-text-muted);
+  font-size: 1rem;
+  line-height: 1.6;
+  margin: 0 auto;
+  max-width: 540px;
+}
+
+.case-card {
+  align-items: center;
+  background: var(--color-chip);
+  border: 3px solid var(--color-ink);
+  border-radius: 16px;
+  box-shadow: 8px 8px 0 var(--color-shadow);
+  display: flex;
+  gap: 30px;
+  padding: 28px;
+}
+
+/* Alternate the illustration side so the page zig-zags as you scroll. */
+.case-card:nth-of-type(even) {
+  flex-direction: row-reverse;
+}
+
+.case-visual {
+  align-items: center;
+  aspect-ratio: 4 / 3;
+  background: var(--color-canvas);
+  border: 3px solid var(--color-ink);
+  border-radius: 12px;
+  display: flex;
+  flex: 0 0 46%;
+  justify-content: center;
+  overflow: hidden;
+  padding: 12px;
+}
+
+/* The real breadboard SVG fits inside the box via its own preserveAspectRatio
+   (meet), so boards of any aspect ratio stay centered and fully visible. */
+.case-art {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+
+.case-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.case-body h3 {
+  color: var(--color-ink);
+  font-size: 1.2rem;
+  font-weight: 800;
+  line-height: 1.3;
+  margin: 12px 0 10px;
+}
+
+.case-body > p {
+  color: var(--color-text-muted);
+  font-size: 0.92rem;
+  line-height: 1.6;
+  margin: 0 0 16px;
+}
+
+.case-tag {
+  border: 2px solid var(--color-ink);
+  border-radius: 999px;
+  box-shadow: 2px 2px 0 var(--color-shadow);
+  color: var(--color-on-accent);
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  padding: 5px 12px;
+  text-transform: uppercase;
+}
+
+.case-accent-pink .case-tag {
+  background: var(--nb-pink);
+}
+
+.case-accent-blue .case-tag {
+  background: var(--nb-blue);
+  color: #ffffff;
+}
+
+.case-accent-purple .case-tag {
+  background: var(--nb-purple);
+  color: #ffffff;
+}
+
+/* The prompt that produces this build, styled as a typed-in chip. */
+.case-prompt {
+  background: var(--color-canvas);
+  border: 2px dashed var(--color-ink);
+  border-radius: 8px;
+  color: var(--color-ink);
+  display: inline-block;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin: 0;
+  padding: 8px 12px;
+}
+
+/* Scroll reveal — the hidden state only exists for motion-friendly users,
+   so reduced-motion (and no-JS) visitors always see the cards. */
+@media (prefers-reduced-motion: no-preference) {
+  .case-card,
+  .home-cases-header {
+    opacity: 0;
+    transform: translateY(34px);
+    transition: opacity 550ms ease, transform 550ms cubic-bezier(0.22, 0.9, 0.3, 1);
+  }
+
+  .case-card.is-revealed,
+  .home-cases-header.is-revealed {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* ── Auth pages ── */
@@ -237,17 +384,17 @@
 }
 
 .auth-card {
-  background: #ffffff;
-  border: 3px solid #111111;
+  background: var(--color-chip);
+  border: 3px solid var(--color-ink);
   border-radius: 16px;
-  box-shadow: 8px 8px 0 #111111;
+  box-shadow: 8px 8px 0 var(--color-shadow);
   max-width: 400px;
   padding: 40px 36px;
   width: 100%;
 }
 
 .auth-card h2 {
-  color: #111111;
+  color: var(--color-ink);
   font-family: var(--font-display);
   font-size: 1.35rem;
   font-weight: 400;
@@ -255,7 +402,7 @@
 }
 
 .auth-label {
-  color: #111111;
+  color: var(--color-ink);
   display: block;
   font-size: 0.85rem;
   font-weight: 700;
@@ -264,7 +411,7 @@
 
 .auth-input {
   background: var(--color-canvas);
-  border: 2px solid #111111;
+  border: 2px solid var(--color-ink);
   border-radius: 8px;
   box-sizing: border-box;
   color: var(--color-text);
@@ -278,7 +425,7 @@
 }
 
 .auth-input:focus {
-  background: #ffffff;
+  background: var(--color-chip);
   box-shadow: 3px 3px 0 var(--nb-blue);
   outline: none;
 }
@@ -290,7 +437,7 @@
 
 .auth-error {
   background: var(--color-error-bg);
-  border: 2px solid #111111;
+  border: 2px solid var(--color-ink);
   border-radius: 8px;
   color: var(--color-error-text);
   font-size: 0.85rem;
@@ -325,10 +472,10 @@
 /* ── Shared buttons ── */
 
 .btn {
-  border: 2px solid #111111;
+  border: 2px solid var(--color-ink);
   border-radius: 8px;
-  box-shadow: 4px 4px 0 #111111;
-  color: #111111;
+  box-shadow: 4px 4px 0 var(--color-shadow);
+  color: var(--color-ink);
   cursor: pointer;
   display: inline-block;
   font-family: inherit;
@@ -340,17 +487,18 @@
 }
 
 .btn:hover {
-  box-shadow: 6px 6px 0 #111111;
+  box-shadow: 6px 6px 0 var(--color-shadow);
   transform: translate(-2px, -2px);
 }
 
 .btn:active {
-  box-shadow: 1px 1px 0 #111111;
+  box-shadow: 1px 1px 0 var(--color-shadow);
   transform: translate(3px, 3px);
 }
 
 .btn-primary {
   background: var(--nb-yellow);
+  color: var(--color-on-accent);
 }
 
 .btn-primary:disabled {
@@ -361,7 +509,7 @@
 }
 
 .btn-outline {
-  background: #ffffff;
+  background: var(--color-chip);
 }
 
 .btn-outline:hover {
@@ -372,8 +520,8 @@
 
 .user-bar {
   align-items: center;
-  background: #ffffff;
-  border: 2px solid #111111;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
   border-radius: 999px;
   box-shadow: var(--shadow-xs);
   color: var(--color-text-muted);
@@ -386,10 +534,10 @@
 
 .user-bar button {
   background: var(--color-surface);
-  border: 2px solid #111111;
+  border: 2px solid var(--color-ink);
   border-radius: 999px;
   box-shadow: none;
-  color: #111111;
+  color: var(--color-ink);
   cursor: pointer;
   font-family: inherit;
   font-size: 0.75rem;
@@ -401,6 +549,7 @@
 .user-bar button:hover:not(:disabled) {
   background: var(--nb-yellow);
   box-shadow: none;
+  color: var(--color-on-accent);
   transform: none;
 }
 
@@ -424,7 +573,7 @@
 
 .loading-screen::after {
   animation: loading-spin 0.8s linear infinite;
-  border: 3px solid #111111;
+  border: 3px solid var(--color-ink);
   border-radius: 50%;
   border-top-color: var(--nb-yellow);
   content: '';
@@ -463,6 +612,22 @@
 
   .pipeline-arrow {
     transform: rotate(90deg);
+  }
+
+  .home-cases {
+    margin-top: 70px;
+  }
+
+  .case-card,
+  .case-card:nth-of-type(even) {
+    flex-direction: column;
+    gap: 20px;
+    padding: 20px;
+  }
+
+  .case-visual {
+    flex: none;
+    width: 100%;
   }
 
   .auth-card {

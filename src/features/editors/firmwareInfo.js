@@ -1,7 +1,6 @@
-// Pure lookup from a circuit to the firmware metadata for its microcontroller
-// board (if any) — display name, language, download filename/MIME type. The
-// actual firmware source text lives on the AI response's `code` field and
-// flows through chat state as plain text; this module never holds it.
+// Maps a circuit's microcontroller board to the firmware language, download
+// filename, and display labels used by the Code editor tab. Pure module so it
+// stays unit-testable.
 import { MCU_KINDS } from '../../core/pcbGenerator.js';
 
 export const FIRMWARE_TARGETS = {
@@ -10,9 +9,9 @@ export const FIRMWARE_TARGETS = {
   raspberry_pi: { boardName: 'Raspberry Pi', language: 'Python (gpiozero)', filename: 'gpio_script.py', mime: 'text/x-python' },
 };
 
-// A circuit with two MCU boards only gets firmware info for the first one
-// found, in component array order — matching the AI's own single-`code`-field
-// contract (server/ai/ollamaProvider.ts writes firmware for one board).
+// The first MCU in components wins; circuits with two boards get firmware for
+// one of them only (known limitation). Returns null when the circuit has no
+// microcontroller board.
 export const firmwareTargetForCircuit = (circuit) => {
   const mcu = (circuit?.components || []).find((part) => MCU_KINDS.has(part.kind));
   return mcu ? { ref: mcu.ref, kind: mcu.kind, ...FIRMWARE_TARGETS[mcu.kind] } : null;

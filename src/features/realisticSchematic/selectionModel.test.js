@@ -32,6 +32,10 @@ describe('highlightFor', () => {
     // The VOUT tie group glows.
     expect(highlight.groupKeys.size).toBeGreaterThan(0);
     expect(highlight.batteryRefs).toEqual(new Set(['V1'])); // V1 feeds VCC
+    // Each lit carrier knows its net, so the overlay can tint per net.
+    highlight.groupKeys.forEach((key) => expect(highlight.nets.has(highlight.groupKeyNets.get(key))).toBe(true));
+    expect([...highlight.groupKeyNets.values()]).toContain('VOUT');
+    expect(highlight.railStripNets.get('railTopPlus')).toBe('VCC');
   });
 
   it('lights a whole net including the parts on it', () => {
@@ -71,5 +75,87 @@ describe('pinLabelsFor', () => {
     expect(pinLabelsFor({ kind: 'capacitor', value: '10uF' })).toEqual(['+', '−']);
     expect(pinLabelsFor({ kind: 'capacitor', value: '100nF' })).toBeNull();
     expect(pinLabelsFor({ kind: 'resistor', value: '1k' })).toBeNull();
+  });
+
+  it('labels the extended kinds from the registry and the SPICE contracts', () => {
+    // fixedPins kinds come straight from the componentKinds registry…
+    expect(pinLabelsFor({ kind: 'timer_555' })).toEqual(['GND', 'TRIG', 'OUT', 'RESET', 'CTRL', 'THRES', 'DISCH', 'VCC']);
+    expect(pinLabelsFor({ kind: 'temp_sensor' })).toEqual(['VCC', 'OUT', 'GND']);
+    expect(pinLabelsFor({ kind: 'regulator' })).toEqual(['IN', 'GND', 'OUT']);
+    expect(pinLabelsFor({ kind: 'buck_converter' })).toEqual(['VIN', 'OUT', 'GND', 'FB', 'ON_OFF']);
+    expect(pinLabelsFor({ kind: 'relay_module' })).toEqual(['VCC', 'GND', 'IN', 'COM', 'NO', 'NC']);
+    // …the tier-1 kinds ride the same fixedPins spread, no per-kind entries…
+    expect(pinLabelsFor({ kind: 'stepper_driver' })).toEqual(['IN1', 'IN2', 'IN3', 'IN4', 'VCC', 'GND', 'OUTA', 'OUTB', 'OUTC', 'OUTD']);
+    expect(pinLabelsFor({ kind: 'lcd_display' })).toEqual(['GND', 'VCC', 'SDA', 'SCL']);
+    expect(pinLabelsFor({ kind: 'rotary_encoder' })).toEqual(['CLK', 'DT', 'SW', 'VCC', 'GND']);
+    expect(pinLabelsFor({ kind: 'led_strip' })).toEqual(['VCC', 'DIN', 'GND']);
+    // …the rest mirror the canonical orders in the SPICE exporter.
+    expect(pinLabelsFor({ kind: 'zener' })).toEqual(['A', 'K']);
+    expect(pinLabelsFor({ kind: 'schottky' })).toEqual(['A', 'K']);
+    expect(pinLabelsFor({ kind: 'vibration_motor' })).toEqual(['+', '−']);
+    expect(pinLabelsFor({ kind: 'solar_panel' })).toEqual(['+', '−']);
+    expect(pinLabelsFor({ kind: 'bridge_rectifier' })).toEqual(['AC1', 'AC2', 'V+', 'V-']);
+    expect(pinLabelsFor({ kind: 'fuse', value: '1A' })).toBeNull();
+    expect(pinLabelsFor({ kind: 'comparator' })).toEqual(['IN+', 'IN-', 'OUT', 'V+', 'V-']);
+    expect(pinLabelsFor({ kind: 'potentiometer' })).toEqual(['A', 'W', 'B']);
+    expect(pinLabelsFor({ kind: 'switch_spdt' })).toEqual(['A', 'COM', 'B']);
+    expect(pinLabelsFor({ kind: 'rgb_led' })).toEqual(['R', 'G', 'B', 'K']);
+    expect(pinLabelsFor({ kind: 'buzzer' })).toEqual(['+', '−']);
+    expect(pinLabelsFor({ kind: 'dc_motor' })).toEqual(['+', '−']);
+  });
+
+  it('labels microcontroller boards with their canonical header pins', () => {
+    expect(pinLabelsFor({ kind: 'arduino_uno' })).toEqual(['5V', '3V3', 'GND', 'VIN', 'D0', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'D13', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5']);
+    expect(pinLabelsFor({ kind: 'raspberry_pi' })).toEqual(['5V', '3V3', 'GND', 'GPIO2', 'GPIO3', 'GPIO4', 'GPIO17', 'GPIO18', 'GPIO27', 'GPIO22', 'GPIO8', 'GPIO9', 'GPIO10', 'GPIO11']);
+    expect(pinLabelsFor({ kind: 'esp32' })).toEqual(['3V3', 'GND', 'VIN', 'EN', 'GPIO2', 'GPIO4', 'GPIO5', 'GPIO13', 'GPIO18', 'GPIO19', 'GPIO21', 'GPIO22']);
+  });
+});
+
+describe('MCU highlighting', () => {
+  const mcuModel = circuitToBreadboard({
+    nodes: ['VCC5', 'LED', '0'],
+    components: [
+      {
+        ref: 'U1',
+        kind: 'arduino_uno',
+        value: 'Uno R3',
+        nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'LED', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+      },
+      { ref: 'RLED', kind: 'resistor', value: '330', nodes: ['LED', '0'] },
+    ],
+  });
+
+  it('lights an MCU part plus the neighborhood of its connected pins only', () => {
+    const highlight = highlightFor(mcuModel, { type: 'part', ref: 'U1' });
+    expect(highlight.active).toBe(true);
+    expect(highlight.nets).toEqual(new Set(['VCC5', '0', 'LED']));
+    expect(highlight.railStrips.has('railTopPlus')).toBe(true);
+  });
+
+  it('describes an MCU part in the readout', () => {
+    expect(readoutFor(mcuModel, { type: 'part', ref: 'U1' })).toBe('U1 · arduino uno · Uno R3');
+  });
+});
+
+describe('voltageOverlayFor', () => {
+  it('tints every carrier by its live net voltage, blue at 0V and red at vMax', async () => {
+    const { voltageOverlayFor, voltageColor } = await import('./selectionModel.js');
+    const netVoltages = new Map([['0', 0], ['VCC', 5], ['VOUT', 2.5]]);
+    const overlay = voltageOverlayFor(model, netVoltages);
+    expect(overlay.active).toBe(true);
+    // Same carriers highlightFor would light for those nets.
+    expect(overlay.railStrips.has('railTopPlus')).toBe(true);
+    expect(overlay.railStripColors.get('railTopPlus')).toBe(voltageColor(5, 5));
+    expect(overlay.groupKeys.size).toBeGreaterThan(0);
+    // VCC (vMax) is red, ground is blue.
+    expect(voltageColor(5, 5)).toBe('hsl(0, 85%, 52%)');
+    expect(voltageColor(0, 5)).toBe('hsl(220, 85%, 52%)');
+    expect(voltageColor(2.5, 5)).toBe('hsl(110, 85%, 52%)');
+  });
+
+  it('is inactive without voltages', async () => {
+    const { voltageOverlayFor } = await import('./selectionModel.js');
+    expect(voltageOverlayFor(model, null).active).toBe(false);
+    expect(voltageOverlayFor(model, new Map()).active).toBe(false);
   });
 });

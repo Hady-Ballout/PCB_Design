@@ -2,12 +2,16 @@ import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { loadEnv } from './env.js';
 import { buildCircuitResponse, reconcileCircuitRevision } from './circuit/circuitResponse.js';
 import { normalizeChatMemory, sanitizeConversationHistory, updateChatMemory } from './ai/chatMemory.js';
-import { runCircuitPipeline } from './ai/ollamaProvider.js';
+import { runCircuitPipeline } from './ai/circuitPipeline.js';
+import { checkCircuitTopology } from '../src/core/topologyRules.js';
+import { generateClarifyingQuestions } from './ai/clarifyProvider.js';
+import { generateAssistReply } from './ai/assistProvider.js';
 import { runNgspiceSimulation } from './simulation/simulator.js';
+import { compileSketch } from './compile/compiler.js';
 import { buildStreamingSpice } from './circuit/streamingCircuit.js';
 import { initDb } from './auth/db.js';
 import { handleSignup, handleLogin, handleVerifyEmail, handleMe, verifyJwt } from './auth/auth.js';
-import type { ChatMemory, ChatMessage, Circuit, CurrentDesign, JwtPayload, PipelineEvent } from './types.js';
+import type { ChatMemory, ChatMessage, CurrentDesign, JwtPayload, PipelineEvent } from './types.js';
 
 loadEnv();
 
@@ -86,6 +90,7 @@ const readJsonBody = async (request: IncomingMessage): Promise<Record<string, un
 const statusFor = (error: unknown): number => (error instanceof HttpError ? error.statusCode : 500);
 
 const startJsonStream = (response: ServerResponse): void => {
+  // CORS headers were already set per-request via applyCorsHeaders().
   response.writeHead(200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
@@ -94,6 +99,34 @@ const startJsonStream = (response: ServerResponse): void => {
 
 const writeStreamEvent = (response: ServerResponse, event: unknown): void => {
   response.write(`${JSON.stringify(event)}\n`);
+};
+
+// Reasoning tokens arrive one word at a time; batching them into ~10 events
+// per second keeps the NDJSON wire and the client's re-render rate sane.
+// Deltas are flushed with the next push after the interval elapses, so a tail
+// shorter than the interval is only dropped when the request finishes — at
+// which point the thinking display disappears anyway.
+const createThinkingBatcher = (write: (delta: string) => void, intervalMs = 100) => {
+  let buffer = '';
+  let lastFlush = 0;
+  return {
+    push(delta: string): void {
+      buffer += delta;
+      const now = Date.now();
+      if (now - lastFlush >= intervalMs) {
+        lastFlush = now;
+        const batched = buffer;
+        buffer = '';
+        write(batched);
+      }
+    },
+    flush(): void {
+      if (!buffer) return;
+      const batched = buffer;
+      buffer = '';
+      write(batched);
+    },
+  };
 };
 
 function getUser(request: IncomingMessage): JwtPayload | null {
@@ -169,6 +202,70 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
     return;
   }
 
+  if (request.url === '/api/clarify-circuit' && request.method === 'POST') {
+    try {
+      const body = await readJsonBody(request);
+      const prompt = String(body.prompt || '').trim();
+      if (!prompt) {
+        sendJson(response, 400, { code: 'clarify_failed', error: 'Prompt is required.' });
+        return;
+      }
+
+      const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
+      const currentDesign = (body.currentDesign as CurrentDesign)?.circuit ? body.currentDesign as CurrentDesign : null;
+      const memory = normalizeChatMemory(body.memory as Partial<ChatMemory> | null);
+      startJsonStream(response);
+      const thinking = createThinkingBatcher((delta) => writeStreamEvent(response, { type: 'thinking', delta }));
+      const result = await generateClarifyingQuestions(prompt, messages, currentDesign, memory, thinking.push);
+      writeStreamEvent(response, { type: 'complete', data: result });
+      response.end();
+    } catch (error) {
+      console.error(`[circuit-clarify] ${(error as Error).message}`);
+      if (response.headersSent) {
+        writeStreamEvent(response, { type: 'error', code: 'clarify_failed', error: (error as Error).message });
+        response.end();
+      } else {
+        sendJson(response, statusFor(error), { code: 'clarify_failed', error: (error as Error).message });
+      }
+    }
+    return;
+  }
+
+  if (request.url === '/api/assist-circuit' && request.method === 'POST') {
+    try {
+      const body = await readJsonBody(request);
+      const mode = String(body.mode || '');
+      if (mode !== 'plan' && mode !== 'ask') {
+        sendJson(response, 400, { code: 'assist_failed', error: 'Mode must be "plan" or "ask".' });
+        return;
+      }
+      const prompt = String(body.prompt || '').trim();
+      if (!prompt) {
+        sendJson(response, 400, { code: 'assist_failed', error: 'Prompt is required.' });
+        return;
+      }
+
+      const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
+      const currentDesign = (body.currentDesign as CurrentDesign)?.circuit ? body.currentDesign as CurrentDesign : null;
+      const memory = normalizeChatMemory(body.memory as Partial<ChatMemory> | null);
+      startJsonStream(response);
+      const thinking = createThinkingBatcher((delta) => writeStreamEvent(response, { type: 'thinking', delta }));
+      // Assist replies confirm no design, so chat memory is deliberately not updated.
+      const result = await generateAssistReply(mode, prompt, messages, currentDesign, memory, thinking.push);
+      writeStreamEvent(response, { type: 'complete', data: result });
+      response.end();
+    } catch (error) {
+      console.error(`[circuit-assist] ${(error as Error).message}`);
+      if (response.headersSent) {
+        writeStreamEvent(response, { type: 'error', code: 'assist_failed', error: (error as Error).message });
+        response.end();
+      } else {
+        sendJson(response, statusFor(error), { code: 'assist_failed', error: (error as Error).message });
+      }
+    }
+    return;
+  }
+
   if (request.url === '/api/generate-circuit' && request.method === 'POST') {
     try {
       const body = await readJsonBody(request);
@@ -214,6 +311,16 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         });
       });
       const circuit = reconcileCircuitRevision(aiResponse.circuit as unknown as Record<string, unknown>, prompt, currentDesign?.circuit ?? null);
+      // Reconciliation can merge the candidate with the prior confirmed
+      // design, so run the topology check on what actually ships; the
+      // pipeline's reviewer stage already corrected what it could, so the
+      // checker's surviving findings are surfaced in the UI, never fatal.
+      let issues: Array<Record<string, unknown>> = [];
+      try {
+        issues = (checkCircuitTopology(circuit) as { violations: typeof issues }).violations;
+      } catch (topologyError) {
+        console.error(`[topology-check] ${(topologyError as Error).message}`);
+      }
       let updatedMemory: ChatMemory = memory;
       try {
         updatedMemory = updateChatMemory(memory, prompt, circuit);
@@ -227,6 +334,7 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
           reply: aiResponse.reply,
           code: aiResponse.code || '',
           memory: updatedMemory,
+          issues,
           ...(process.env.OLLAMA_CONTEXT_DIAGNOSTICS === '1' ? { contextDiagnostics } : {}),
         },
       });
@@ -257,6 +365,21 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         spice: body.spice as string,
       });
       sendJson(response, simulation.ok ? 200 : 422, simulation);
+    } catch (error) {
+      sendJson(response, statusFor(error), { error: (error as Error).message });
+    }
+    return;
+  }
+
+  if (request.url === '/api/compile-sketch' && request.method === 'POST') {
+    try {
+      const body = await readJsonBody(request);
+      if (typeof body.code !== 'string' || !body.code.trim()) {
+        sendJson(response, 400, { error: 'Sketch source code is required.' });
+        return;
+      }
+      const compilation = await compileSketch({ code: body.code });
+      sendJson(response, compilation.ok ? 200 : 422, compilation);
     } catch (error) {
       sendJson(response, statusFor(error), { error: (error as Error).message });
     }

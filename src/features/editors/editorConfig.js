@@ -1,12 +1,13 @@
 // Shared editor-window labels and split-pane persistence.
+// The SPICE, JSON, and Block schematic tabs were retired from the launchbar;
+// their render code and the SPICE data/simulation pipeline stay in App.jsx
+// (dead but restorable). Canvas hosts the KiCad/KiCanvas schematic view with
+// an edit mode, and pcb3d is the three.js board viewer.
 export const EDITOR_VIEW_LABELS = {
-  spice: 'SPICE',
-  json: 'JSON',
-  canvas: 'Schematic',
-  blockSchematic: 'Block schematic',
-  realisticSchematic: 'Realistic schematic',
-  pcb3d: '3D PCB',
   code: 'Code',
+  realisticSchematic: 'Realistic schematic',
+  canvas: 'Schematic',
+  pcb3d: '3D PCB',
 };
 
 export const EDITOR_SPLIT_STORAGE_KEY = 'prompt-to-pcb-editor-split-v1';

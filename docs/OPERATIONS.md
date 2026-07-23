@@ -20,6 +20,7 @@ the frontend expects `VITE_API_URL` (see below) or same-origin `/api`.
 |---|---|
 | `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_API_KEY` | local/hosted Ollama connection |
 | `OLLAMA_NUM_CTX`, `OLLAMA_NUM_PREDICT` | context/output size for circuit generation |
+| `OLLAMA_NUM_PREDICT_CLARIFY`, `OLLAMA_NUM_PREDICT_ASSIST` | output budgets for the clarify round (default 512) and Plan/Ask replies (default 1024) |
 | `OLLAMA_CONTEXT_DIAGNOSTICS` | `1` to log per-request turn count/revision flag |
 | `AI_PROVIDER`, `AI_API_URL`, `AI_MODEL`, `AI_API_KEY`, `AI_MAX_TOKENS` | switch to an OpenAI-compatible provider (e.g. Z.ai/GLM) instead of Ollama |
 | `ZAI_THINKING_TYPE`, `ZAI_REASONING_EFFORT` | Z.ai-specific tuning |
@@ -46,6 +47,29 @@ Ollama request building/response validation, and circuit response reconciliation
 Must be installed and on `PATH`. On Windows, `ngspice_con.exe` (console/batch mode) is
 preferred over `ngspice.exe` to avoid launching a GUI (see `docs/BACKEND.md` /
 `server/simulation/simulator.ts`).
+
+## Arduino CLI
+
+Needed only for the breadboard view's live Uno firmware emulation (`POST
+/api/compile-sketch` in `server/compile/compiler.ts`). Must be on `PATH` (override with
+`ARDUINO_CLI_BINARY`). Install on Windows with `winget install ArduinoSA.CLI`, then run the
+one-time toolchain setup:
+
+```bash
+arduino-cli core update-index
+arduino-cli core install arduino:avr
+# Libraries the generated sketches use (displays, keypad, servo, DHT…):
+arduino-cli lib install "LiquidCrystal I2C" "Keypad" "Adafruit SSD1306" \
+  "Adafruit GFX Library" "Adafruit BusIO" "Servo" \
+  "DHT sensor library" "Adafruit Unified Sensor" \
+  "RTClib" "Adafruit MPU6050" "Adafruit BMP280 Library" "Adafruit NeoPixel" \
+  "Stepper" "IRremote" "MFRC522" "PMW3360 Module"
+```
+
+Sketches are compiled locally in a temp dir (`sketch/sketch.ino`, `--fqbn
+arduino:avr:uno`) — source never leaves the machine — with an in-memory hash→hex cache for
+repeat runs. If the CLI is missing, the endpoint returns a friendly install hint instead of
+failing opaquely; the rest of the app (including non-firmware simulation) is unaffected.
 
 ## Deployment
 

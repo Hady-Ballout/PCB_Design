@@ -1,5 +1,81 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { formatChatTime } from './chatFormat.js';
+import { ClarificationCard } from './ClarificationCard.jsx';
+import { PlanCard } from './PlanCard.jsx';
+import { ThinkingWindow } from './ThinkingWindow.jsx';
+
+const COMPOSER_MODE_OPTIONS = [
+  { value: 'plan', label: 'Plan' },
+  { value: 'ask', label: 'Ask' },
+  { value: 'implement', label: 'Implement' },
+];
+
+// Minimal mode dropdown pinned to the composer's bottom-left corner: the
+// trigger shows the current choice, the menu opens upward over the thread.
+function ComposerModeMenu({ mode, onSelect }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onPointerDown = (event) => {
+      if (!menuRef.current?.contains(event.target)) setOpen(false);
+    };
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  const current = COMPOSER_MODE_OPTIONS.find((option) => option.value === mode)
+    || COMPOSER_MODE_OPTIONS.at(-1);
+
+  return (
+    <div className="composer-mode-menu" ref={menuRef}>
+      {open && (
+        <ul className="composer-mode-list" role="listbox" aria-label="Assistant mode">
+          {COMPOSER_MODE_OPTIONS.map(({ value, label }) => (
+            <li key={value}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={mode === value}
+                className={`composer-mode-option ${mode === value ? 'selected' : ''}`}
+                onClick={() => { onSelect(value); setOpen(false); }}
+              >
+                {label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button
+        type="button"
+        className="composer-mode-trigger"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title="Assistant mode"
+        onClick={() => setOpen((value) => !value)}
+      >
+        {current.label}
+        <svg viewBox="0 0 24 24" width="10" height="10" aria-hidden="true">
+          <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+const COMPOSER_PLACEHOLDERS = {
+  plan: 'Describe a circuit to plan before building...',
+  ask: 'Ask about the design or electronics...',
+  implement: 'Message the circuit assistant...',
+};
 
 const GENERATION_STAGES = [
   { id: 'circuit', node: 'Circuit', label: 'Generating circuit...' },
@@ -52,7 +128,16 @@ export function ChatPanel({
   activeChat,
   openChat,
   isGenerating,
+  isClarifying,
+  isAssisting,
+  composerMode,
+  setComposerMode,
+  buildFromPlan,
   generationStage,
+  thinkingText,
+  answerClarification,
+  submitClarification,
+  skipClarification,
   messagesEndRef,
   prompt,
   setPrompt,
@@ -151,10 +236,25 @@ export function ChatPanel({
               {activeChat?.messages.map((message) => (
                 <article className={`chat-message ${message.role}`} key={message.id}>
                   <div className="chat-message-meta">
-                    <strong>{message.role === 'user' ? 'You' : 'AI'}</strong>
                     <time>{formatChatTime(message.createdAt)}</time>
                   </div>
-                  <p>{message.content}</p>
+                  <p className={message.mode ? 'chat-multiline' : ''}>{message.content}</p>
+                  {message.plan && (
+                    <PlanCard
+                      message={message}
+                      disabled={generationBusy}
+                      onBuild={() => buildFromPlan(message.id)}
+                    />
+                  )}
+                  {message.clarification && (
+                    <ClarificationCard
+                      message={message}
+                      disabled={generationBusy}
+                      onAnswer={(questionId, answer) => answerClarification(message.id, questionId, answer)}
+                      onSubmit={() => submitClarification(message.id)}
+                      onSkip={() => skipClarification(message.id)}
+                    />
+                  )}
                   {message.circuit && (
                     <div className="chat-artifact-chip">
                       <span>{message.circuit.type.replaceAll('_', ' ')}</span>
@@ -163,10 +263,28 @@ export function ChatPanel({
                   )}
                 </article>
               ))}
+              {isClarifying && (
+                <article className="chat-message assistant pending">
+                  <p>
+                    Preparing a few quick questions...{' '}
+                    <span className="typing-dots" aria-hidden="true"><i /><i /><i /></span>
+                  </p>
+                  <ThinkingWindow text={thinkingText} />
+                </article>
+              )}
+              {isAssisting && (
+                <article className="chat-message assistant pending">
+                  <p>
+                    {composerMode === 'plan' ? 'Drafting a design plan...' : 'Thinking...'}{' '}
+                    <span className="typing-dots" aria-hidden="true"><i /><i /><i /></span>
+                  </p>
+                  <ThinkingWindow text={thinkingText} />
+                </article>
+              )}
               {isGenerating && (
                 <article className="chat-message assistant pending">
-                  <div className="chat-message-meta"><strong>AI</strong></div>
                   <GenerationStatus stage={generationStage} />
+                  <ThinkingWindow text={thinkingText} />
                 </article>
               )}
               <div ref={messagesEndRef} />
@@ -179,9 +297,10 @@ export function ChatPanel({
                   onChange={(event) => setPrompt(event.target.value)}
                   onKeyDown={handleComposerKeyDown}
                   rows={3}
-                  placeholder="Message the circuit assistant..."
+                  placeholder={COMPOSER_PLACEHOLDERS[composerMode] || COMPOSER_PLACEHOLDERS.implement}
                   aria-label="Message the circuit assistant"
                 />
+                <ComposerModeMenu mode={composerMode} onSelect={setComposerMode} />
                 <button
                   className="composer-send-button"
                   type="submit"

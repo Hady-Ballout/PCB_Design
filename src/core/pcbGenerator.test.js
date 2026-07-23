@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  MCU_PIN_COUNTS,
+  addMissingSpiceModels,
   buildCircuitDiagram,
   diagramComponentsOverlap,
   layoutCircuitDiagram,
@@ -432,57 +432,234 @@ describe('prompt-to-pcb generator', () => {
 
 describe('microcontroller boards', () => {
   const esp32Circuit = {
-    title: 'ESP32 Blink',
-    type: 'mcu_blink',
+    title: 'ESP32 LED',
+    type: 'mcu_led',
     supplyVoltage: 3.3,
     components: [
       {
         ref: 'U1',
         kind: 'esp32',
         value: 'DevKit V1',
-        nodes: [
-          'NC_U1_1', '0', 'NC_U1_3', 'NC_U1_4',
-          'GPIO2', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8',
-          'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12',
-        ],
+        nodes: ['VCC3', '0', 'NC_U1_3', 'NC_U1_4', 'LED', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
       },
-      { ref: 'RLED', kind: 'resistor', value: '330', nodes: ['GPIO2', 'LED_A'] },
-      { ref: 'DLED1', kind: 'led', value: 'LED', nodes: ['LED_A', '0'] },
+      { ref: 'RLED', kind: 'resistor', value: '220', nodes: ['LED', 'LEDK'] },
+      { ref: 'DLED1', kind: 'led', value: 'blue', nodes: ['LEDK', '0'] },
+      { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['VCC3', '0'] },
     ],
     notes: [],
   };
 
-  it('emits a comment-only SPICE line for a microcontroller board, never an element line', () => {
+  it('exports MCUs as SPICE comments, never element lines', () => {
     const spice = toSpice(esp32Circuit);
-
     expect(spice).toContain('* U1 esp32 (microcontroller board, not simulated)');
-    expect(spice).not.toMatch(/^U1\s/m);
-    expect(spice).toContain('RLED GPIO2 LED_A 330');
-    expect(spice).toContain('DLED1 LED_A 0 DRED');
-    expect(spice.trim().endsWith('.end')).toBe(true);
+    expect(spice.split('\n').some((line) => /^U1\s/i.test(line))).toBe(false);
+    expect(spice).toContain('RLED LED LEDK 220');
+    expect(spice).toContain('.end');
   });
 
-  it('does not flag a board\'s NC_ placeholder pins as floating nets', () => {
-    const result = validateCircuit(esp32Circuit);
-
-    expect(result.warnings.some((warning) => /NC_U1/.test(warning))).toBe(false);
+  it('does not flag NC placeholder pins as floating nets', () => {
+    const validation = validateCircuit(esp32Circuit);
+    expect(validation.ok).toBe(true);
+    expect(validation.warnings.filter((warning) => warning.includes('NC_U1'))).toHaveLength(0);
   });
 
-  it('warns when a board does not list its fixed pin count', () => {
+  it('warns when an MCU pin list has the wrong length', () => {
     const truncated = {
       ...esp32Circuit,
-      components: esp32Circuit.components.map((part) => (part.ref === 'U1' ? { ...part, nodes: part.nodes.slice(0, 4) } : part)),
+      components: [
+        { ...esp32Circuit.components[0], nodes: ['VCC3', '0', 'LED'] },
+        ...esp32Circuit.components.slice(1),
+      ],
     };
-    const result = validateCircuit(truncated);
-
-    expect(result.warnings.some((warning) => warning.includes(`exactly ${MCU_PIN_COUNTS.esp32} nodes`))).toBe(true);
+    const validation = validateCircuit(truncated);
+    expect(validation.warnings.some((warning) => warning.includes('exactly 12 nodes'))).toBe(true);
   });
 
-  it('assigns a diagram symbol to a placed microcontroller board', () => {
+  it('lays out MCU circuits on the canvas without errors', () => {
     const diagram = buildCircuitDiagram(esp32Circuit);
-    const board = diagram.components.find((component) => component.ref === 'U1');
+    const mcu = diagram.components.find((part) => part.ref === 'U1');
+    expect(mcu.symbolType).toBe('mcu');
+    expect(mcu.pins).toHaveLength(12);
+  });
+});
 
-    expect(board).toBeDefined();
-    expect(board.pins).toHaveLength(MCU_PIN_COUNTS.esp32);
+describe('tier-2 SPICE support', () => {
+  const optoCircuit = {
+    title: 'Opto isolation',
+    type: 'isolation',
+    supplyVoltage: 5,
+    nodes: ['CTRL', 'ANO', 'V12', 'BZLOW', '0'],
+    components: [
+      { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['V12', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '330', nodes: ['CTRL', 'ANO'] },
+      { ref: 'XU1', kind: 'optocoupler', value: 'PC817', nodes: ['ANO', '0', '0', 'BZLOW'] },
+      { ref: 'RBZ1', kind: 'buzzer', value: '12V active', nodes: ['V12', 'BZLOW'] },
+    ],
+    notes: [],
+  };
+
+  it('emits the buck converter as one ideal DC source line on its OUT pin', () => {
+    const spice = toSpice({
+      title: 'Buck regulated rail',
+      type: 'power',
+      supplyVoltage: 12,
+      nodes: ['VIN', 'SW', '0', 'VOUT'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VIN', '0'] },
+        { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'VOUT', '0'] },
+      ],
+      notes: [],
+    });
+    const u1Lines = spice.split('\n').filter((line) => /^V_U1\s/i.test(line));
+    expect(u1Lines).toEqual(['V_U1 SW 0 DC 5']);
+  });
+
+  it('emits the optocoupler as one X line plus the PC817 subcircuit', () => {
+    const spice = toSpice(optoCircuit);
+    expect(spice).toContain('XU1 ANO 0 0 BZLOW PC817');
+    expect(spice).toContain('.subckt PC817 A K E C');
+    expect(spice).toContain('.ends PC817');
+  });
+
+  it('injects the PC817 subcircuit into hand-edited decks that lack it', () => {
+    const handDeck = '* hand deck\nXU1 ANO 0 0 BZLOW PC817\n.end';
+    const patched = addMissingSpiceModels(handDeck, optoCircuit);
+    expect(patched).toContain('.subckt PC817');
+    // Idempotent: a deck that already defines it is untouched.
+    expect(addMissingSpiceModels(patched, optoCircuit)).toBe(patched);
+  });
+
+  it('emits the current sensor as a single derived milliohm shunt line', () => {
+    const spice = toSpice({
+      title: 'Current sense',
+      type: 'measurement',
+      supplyVoltage: 5,
+      nodes: ['VCC', 'MTOP', 'MLOW', '0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'RCS1', kind: 'current_sensor', value: 'ACS712', nodes: ['VCC', 'MTOP', 'VCC', 'NC_RCS1_4', '0'] },
+        { ref: 'RM1', kind: 'dc_motor', value: '6V', nodes: ['MTOP', '0'] },
+      ],
+      notes: [],
+    });
+    expect(spice).toContain('RCS1_S VCC MTOP 0.0012');
+    expect(spice.split('\n').some((line) => /^RCS1\s/.test(line))).toBe(false);
+  });
+
+  it('skips the shunt line when an IP terminal is unconnected', () => {
+    const spice = toSpice({
+      title: 'Fresh sensor',
+      type: 'measurement',
+      supplyVoltage: 5,
+      nodes: ['0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'RCS1', kind: 'current_sensor', value: 'ACS712', nodes: ['NC_RCS1_1', 'NC_RCS1_2', 'VCC', 'NC_RCS1_4', '0'] },
+      ],
+      notes: [],
+    });
+    expect(spice).not.toContain('RCS1_S');
+  });
+
+  it('emits tier-3 discrete parts with their models and fallbacks', () => {
+    const spice = toSpice({
+      title: 'Tier-3 discretes',
+      type: 'power',
+      supplyVoltage: 6,
+      nodes: ['SUN', 'FOUT', 'MLOW', '0'],
+      components: [
+        { ref: 'VSOL1', kind: 'solar_panel', value: '6V', nodes: ['SUN', '0'] },
+        { ref: 'F1', kind: 'fuse', value: '1A', nodes: ['SUN', 'FOUT'] },
+        { ref: 'DS1', kind: 'schottky', value: '1N5819', nodes: ['FOUT', 'MLOW'] },
+        { ref: 'RVM1', kind: 'vibration_motor', value: '3V', nodes: ['MLOW', '0'] },
+      ],
+      notes: [],
+    });
+    expect(spice).toContain('VSOL1 SUN 0 DC 6');
+    expect(spice).toContain('F1 SUN FOUT 0.05'); // "1A" is a rating, not a resistance
+    expect(spice).toContain('DS1 FOUT MLOW DSCH');
+    expect(spice).toContain('.model DSCH');
+    expect(spice).toContain('RVM1 MLOW 0 27'); // "3V" falls back to winding resistance
+  });
+
+  it('omits the DSCH model when no schottky is present', () => {
+    expect(toSpice(aiCircuit)).not.toContain('.model DSCH');
+  });
+
+  it('emits the IR parts: DIR emitter model and phototransistor resistance', () => {
+    const spice = toSpice({
+      title: 'IR link',
+      type: 'sensor',
+      supplyVoltage: 5,
+      nodes: ['VCC', 'IRA', 'VSENSE', '0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'R1', kind: 'resistor', value: '220', nodes: ['VCC', 'IRA'] },
+        { ref: 'DIR1', kind: 'ir_led', value: '940nm', nodes: ['IRA', '0'] },
+        { ref: 'RIR1', kind: 'ir_phototransistor', value: '', nodes: ['VCC', 'VSENSE'] },
+        { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['VSENSE', '0'] },
+      ],
+      notes: [],
+    });
+    expect(spice).toContain('DIR1 IRA 0 DIR');
+    expect(spice).toContain('.model DIR ');
+    expect(spice).toContain('RIR1 VCC VSENSE 10k');
+  });
+
+  it('omits the DIR model when no IR emitter is present', () => {
+    expect(toSpice(aiCircuit)).not.toContain('.model DIR ');
+  });
+
+  it('emits the bridge rectifier as four correctly oriented derived diodes', () => {
+    const spice = toSpice({
+      title: 'Bridge',
+      type: 'power',
+      supplyVoltage: 6,
+      nodes: ['AC1N', 'AC2N', 'DCP', 'DCM'],
+      components: [
+        { ref: 'V1', kind: 'signal_source', value: 'SINE(0 6 50)', nodes: ['AC1N', 'AC2N'] },
+        { ref: 'DB1', kind: 'bridge_rectifier', value: 'DB107', nodes: ['AC1N', 'AC2N', 'DCP', 'DCM'] },
+        { ref: 'C1', kind: 'capacitor', value: '100uF', nodes: ['DCP', 'DCM'] },
+      ],
+      notes: [],
+    });
+    expect(spice).toContain('DB1_A AC1N DCP DGEN');
+    expect(spice).toContain('DB1_B AC2N DCP DGEN');
+    expect(spice).toContain('DB1_C DCM AC1N DGEN');
+    expect(spice).toContain('DB1_D DCM AC2N DGEN');
+    expect(spice.split('\n').some((line) => /^DB1\s/.test(line))).toBe(false);
+  });
+
+  it('skips bridge legs that touch unconnected terminals', () => {
+    const spice = toSpice({
+      title: 'Fresh bridge',
+      type: 'power',
+      supplyVoltage: 6,
+      nodes: ['0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'DB1', kind: 'bridge_rectifier', value: 'DB107', nodes: ['NC_DB1_1', 'NC_DB1_2', 'NC_DB1_3', 'NC_DB1_4'] },
+      ],
+      notes: [],
+    });
+    expect(spice).not.toContain('DB1_A');
+    expect(spice).not.toContain('DB1_D');
+  });
+
+  it('comments out the new wiring-only module kinds', () => {
+    const spice = toSpice({
+      title: 'Modules',
+      type: 'modules',
+      supplyVoltage: 5,
+      nodes: ['VCC', '0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+        { ref: 'U1', kind: 'keypad', value: '4x4', nodes: ['R1N', 'R2N', 'R3N', 'R4N', 'C1N', 'C2N', 'C3N', 'C4N'] },
+        { ref: 'U2', kind: 'adc_module', value: 'MCP3008', nodes: ['CH0', 'NC_U2_2', 'NC_U2_3', 'NC_U2_4', 'NC_U2_5', 'NC_U2_6', 'NC_U2_7', 'NC_U2_8', '0', 'CSN', 'DIN', 'DOUT', 'CLKN', '0', 'VCC', 'VCC'] },
+      ],
+      notes: [],
+    });
+    expect(spice).toContain('* U1 keypad (wiring-only, not simulated)');
+    expect(spice).toContain('* U2 adc_module (wiring-only, not simulated)');
   });
 });

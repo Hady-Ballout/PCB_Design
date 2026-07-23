@@ -386,55 +386,207 @@ V2 IN 0 DC 5
 });
 
 describe('microcontroller board synchronization', () => {
-  const unoCircuit = {
-    title: 'Uno Blink',
-    type: 'mcu_blink',
+  const mcuCircuit = {
+    title: 'Uno blink',
+    type: 'mcu_led',
     supplyVoltage: 5,
     components: [
+      { ref: 'V1', kind: 'voltage_source', value: '5V', footprint: '', nodes: ['VIN', '0'] },
       {
         ref: 'U1',
         kind: 'arduino_uno',
         value: 'Uno R3',
         footprint: 'Module:Arduino_UNO_R3',
-        nodes: [
-          'NC_U1_1', 'NC_U1_2', '0', 'NC_U1_4',
-          'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8',
-          'D13', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12',
-        ],
+        nodes: ['NC_U1_1', 'NC_U1_2', '0', 'VIN', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'LED', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
       },
-      { ref: 'RLED', kind: 'resistor', value: '330', footprint: 'Resistor_THT:R_Axial', nodes: ['D13', 'LED_A'] },
-      { ref: 'DLED1', kind: 'led', value: 'LED', footprint: 'LED_THT:LED_D5.0mm', nodes: ['LED_A', '0'] },
+      { ref: 'RLED', kind: 'resistor', value: '330', footprint: '', nodes: ['LED', 'LEDK'] },
+      { ref: 'DLED1', kind: 'led', value: 'red', footprint: '', nodes: ['LEDK', '0'] },
     ],
     notes: [],
   };
 
-  it('accepts the arduino_uno kind in circuit JSON', () => {
-    const parsed = parseCircuitJson(JSON.stringify(unoCircuit));
+  it('accepts MCU kinds in circuit JSON', () => {
+    const parsed = parseCircuitJson(JSON.stringify(mcuCircuit), null);
     expect(parsed.ok).toBe(true);
     expect(parsed.circuit.components.find((part) => part.ref === 'U1').kind).toBe('arduino_uno');
   });
 
-  it('round-trips U1 through the SPICE deck as a comment, never an element line', () => {
-    const spice = toSpice(unoCircuit);
+  it('preserves MCUs through the SPICE round-trip at their original index', () => {
+    const spice = toSpice(mcuCircuit);
     expect(spice).toContain('* U1 arduino_uno');
-    expect(spice).not.toMatch(/^U1\s/m);
-
-    const parsed = parseSpiceNetlist(spice, unoCircuit);
+    const parsed = parseSpiceNetlist(spice, mcuCircuit);
     expect(parsed.ok).toBe(true);
-    expect(parsed.circuit.components.map((part) => part.ref)).toEqual(['U1', 'RLED', 'DLED1']);
-    expect(parsed.circuit.components.find((part) => part.ref === 'U1')).toMatchObject(unoCircuit.components[0]);
+    expect(parsed.circuit.components.map((part) => part.ref)).toEqual(['V1', 'U1', 'RLED', 'DLED1']);
+    const preserved = parsed.circuit.components[1];
+    expect(preserved).toMatchObject({ ref: 'U1', kind: 'arduino_uno', value: 'Uno R3' });
+    expect(preserved.nodes).toEqual(mcuCircuit.components[1].nodes);
+    // The electrical signature must not register a spurious edit.
+    expect(circuitElectricalSignature(parsed.circuit)).toBe(circuitElectricalSignature(mcuCircuit));
   });
 
-  it('keeps U1 present after editing an unrelated component value in the SPICE deck', () => {
-    const editedSpice = toSpice(unoCircuit).replace('RLED D13 LED_A 330', 'RLED D13 LED_A 470');
-    const parsed = parseSpiceNetlist(editedSpice, unoCircuit);
-
+  it('keeps the MCU when the user edits another component in SPICE', () => {
+    const editedDeck = toSpice(mcuCircuit).replace('RLED LED LEDK 330', 'RLED LED LEDK 470');
+    const parsed = parseSpiceNetlist(editedDeck, mcuCircuit);
     expect(parsed.ok).toBe(true);
+    expect(parsed.circuit.components.find((part) => part.ref === 'U1')).toBeTruthy();
     expect(parsed.circuit.components.find((part) => part.ref === 'RLED').value).toBe('470');
-    expect(parsed.circuit.components.find((part) => part.ref === 'U1')).toMatchObject(unoCircuit.components[0]);
-    expect(circuitElectricalSignature({
-      ...unoCircuit,
-      components: unoCircuit.components.map((part) => (part.ref === 'RLED' ? { ...part, value: '470' } : part)),
-    })).toBe(circuitElectricalSignature(parsed.circuit));
+  });
+});
+
+describe('tier-2 synchronization', () => {
+  const optoBase = {
+    title: 'Opto circuit',
+    type: 'isolation',
+    supplyVoltage: 5,
+    components: [
+      { ref: 'V1', kind: 'voltage_source', value: '12V', footprint: '', nodes: ['V12', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '330', footprint: '', nodes: ['CTRL', 'ANO'] },
+      { ref: 'XU1', kind: 'optocoupler', value: 'PC817', footprint: '', nodes: ['ANO', '0', '0', 'BZLOW'] },
+      { ref: 'RBZ1', kind: 'buzzer', value: '100', footprint: '', nodes: ['V12', 'BZLOW'] },
+    ],
+    notes: [],
+  };
+
+  it('round-trips an optocoupler through SPICE export and reparse', () => {
+    const parsed = parseSpiceNetlist(toSpice(optoBase), optoBase);
+    expect(parsed.ok).toBe(true);
+    const opto = parsed.circuit.components.find((part) => part.ref === 'XU1');
+    expect(opto).toMatchObject({ kind: 'optocoupler', value: 'PC817', nodes: ['ANO', '0', '0', 'BZLOW'] });
+  });
+
+  it('recognizes a PC817 X line without a base circuit', () => {
+    const parsed = parseSpiceNetlist('* deck\nXU9 A1 0 0 C1 PC817\nR1 A1 0 1k\n.end', null);
+    expect(parsed.ok).toBe(true);
+    const opto = parsed.circuit.components.find((part) => part.ref === 'XU9');
+    expect(opto).toMatchObject({ kind: 'optocoupler', nodes: ['A1', '0', '0', 'C1'] });
+  });
+
+  it('carries a current sensor over from its derived shunt line', () => {
+    const base = {
+      title: 'Current sense',
+      type: 'measurement',
+      supplyVoltage: 5,
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', footprint: '', nodes: ['VCC', '0'] },
+        { ref: 'RCS1', kind: 'current_sensor', value: 'ACS712', footprint: '', nodes: ['VCC', 'MTOP', 'VCC', 'AOUT', '0'] },
+        { ref: 'RM1', kind: 'dc_motor', value: '6V', footprint: '', nodes: ['MTOP', '0'] },
+      ],
+      notes: [],
+    };
+    const parsed = parseSpiceNetlist(toSpice(base), base);
+    expect(parsed.ok).toBe(true);
+    const sensor = parsed.circuit.components.find((part) => part.ref === 'RCS1');
+    expect(sensor).toMatchObject({ kind: 'current_sensor', nodes: ['VCC', 'MTOP', 'VCC', 'AOUT', '0'] });
+    // No spurious resistor was reconstructed from the derived line.
+    expect(parsed.circuit.components.filter((part) => part.ref.startsWith('RCS1'))).toHaveLength(1);
+  });
+
+  it('round-trips tier-3 discrete kinds through SPICE export and reparse', () => {
+    const base = {
+      title: 'Tier-3 power path',
+      type: 'power',
+      supplyVoltage: 6,
+      components: [
+        { ref: 'VSOL1', kind: 'solar_panel', value: '6V', footprint: '', nodes: ['SUN', '0'] },
+        { ref: 'F1', kind: 'fuse', value: '1A', footprint: '', nodes: ['SUN', 'FOUT'] },
+        { ref: 'DS1', kind: 'schottky', value: '1N5819', footprint: '', nodes: ['FOUT', 'MLOW'] },
+        { ref: 'RVM1', kind: 'vibration_motor', value: '3V', footprint: '', nodes: ['MLOW', '0'] },
+      ],
+      notes: [],
+    };
+    const parsed = parseSpiceNetlist(toSpice(base), base);
+    expect(parsed.ok).toBe(true);
+    const kinds = Object.fromEntries(parsed.circuit.components.map((part) => [part.ref, part.kind]));
+    expect(kinds).toMatchObject({ VSOL1: 'solar_panel', F1: 'fuse', DS1: 'schottky', RVM1: 'vibration_motor' });
+  });
+
+  it('round-trips the IR parts through SPICE export and reparse', () => {
+    const base = {
+      title: 'IR link',
+      type: 'sensor',
+      supplyVoltage: 5,
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', footprint: '', nodes: ['VCC', '0'] },
+        { ref: 'R1', kind: 'resistor', value: '220', footprint: '', nodes: ['VCC', 'IRA'] },
+        { ref: 'DIR1', kind: 'ir_led', value: '940nm', footprint: '', nodes: ['IRA', '0'] },
+        { ref: 'RIR1', kind: 'ir_phototransistor', value: '', footprint: '', nodes: ['VCC', 'VSENSE'] },
+        { ref: 'R2', kind: 'resistor', value: '10k', footprint: '', nodes: ['VSENSE', '0'] },
+      ],
+      notes: [],
+    };
+    const parsed = parseSpiceNetlist(toSpice(base), base);
+    expect(parsed.ok).toBe(true);
+    const kinds = Object.fromEntries(parsed.circuit.components.map((part) => [part.ref, part.kind]));
+    expect(kinds).toMatchObject({ DIR1: 'ir_led', RIR1: 'ir_phototransistor' });
+  });
+
+  it('recognizes a DIR line as an ir_led even without a base circuit', () => {
+    const parsed = parseSpiceNetlist('* deck\nV1 VCC 0 DC 5\nD7 VCC K1 DIR\nR1 K1 0 220\n.end', null);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.circuit.components.find((part) => part.ref === 'D7').kind).toBe('ir_led');
+  });
+
+  it('recognizes a DSCH line as a schottky even without a base circuit', () => {
+    const parsed = parseSpiceNetlist('* deck\nV1 VCC 0 DC 5\nDS9 VCC K1 DSCH\nR1 K1 0 330\n.end', null);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.circuit.components.find((part) => part.ref === 'DS9').kind).toBe('schottky');
+  });
+
+  it('keeps plain DC sources as voltage_source and waveforms as signal_source', () => {
+    // The V-branch base-kind preservation must not disturb existing behavior:
+    // a hand-added V line with no base is a voltage_source, and a base
+    // signal_source rewritten to a DC expression becomes a voltage_source.
+    const base = {
+      title: 'Sources',
+      type: 'test',
+      supplyVoltage: 5,
+      components: [
+        { ref: 'VSIG1', kind: 'signal_source', value: 'SINE(0 1 1k)', footprint: '', nodes: ['IN', '0'] },
+        { ref: 'R1', kind: 'resistor', value: '1k', footprint: '', nodes: ['IN', '0'] },
+      ],
+      notes: [],
+    };
+    const parsed = parseSpiceNetlist('* deck\nVSIG1 IN 0 DC 2\nR1 IN 0 1k\nVNEW VCC 0 DC 5\nR2 VCC 0 1k\n.end', base);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.circuit.components.find((part) => part.ref === 'VSIG1').kind).toBe('voltage_source');
+    expect(parsed.circuit.components.find((part) => part.ref === 'VNEW').kind).toBe('voltage_source');
+  });
+
+  it('carries a bridge rectifier over from its derived diode lines', () => {
+    const base = {
+      title: 'Bridge',
+      type: 'power',
+      supplyVoltage: 6,
+      components: [
+        { ref: 'V1', kind: 'signal_source', value: 'SINE(0 6 50)', footprint: '', nodes: ['AC1N', 'AC2N'] },
+        { ref: 'DB1', kind: 'bridge_rectifier', value: 'DB107', footprint: '', nodes: ['AC1N', 'AC2N', 'DCP', 'DCM'] },
+        { ref: 'C1', kind: 'capacitor', value: '100uF', footprint: '', nodes: ['DCP', 'DCM'] },
+      ],
+      notes: [],
+    };
+    const parsed = parseSpiceNetlist(toSpice(base), base);
+    expect(parsed.ok).toBe(true);
+    const bridge = parsed.circuit.components.find((part) => part.ref === 'DB1');
+    expect(bridge).toMatchObject({ kind: 'bridge_rectifier', nodes: ['AC1N', 'AC2N', 'DCP', 'DCM'] });
+    expect(parsed.circuit.components.filter((part) => part.ref.startsWith('DB1'))).toHaveLength(1);
+  });
+
+  it('pads a pasted legacy 10-node raspberry_pi circuit to the current 14 pins', () => {
+    const legacy = JSON.stringify({
+      title: 'Old Pi blink',
+      type: 'mcu_led',
+      supplyVoltage: 3.3,
+      components: [
+        { ref: 'U1', kind: 'raspberry_pi', value: 'Pi 4', footprint: '', nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'LED', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10'] },
+        { ref: 'R1', kind: 'resistor', value: '330', footprint: '', nodes: ['LED', 'LEDK'] },
+        { ref: 'DLED1', kind: 'led', value: 'red', footprint: '', nodes: ['LEDK', '0'] },
+      ],
+      notes: [],
+    });
+    const parsed = parseCircuitJson(legacy);
+    expect(parsed.ok).toBe(true);
+    const pi = parsed.circuit.components.find((part) => part.ref === 'U1');
+    expect(pi.nodes).toHaveLength(14);
+    expect(pi.nodes.slice(10)).toEqual(['NC_U1_11', 'NC_U1_12', 'NC_U1_13', 'NC_U1_14']);
   });
 });

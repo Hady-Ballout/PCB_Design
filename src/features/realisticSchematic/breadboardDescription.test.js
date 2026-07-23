@@ -95,3 +95,27 @@ describe('describeBreadboard', () => {
     expect(text).toMatch(/not connected/);
   });
 });
+
+describe('microcontroller boards', () => {
+  it('describes an MCU build and reports its connectivity as OK', () => {
+    const circuit = {
+      title: 'Uno blink',
+      components: [
+        {
+          ref: 'U1',
+          kind: 'arduino_uno',
+          value: 'Uno R3',
+          nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12', 'NC_U1_13', 'NC_U1_14', 'NC_U1_15', 'NC_U1_16', 'NC_U1_17', 'LED', 'NC_U1_19', 'NC_U1_20', 'NC_U1_21', 'NC_U1_22', 'NC_U1_23', 'NC_U1_24'],
+        },
+        { ref: 'RLED', kind: 'resistor', value: '330', nodes: ['LED', 'LEDK'] },
+        { ref: 'DLED1', kind: 'led', value: 'red', nodes: ['LEDK', '0'] },
+        { ref: 'R2', kind: 'resistor', value: '330', nodes: ['VCC5', '0'] },
+      ],
+    };
+    const text = describeBreadboard(circuit, circuitToBreadboard(circuit));
+    expect(text).toContain('U1  arduino_uno Uno R3  [arduino_uno]');
+    expect(text).toMatch(/pin18 \(D13\): LED/);
+    expect(text).toMatch(/pin2 \(3V3\): not connected -> unplaced/);
+    expect(text).toContain('OK: every net is one connected node on the board and no node mixes nets.');
+  });
+});

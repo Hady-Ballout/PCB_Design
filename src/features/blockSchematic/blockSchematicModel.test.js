@@ -95,21 +95,46 @@ describe('blockSchematicModel', () => {
     expect(humanComponentName(opamp)).toBe('Op-Amp');
   });
 
-  it('labels a microcontroller board with its fixed pin names and only wired pins as connected', () => {
+  it('labels buck converter pins and names the component', () => {
+    const buckConverter = { ref: 'U1', kind: 'buck_converter', value: 'LM2596', nodes: ['VIN', 'OUT', 'GND', 'FB', 'ON_OFF'] };
+    expect(humanComponentName(buckConverter)).toBe('Buck Converter');
+    expect(pinLabel(buckConverter, 1)).toBe('VIN');
+    expect(pinLabel(buckConverter, 2)).toBe('OUT');
+    expect(pinLabel(buckConverter, 3)).toBe('GND');
+    expect(pinLabel(buckConverter, 4)).toBe('FB');
+    expect(pinLabel(buckConverter, 5)).toBe('ON/OFF');
+  });
+});
+
+describe('microcontroller blocks', () => {
+  it('labels MCU pins positionally and names the boards', () => {
     const uno = {
       ref: 'U1',
       kind: 'arduino_uno',
       value: 'Uno R3',
-      nodes: ['NC_U1_1', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'D13', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+      nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12', 'NC_U1_13', 'NC_U1_14', 'NC_U1_15', 'NC_U1_16', 'NC_U1_17', 'LED', 'NC_U1_19', 'NC_U1_20', 'NC_U1_21', 'NC_U1_22', 'NC_U1_23', 'NC_U1_24'],
     };
     expect(humanComponentName(uno)).toBe('Arduino Uno');
-    expect(pinLabel(uno, 3)).toBe('GND');
-    expect(pinLabel(uno, 9)).toBe('D13');
+    expect(pinLabel(uno, 1)).toBe('5V');
+    expect(pinLabel(uno, 18)).toBe('D13');
+    expect(humanComponentName({ kind: 'raspberry_pi' })).toBe('Raspberry Pi');
+    expect(pinLabel({ kind: 'esp32', nodes: new Array(12).fill('x') }, 5)).toBe('GPIO2');
+  });
 
-    const { nodes } = circuitToFlow({ components: [uno] });
-    const unoNode = nodes.find((node) => node.id === 'U1');
-    expect(unoNode.data.pins).toHaveLength(12);
-    const connected = unoNode.data.pins.filter((pin) => pin.connected).map((pin) => pin.label);
-    expect(connected).toEqual(['GND', 'D13']);
+  it('builds flow nodes for MCU circuits with connected pins marked', () => {
+    const { nodes } = circuitToFlow({
+      components: [
+        {
+          ref: 'U1',
+          kind: 'arduino_uno',
+          value: 'Uno R3',
+          nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12', 'NC_U1_13', 'NC_U1_14', 'NC_U1_15', 'NC_U1_16', 'NC_U1_17', 'LED', 'NC_U1_19', 'NC_U1_20', 'NC_U1_21', 'NC_U1_22', 'NC_U1_23', 'NC_U1_24'],
+        },
+        { ref: 'RLED', kind: 'resistor', value: '330', nodes: ['LED', '0'] },
+      ],
+    });
+    const mcuNode = nodes.find((node) => node.id === 'U1');
+    expect(mcuNode.data.pins).toHaveLength(24);
+    expect(mcuNode.data.pins.filter((pin) => pin.connected).map((pin) => pin.label)).toEqual(['5V', 'GND', 'D13']);
   });
 });

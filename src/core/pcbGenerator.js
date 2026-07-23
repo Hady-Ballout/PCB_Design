@@ -36,15 +36,21 @@ export {
   validateDiagramLayout,
 };
 
-export const MCU_KINDS = new Set(['arduino_uno', 'raspberry_pi', 'esp32']);
-// Fixed pin order for microcontroller boards; nodes[i] is pin i+1 of this list.
-export const MCU_PIN_NAMES = {
-  arduino_uno: ['5V', '3V3', 'GND', 'VIN', 'D2', 'D3', 'D5', 'D9', 'D13', 'A0', 'A1', 'A2'],
-  raspberry_pi: ['5V', '3V3', 'GND', 'GPIO2', 'GPIO3', 'GPIO4', 'GPIO17', 'GPIO18', 'GPIO27', 'GPIO22'],
-  esp32: ['3V3', 'GND', 'VIN', 'EN', 'GPIO2', 'GPIO4', 'GPIO5', 'GPIO13', 'GPIO18', 'GPIO19', 'GPIO21', 'GPIO22'],
-};
-export const MCU_PIN_COUNTS = Object.fromEntries(
-  Object.entries(MCU_PIN_NAMES).map(([kind, names]) => [kind, names.length]),
+import {
+  FIXED_PIN_NAMES,
+  MCU_KINDS,
+  MCU_PIN_COUNTS,
+  SPICE_PREFIX_BY_KIND,
+  SYMBOL_TYPE_BY_KIND,
+  WIRING_ONLY_KINDS,
+} from './componentKinds.js';
+
+export { MCU_KINDS, MCU_PIN_COUNTS };
+
+// Named pin tables and display titles for the boards, consumed by the KiCad
+// schematic exporter's synthesized module boxes (kicadSchematic.js).
+export const MCU_PIN_NAMES = Object.fromEntries(
+  [...MCU_KINDS].map((kind) => [kind, FIXED_PIN_NAMES[kind] || []]),
 );
 export const MCU_BOARD_TITLES = {
   arduino_uno: 'Arduino UNO R3',
@@ -69,14 +75,15 @@ export const validateCircuit = (circuit) => {
 
   for (const part of circuit.components) {
     if (!part.value) errors.push(`${part.ref} is missing a value.`);
-    if (!part.nodes.includes('0') && part.kind === 'voltage_source') {
+    if (!part.nodes.includes('0') && (part.kind === 'voltage_source' || part.kind === 'solar_panel')) {
       warnings.push(`${part.ref} does not reference ground.`);
     }
     if (part.kind === 'opamp' && part.nodes.length < 5) {
       warnings.push(`${part.ref} op amp should include + input, - input, output, V+, and V- nodes.`);
     }
-    if (MCU_KINDS.has(part.kind) && part.nodes.length !== MCU_PIN_COUNTS[part.kind]) {
-      warnings.push(`${part.ref} ${part.kind} should list exactly ${MCU_PIN_COUNTS[part.kind]} nodes in its fixed pin order.`);
+    const fixedPins = FIXED_PIN_NAMES[part.kind];
+    if (fixedPins && part.nodes.length !== fixedPins.length) {
+      warnings.push(`${part.ref} ${part.kind} should list exactly ${fixedPins.length} nodes in its fixed pin order.`);
     }
     part.nodes.forEach((node, index) => {
       if (isUnconnectedTerminal(node, part.ref, index + 1)) return;
@@ -101,26 +108,7 @@ const sanitizeSpiceRef = (ref) => String(ref || 'X').replace(/[^a-z0-9_]/gi, '_'
 
 const spiceRef = (part) => {
   const base = sanitizeSpiceRef(part.ref);
-  const prefixByKind = {
-    voltage_source: 'V',
-    signal_source: 'V',
-    resistor: 'R',
-    load: 'R',
-    capacitor: 'C',
-    inductor: 'L',
-    diode: 'D',
-    led: 'D',
-    bjt_npn: 'Q',
-    bjt_pnp: 'Q',
-    mosfet_n: 'M',
-    mosfet_p: 'M',
-    opamp: 'X',
-    regulator: 'V',
-    arduino_uno: 'U',
-    raspberry_pi: 'U',
-    esp32: 'U',
-  };
-  const prefix = prefixByKind[part.kind] || 'X';
+  const prefix = SPICE_PREFIX_BY_KIND[part.kind] || 'X';
   return base.startsWith(prefix) ? base : `${prefix}_${base}`;
 };
 
@@ -134,33 +122,45 @@ const regulatorVoltage = (value) => {
   return cleanVoltageValue(text).match(/\d+(?:\.\d+)?/)?.[0] || '5';
 };
 
+// Mirrors buckVolts in sim/simValues.js. The LM2596 part number is stripped
+// first so its digits ("2596") never get mistaken for the output voltage.
+// Round-tripped through Number so "LM2596-5.0" emits "5", not "5.0".
+const buckVoltage = (value) => {
+  const text = String(value || '').toLowerCase().replace(/lm25\d\d[a-z]*/g, '');
+  const match = text.match(/\d+(?:\.\d+)?/)?.[0];
+  return match ? String(Number(match)) : '5';
+};
+
 const regulatorOutputNode = (nodes = []) => {
   const namedOutput = nodes.find((node) => /^v?out/i.test(node));
   return namedOutput || nodes.at(-1) || 'VOUT';
 };
 
-const symbolTypeByKind = {
-  voltage_source: 'voltage_source',
-  signal_source: 'voltage_source',
-  resistor: 'resistor',
-  load: 'resistor',
-  capacitor: 'capacitor',
-  inductor: 'inductor',
-  diode: 'diode',
-  led: 'led',
-  bjt_npn: 'bjt_npn',
-  bjt_pnp: 'bjt_pnp',
-  mosfet_n: 'generic',
-  mosfet_p: 'generic',
-  opamp: 'opamp',
-  regulator: 'generic',
-  arduino_uno: 'generic',
-  raspberry_pi: 'generic',
-  esp32: 'generic',
+// Kinds simulated as plain resistances: keep the value when it parses as a
+// resistance, otherwise fall back (a buzzer's value may be "5V active").
+const resistiveValue = (value, fallback) => {
+  const text = String(value || '').trim().replace(/(?:Ω|ohms?)\s*$/i, '').trim();
+  return /^\d+(?:\.\d+)?\s*(?:k|meg|m|g|r)?$/i.test(text) ? text.replace(/\s+/g, '') : fallback;
 };
 
+const zenerVoltage = (value) => String(value || '').match(/\d+(?:\.\d+)?/)?.[0] || '5.1';
+const zenerModelName = (value) => `DZEN_${zenerVoltage(value).replace('.', 'R')}`;
+
+// Half of a plain resistance value ("10k" -> "5k") for the potentiometer's
+// 50%-position two-resistor model.
+const halfResistance = (value) => {
+  const match = String(value).match(/^(\d+(?:\.\d+)?)(k|meg|m|g|r)?$/i);
+  if (!match) return value;
+  const half = Number(match[1]) / 2;
+  return `${Number.isInteger(half) ? half : half.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')}${match[2] || ''}`;
+};
+
+const SEVEN_SEGMENT_SEGMENTS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'DP'];
+
+const symbolTypeByKind = SYMBOL_TYPE_BY_KIND;
+
 const isOutputNode = (node) => /(^|_)(v?out|out|load|filtered)(_|$)/i.test(node);
-const isSourceKind = (kind) => kind === 'voltage_source' || kind === 'signal_source';
+const isSourceKind = (kind) => kind === 'voltage_source' || kind === 'signal_source' || kind === 'solar_panel';
 const isUnconnectedNode = (node) => /^NC_/i.test(String(node));
 const isUnconnectedTerminal = (node, ref, pin) =>
   isUnconnectedNode(node) || String(node) === `${ref}_${pin}`;
@@ -172,16 +172,60 @@ CPOLE NINT 0 15.9n
 EOUT OUT 0 NINT 0 1
 .ends LM358`;
 
-export const addMissingSpiceModels = (spice, circuit) => {
-  const source = String(spice || '');
-  const needsLm358 = circuit?.components?.some((part) => part.kind === 'opamp')
-    && !/^\s*\.subckt\s+LM358\b/im.test(source);
-  if (!needsLm358) return source;
+export const LM393_SUBCIRCUIT = `.subckt LM393 INP INN OUT VCC VEE
+EGAIN NRAW 0 INP INN 1e5
+RPOLE NRAW NINT 1k
+CPOLE NINT 0 1n
+EOUT OUT 0 NINT 0 1
+.ends LM393`;
 
-  const endPattern = /^\s*\.end\s*$/im;
-  return endPattern.test(source)
-    ? source.replace(endPattern, `${LM358_SUBCIRCUIT}\n.end`)
-    : `${source.trimEnd()}\n${LM358_SUBCIRCUIT}`;
+export const TIMER555_SUBCIRCUIT = `.subckt TIMER555 GND TRIG OUT RESET CTRL THRES DISCH VCC
+* Internal latch approximated with hysteretic switches: trip points ~1/3 and
+* ~2/3 of a 5V supply (VT=2.5 VH=0.85). OUT drives high through ROUT until
+* THRES crosses the upper trip, then OUT and DISCH pull low until the lower.
+ROUT VCC OUT 1k
+SOUT OUT GND THRES GND SW555
+SDIS DISCH GND THRES GND SW555
+RTRIG TRIG GND 10Meg
+RCTRL CTRL GND 10Meg
+RRST RESET GND 10Meg
+.model SW555 SW(VT=2.5 VH=0.85 RON=10 ROFF=10Meg)
+.ends TIMER555`;
+
+export const PC817_SUBCIRCUIT = `.subckt PC817 A K E C
+* Input LED; the output phototransistor is approximated as a switch that
+* closes when the LED is forward-biased (~1.1V). CTR is not modeled — the
+* coupler is on/off, which is the beginner-facing behavior. RLEAK/RCE keep
+* every port DC-connected so partially wired circuits still converge.
+DLED A K DOPTOLED
+RLEAK A K 10Meg
+SCE C E A K SWOPTO
+RCE C E 10Meg
+.model DOPTOLED D(IS=1e-16 N=1.8 RS=2)
+.model SWOPTO SW(VT=1.1 VH=0.15 RON=30 ROFF=10Meg)
+.ends PC817`;
+
+// Built-in subcircuits injected into any deck whose circuit references them
+// without defining them (hand-edited SPICE included).
+const SPICE_SUBCIRCUITS = [
+  { name: 'LM358', kind: 'opamp', text: LM358_SUBCIRCUIT },
+  { name: 'LM393', kind: 'comparator', text: LM393_SUBCIRCUIT },
+  { name: 'TIMER555', kind: 'timer_555', text: TIMER555_SUBCIRCUIT },
+  { name: 'PC817', kind: 'optocoupler', text: PC817_SUBCIRCUIT },
+];
+
+export const addMissingSpiceModels = (spice, circuit) => {
+  let source = String(spice || '');
+  for (const { name, kind, text } of SPICE_SUBCIRCUITS) {
+    const needed = circuit?.components?.some((part) => part.kind === kind)
+      && !new RegExp(`^\\s*\\.subckt\\s+${name}\\b`, 'im').test(source);
+    if (!needed) continue;
+    const endPattern = /^\s*\.end\s*$/im;
+    source = endPattern.test(source)
+      ? source.replace(endPattern, `${text}\n.end`)
+      : `${source.trimEnd()}\n${text}`;
+  }
+  return source;
 };
 
 const orderNonGroundNets = (circuit) => {
@@ -254,7 +298,7 @@ const pinPoint = (component, pinIndex, node, netPosition) => {
   const rows = Math.ceil(component.pinCount / 2);
   return {
     x: component.x + side * (component.width / 2),
-    y: component.y - ((rows - 1) * 14) / 2 + row * 28,
+    y: component.y - ((rows - 1) * 40) / 2 + row * 40,
   };
 };
 
@@ -666,21 +710,92 @@ export const toSpice = (circuit) => {
     if (part.kind === 'inductor') lines.push(`${ref} ${a} ${b} ${part.value.replace(/h$/i, '')}`);
     if (part.kind === 'diode') lines.push(`${ref} ${a} ${b} DGEN`);
     if (part.kind === 'led') lines.push(`${ref} ${a} ${b} DRED`);
+    if (part.kind === 'ir_led') lines.push(`${ref} ${a} ${b} DIR`);
+    if (part.kind === 'schottky') lines.push(`${ref} ${a} ${b} DSCH`);
+    if (part.kind === 'solar_panel') lines.push(`${ref} ${a} ${b} DC ${cleanVoltageValue(part.value)}`);
     if (part.kind === 'bjt_npn') lines.push(`${ref} ${a} ${b} ${c} Q2N2222`);
     if (part.kind === 'bjt_pnp') lines.push(`${ref} ${a} ${b} ${c} Q2N3906`);
     if (part.kind === 'mosfet_n') lines.push(`${ref} ${a} ${b} ${c} ${c} MNMOS`);
     if (part.kind === 'mosfet_p') lines.push(`${ref} ${a} ${b} ${c} ${c} MPMOS`);
     if (part.kind === 'opamp') lines.push(`${ref} ${a} ${b} ${c} ${d} ${e} LM358`);
+    if (part.kind === 'comparator') lines.push(`${ref} ${a} ${b} ${c} ${d} ${e} LM393`);
+    if (part.kind === 'timer_555') lines.push(`${ref} ${part.nodes.join(' ')} TIMER555`);
+    if (part.kind === 'optocoupler') lines.push(`${ref} ${part.nodes.join(' ')} PC817`);
     if (part.kind === 'regulator') lines.push(`${ref} ${regulatorOutputNode(part.nodes)} 0 DC ${regulatorVoltage(part.value)}`);
-    if (MCU_KINDS.has(part.kind)) lines.push(`* ${ref} ${part.kind} (microcontroller board, not simulated)`);
+    if (part.kind === 'buck_converter') lines.push(`${ref} ${b} 0 DC ${buckVoltage(part.value)}`);
+    if (part.kind === 'zener') lines.push(`${ref} ${a} ${b} ${zenerModelName(part.value)}`);
+    if (part.kind === 'photoresistor' || part.kind === 'thermistor' || part.kind === 'ir_phototransistor') lines.push(`${ref} ${a} ${b} ${resistiveValue(part.value, '10k')}`);
+    if (part.kind === 'buzzer') lines.push(`${ref} ${a} ${b} ${resistiveValue(part.value, '1k')}`);
+    if (part.kind === 'crystal') lines.push(`${ref} ${a} ${b} 20p`);
+    if (part.kind === 'pushbutton') lines.push(`${ref} ${a} ${b} 10Meg`);
+    if (part.kind === 'dc_motor') lines.push(`${ref} ${a} ${b} ${resistiveValue(part.value, '10')}`);
+    // Fuse ratings like "1A" fail the resistance regex and fall back to 0.05Ω.
+    if (part.kind === 'fuse') lines.push(`${ref} ${a} ${b} ${resistiveValue(part.value, '0.05')}`);
+    // Pager/coin vibration motors are ~25-30Ω windings.
+    if (part.kind === 'vibration_motor') lines.push(`${ref} ${a} ${b} ${resistiveValue(part.value, '27')}`);
+    if (part.kind === 'potentiometer') {
+      const half = halfResistance(resistiveValue(part.value, '10k'));
+      lines.push(`${ref}_A ${a} ${b} ${half}`);
+      lines.push(`${ref}_B ${b} ${c} ${half}`);
+    }
+    if (part.kind === 'switch_spdt') {
+      lines.push(`${ref}_A ${b} ${a} 1m`);
+      lines.push(`${ref}_B ${b} ${c} 10Meg`);
+    }
+    if (part.kind === 'current_sensor') {
+      // The load current flows through the module's IP+ / IP- terminals; the
+      // ACS712's internal shunt is ~1.2 mΩ. VCC/OUT/GND are wiring-only.
+      if (!isUnconnectedTerminal(a, part.ref, 1) && !isUnconnectedTerminal(b, part.ref, 2)) {
+        lines.push(`${ref}_S ${a} ${b} 0.0012`);
+      }
+    }
+    if (part.kind === 'bridge_rectifier') {
+      // [AC1, AC2, V+, V-]: standard bridge — AC1/AC2 anodes into V+, and the
+      // V- node's anodes into AC1/AC2. An inverted leg would short the source.
+      const legs = [['A', a, c, 1, 3], ['B', b, c, 2, 3], ['C', d, a, 4, 1], ['D', d, b, 4, 2]];
+      legs.forEach(([suffix, anode, cathode, anodePin, cathodePin]) => {
+        if (isUnconnectedTerminal(anode, part.ref, anodePin) || isUnconnectedTerminal(cathode, part.ref, cathodePin)) return;
+        lines.push(`${ref}_${suffix} ${anode} ${cathode} DGEN`);
+      });
+    }
+    if (part.kind === 'rgb_led') {
+      const models = { R: 'DRED', G: 'DGRN', B: 'DBLU' };
+      ['R', 'G', 'B'].forEach((channel, index) => {
+        const anode = part.nodes[index];
+        if (isUnconnectedTerminal(anode, part.ref, index + 1) || isUnconnectedTerminal(d, part.ref, 4)) return;
+        lines.push(`${ref}_${channel} ${anode} ${d} ${models[channel]}`);
+      });
+    }
+    if (part.kind === 'seven_segment') {
+      const com = part.nodes[8];
+      SEVEN_SEGMENT_SEGMENTS.forEach((segment, index) => {
+        const anode = part.nodes[index];
+        if (!anode || !com) return;
+        if (isUnconnectedTerminal(anode, part.ref, index + 1) || isUnconnectedTerminal(com, part.ref, 9)) return;
+        lines.push(`${ref}_${segment} ${anode} ${com} DRED`);
+      });
+    }
+    if (WIRING_ONLY_KINDS.has(part.kind)) {
+      lines.push(`* ${ref} ${part.kind} (${MCU_KINDS.has(part.kind) ? 'microcontroller board' : 'wiring-only'}, not simulated)`);
+    }
   }
   lines.push('.model DGEN D(IS=1e-14 RS=1 N=1)');
   lines.push('.model DRED D(IS=1e-20 N=2 RS=10 CJO=2p BV=5 IBV=10u)');
   lines.push('.model Q2N2222 NPN(IS=1e-14 BF=200 VAF=100)');
+  [...new Set(circuit.components.filter((part) => part.kind === 'zener').map((part) => zenerVoltage(part.value)))]
+    .forEach((voltage) => lines.push(`.model DZEN_${voltage.replace('.', 'R')} D(IS=1e-14 RS=1 N=1 BV=${voltage} IBV=5m)`));
+  if (circuit.components.some((part) => part.kind === 'rgb_led')) {
+    lines.push('.model DGRN D(IS=1e-20 N=2 RS=10 CJO=2p BV=5 IBV=10u)');
+    lines.push('.model DBLU D(IS=1e-20 N=2 RS=10 CJO=2p BV=5 IBV=10u)');
+  }
+  if (circuit.components.some((part) => part.kind === 'schottky')) lines.push('.model DSCH D(IS=1e-8 RS=0.5 N=1.05 BV=40 IBV=1u)');
+  if (circuit.components.some((part) => part.kind === 'ir_led')) lines.push('.model DIR D(IS=1e-18 N=1.4 RS=6 CJO=2p BV=5 IBV=10u)');
   if (circuit.components.some((part) => part.kind === 'bjt_pnp')) lines.push('.model Q2N3906 PNP(IS=1e-14 BF=200 VAF=100)');
   if (circuit.components.some((part) => part.kind === 'mosfet_n')) lines.push('.model MNMOS NMOS(LEVEL=1 KP=20u VTO=2)');
   if (circuit.components.some((part) => part.kind === 'mosfet_p')) lines.push('.model MPMOS PMOS(LEVEL=1 KP=10u VTO=-2)');
-  if (circuit.components.some((part) => part.kind === 'opamp')) lines.push(LM358_SUBCIRCUIT);
+  SPICE_SUBCIRCUITS.forEach(({ kind, text }) => {
+    if (circuit.components.some((part) => part.kind === kind)) lines.push(text);
+  });
   lines.push('.tran 0.1ms 20ms');
   lines.push('.op');
   lines.push('.end');

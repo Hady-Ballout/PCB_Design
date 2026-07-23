@@ -1,32 +1,35 @@
-/* Realistic-schematic view: brutalist chrome around the breadboard photo. */
+/* Realistic-schematic view: fills the editor window directly — no border of
+   its own, so the window frame is the single box around the breadboard. */
 .realistic-schematic {
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 480px;
   min-width: 0;
-  border-radius: 8px;
   overflow: hidden;
-  border: 2px solid #111111;
   background: var(--color-canvas);
 }
 
 .realistic-toolbar {
   align-items: center;
   background: var(--color-surface);
-  border-bottom: 2px solid #111111;
+  border-bottom: 2px solid var(--color-ink);
   display: flex;
+  /* Wrap when the window is too narrow to hold every action on one line, so the
+     trailing window controls (maximize/close) drop to a new row instead of
+     being clipped by the window's overflow:hidden. */
+  flex-wrap: wrap;
   flex: 0 0 auto;
   gap: 6px;
   padding: 6px 10px;
 }
 
 .realistic-toolbar button {
-  background: #ffffff;
-  border: 2px solid #111111;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
   border-radius: 6px;
-  box-shadow: 2px 2px 0 #111111;
-  color: #111111;
+  box-shadow: 2px 2px 0 var(--color-shadow);
+  color: var(--color-ink);
   cursor: pointer;
   font-size: 12px;
   line-height: 1;
@@ -36,12 +39,12 @@
 }
 
 .realistic-toolbar button:hover:not(:disabled) {
-  box-shadow: 3px 3px 0 #111111;
+  box-shadow: 3px 3px 0 var(--color-shadow);
   transform: translate(-1px, -1px);
 }
 
 .realistic-toolbar button:active:not(:disabled) {
-  box-shadow: 1px 1px 0 #111111;
+  box-shadow: 1px 1px 0 var(--color-shadow);
   transform: translate(1px, 1px);
 }
 
@@ -62,14 +65,27 @@
   white-space: nowrap;
 }
 
+/* Icon-only actions: center the glyph and keep a square-ish footprint. */
+.realistic-describe,
+.realistic-download {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  padding: 5px 6px;
+}
+
 .realistic-describe {
   margin-left: auto;
+}
+
+.realistic-describe.copied {
+  background: var(--color-success-bg);
 }
 
 /* Net legend: one clickable chip per net, swatch matches the wire color. */
 .realistic-legend {
   background: var(--color-surface);
-  border-bottom: 2px solid #111111;
+  border-bottom: 2px solid var(--color-ink);
   display: flex;
   flex: 0 0 auto;
   flex-wrap: wrap;
@@ -79,10 +95,10 @@
 
 .realistic-legend-chip {
   align-items: center;
-  background: #ffffff;
-  border: 2px solid #111111;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
   border-radius: 999px;
-  color: #111111;
+  color: var(--color-ink);
   cursor: pointer;
   display: inline-flex;
   font-size: 11px;
@@ -99,10 +115,11 @@
 
 .realistic-legend-chip.active {
   background: var(--nb-yellow);
+  color: var(--color-on-accent);
 }
 
 .realistic-legend-swatch {
-  border: 1px solid #111111;
+  border: 1px solid var(--color-ink);
   border-radius: 50%;
   display: inline-block;
   height: 8px;
@@ -134,23 +151,465 @@
   outline-offset: 2px;
 }
 
-.realistic-warnings {
-  background: var(--color-warning-bg);
-  border-bottom: 2px solid #111111;
-  color: var(--color-warning-text);
+.rs-issues {
+  background: var(--color-surface);
+  border-bottom: 2px solid var(--color-ink);
   flex: 0 0 auto;
   font-size: 12px;
-  font-weight: 600;
-  list-style: disc inside;
-  margin: 0;
+}
+
+.rs-issues-summary {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  cursor: pointer;
+  font-weight: 700;
   padding: 6px 12px;
+}
+
+.rs-issues-has-errors > .rs-issues-summary {
+  background: var(--color-error-bg);
+  color: var(--color-error-text);
+}
+
+.rs-issues-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 12px 8px;
+}
+
+.rs-issue {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.rs-issue-tag {
+  border: 2px solid var(--color-ink);
+  border-radius: 6px;
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  text-transform: uppercase;
+}
+
+.rs-issue-error .rs-issue-tag {
+  background: var(--color-error-bg);
+  color: var(--color-error-text);
+}
+
+.rs-issue-warning .rs-issue-tag {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+
+.rs-issue-fixed .rs-issue-tag {
+  background: var(--color-success-bg);
+  color: var(--color-ink);
+}
+
+.rs-issue-body {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+
+.rs-issue-fix {
+  color: var(--color-text-muted);
+  font-weight: 500;
 }
 
 /* Neutral bench mat so the realistic component colors read clearly. */
 .realistic-scroll {
-  background: #efe9dc;
+  background: var(--color-bench);
   flex: 1;
   min-height: 0;
   overflow: auto;
   padding: 12px;
+}
+
+/* The board is a pan/zoom canvas: it fills the stage; touch-action:none hands
+   us pinch/two-finger gestures instead of scrolling the page. */
+.realistic-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: grab;
+}
+
+.realistic-canvas .rs-item {
+  cursor: pointer;
+}
+
+/* Rewiring: the selected part's pins become draggable handles trailing a
+   rubber-band line to the hole they will connect to. */
+.rs-pin-handle {
+  fill: var(--nb-blue);
+  stroke: var(--color-chip);
+  stroke-width: 1.5;
+  cursor: crosshair;
+}
+
+.rs-pin-handle:hover {
+  fill: var(--nb-pink);
+  r: 6;
+}
+
+.rs-wire-drag {
+  stroke: var(--nb-blue);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+  stroke-linecap: round;
+}
+
+/* Component library: browse-only popover opened by double-clicking the board.
+   Neo-brutalism: black 2px borders, hard offset shadows, flat accents. */
+.realistic-library-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+}
+
+.realistic-library {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-panel);
+  border: 2px solid var(--color-ink);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.realistic-library-header {
+  align-items: center;
+  background: var(--color-surface);
+  border-bottom: 2px solid var(--color-ink);
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 10px;
+}
+
+.realistic-library-title {
+  font-weight: 700;
+}
+
+.realistic-library-close {
+  background: transparent;
+  border: 0;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.realistic-library-close:hover {
+  color: var(--color-text);
+}
+
+.realistic-library-search {
+  border: 0;
+  border-bottom: 2px solid var(--color-ink);
+  color: var(--color-text);
+  flex: 0 0 auto;
+  font-size: 12px;
+  outline: none;
+  padding: 8px 10px;
+}
+
+.realistic-library-search:focus-visible {
+  background: var(--nb-yellow-soft);
+}
+
+.realistic-library-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 10px 10px;
+}
+
+.realistic-library-group + .realistic-library-group {
+  margin-top: 10px;
+}
+
+.realistic-library-group-title {
+  color: var(--color-text-subtle);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin: 0 0 6px;
+  text-transform: uppercase;
+}
+
+.realistic-library-grid {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: 1fr;
+}
+
+.realistic-library-item {
+  align-items: center;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
+  border-radius: 6px;
+  box-shadow: 2px 2px 0 var(--color-shadow);
+  color: var(--color-text);
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  /* Let the item shrink to its grid track so long labels ellipsize instead
+     of pushing the popover wider and forcing horizontal scrolling. */
+  min-width: 0;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.realistic-library-item:hover {
+  background: var(--nb-yellow-soft);
+  box-shadow: 3px 3px 0 var(--color-shadow);
+  transform: translate(-1px, -1px);
+}
+
+.realistic-library-item:active {
+  box-shadow: 1px 1px 0 var(--color-shadow);
+  transform: translate(1px, 1px);
+}
+
+.realistic-library-item:focus-visible {
+  outline: 3px solid var(--nb-blue);
+  outline-offset: 1px;
+}
+
+.realistic-library-item:disabled {
+  box-shadow: 2px 2px 0 var(--color-shadow);
+  cursor: default;
+  transform: none;
+}
+
+.realistic-library-item-icon {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  justify-content: center;
+  width: 44px;
+}
+
+/* Realistic part-artwork thumbnails carry their own fills and strokes — no
+   line-art overrides here. */
+.realistic-library-item-icon svg {
+  width: 44px;
+  height: 30px;
+}
+
+.realistic-library-item-label {
+  line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.realistic-library-empty {
+  color: var(--color-text-muted);
+  margin: 4px 0;
+}
+
+/* --- live simulation (Run mode) ------------------------------------------ */
+
+.realistic-run.running {
+  background: var(--nb-yellow);
+  color: var(--color-on-accent);
+}
+
+.realistic-sim-status {
+  background: var(--color-success-bg);
+  border: 2px solid var(--color-ink);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+.realistic-sim-status.warn {
+  background: var(--color-error-bg);
+}
+
+/* Warning / error strips under the issues panel while simulating. */
+.realistic-sim-banner {
+  background: var(--color-warning-bg);
+  border-bottom: 2px solid var(--color-ink);
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.realistic-sim-banner.error {
+  background: var(--color-error-bg);
+  font-weight: 600;
+}
+
+.realistic-legend-volts {
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+
+/* Stimulus sliders for the selected interactive part (LDR light, thermistor
+   temperature, pot wiper). */
+.rs-stimulus-panel {
+  background: var(--color-surface);
+  border-bottom: 2px solid var(--color-ink);
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 6px 10px;
+}
+
+.rs-stimulus-row {
+  align-items: center;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+}
+
+.rs-stimulus-label {
+  font-weight: 600;
+}
+
+/* IR remote widget: a 3x3 key grid per ir_receiver ref. */
+.rs-ir-remote {
+  display: grid;
+  gap: 2px;
+  grid-template-columns: repeat(3, minmax(22px, auto));
+}
+
+.rs-stimulus-row input[type='range'] {
+  width: 140px;
+}
+
+.rs-stimulus-value {
+  color: var(--color-text-muted);
+  min-width: 44px;
+}
+
+/* Run-mode motor motion. transform-box makes the rotation pivot on the
+   element's own box instead of the SVG origin. */
+.rs-motor-spin {
+  animation: rs-spin 1s linear infinite;
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+}
+
+@keyframes rs-spin {
+  to { transform: rotate(360deg); }
+}
+
+.rs-motor-shake {
+  animation: rs-shake 0.08s linear infinite;
+}
+
+@keyframes rs-shake {
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(0.6px, -0.4px); }
+  50% { transform: translate(-0.5px, 0.5px); }
+  75% { transform: translate(0.4px, 0.6px); }
+  100% { transform: translate(0, 0); }
+}
+
+.realistic-vmap.active,
+.realistic-legend-toggle.active {
+  background: var(--nb-yellow);
+  color: var(--color-on-accent);
+}
+
+.realistic-audio-toggle.muted {
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+}
+
+/* Serial monitor strip (Uno firmware simulation). */
+.realistic-serial {
+  background: var(--color-surface);
+  border-bottom: 2px solid var(--color-ink);
+  flex: 0 0 auto;
+}
+
+.realistic-serial-bar {
+  display: flex;
+  gap: 6px;
+  padding: 4px 10px;
+}
+
+.realistic-serial-bar button {
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
+  border-radius: 6px;
+  box-shadow: 2px 2px 0 var(--color-shadow);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+.realistic-serial-body {
+  background: #111418;
+  color: #9fe8a8;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  margin: 0 10px 8px;
+  max-height: 120px;
+  overflow-y: auto;
+  padding: 6px 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.rs-stimulus-row button {
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
+  border-radius: 6px;
+  box-shadow: 2px 2px 0 var(--color-shadow);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+}
+
+.rs-stimulus-row button:active {
+  box-shadow: 1px 1px 0 var(--color-shadow);
+  transform: translate(1px, 1px);
+}
+
+.realistic-serial-input {
+  display: flex;
+  gap: 6px;
+  padding: 0 10px 8px;
+}
+
+.realistic-serial-input input {
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
+  border-radius: 6px;
+  flex: 1;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  min-height: 0;
+  padding: 4px 8px;
+}
+
+.realistic-serial-input button {
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
+  border-radius: 6px;
+  box-shadow: 2px 2px 0 var(--color-shadow);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 10px;
 }

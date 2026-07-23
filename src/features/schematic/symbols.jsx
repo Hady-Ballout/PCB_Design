@@ -15,6 +15,13 @@ export function ComponentToolIcon({ type }) {
       </svg>
     );
   }
+  if (type === 'inductor') {
+    return (
+      <svg viewBox="0 0 64 32" aria-hidden="true" focusable="false">
+        <path d="M4 20H12Q17 6 22 20Q27 6 32 20Q37 6 42 20Q47 6 52 20H60" />
+      </svg>
+    );
+  }
   if (type === 'source') {
     return (
       <svg viewBox="0 0 64 32" aria-hidden="true" focusable="false">
@@ -43,14 +50,6 @@ export function ComponentToolIcon({ type }) {
     return (
       <svg viewBox="0 0 64 32" aria-hidden="true" focusable="false">
         <path d="M32 4V13M14 13H50M20 20H44M26 27H38" />
-      </svg>
-    );
-  }
-  if (type === 'arduino_uno' || type === 'raspberry_pi' || type === 'esp32') {
-    return (
-      <svg viewBox="0 0 64 32" aria-hidden="true" focusable="false">
-        <rect x="14" y="4" width="36" height="24" rx="2" />
-        <path d="M20 4V0M28 4V0M36 4V0M44 4V0M20 28V32M28 28V32M36 28V32M44 28V32" />
       </svg>
     );
   }
@@ -259,6 +258,37 @@ export function DiagramSymbol({ component }) {
     );
   }
 
+  if (symbolType === 'mcu') {
+    const bodyLeft = left + 22;
+    const bodyRight = right - 22;
+    const label = MCU_SYMBOL_LABELS[component.kind] || component.kind.replaceAll('_', ' ').toUpperCase();
+    const pinNames = MCU_SYMBOL_PINS[component.kind] || [];
+    return (
+      <>
+        <rect className="diagram-fill" x={bodyLeft} y={top} width={bodyRight - bodyLeft} height={height} rx="8" />
+        {(component.pins || []).map((pin) => {
+          const onLeft = pin.pinIndex % 2 === 1;
+          const edgeX = onLeft ? bodyLeft : bodyRight;
+          return (
+            <g key={pin.pinIndex}>
+              <line className="diagram-symbol" x1={pin.x} y1={pin.y} x2={edgeX} y2={pin.y} />
+              <text
+                className="diagram-small"
+                fontSize="9"
+                x={onLeft ? bodyLeft + 5 : bodyRight - 5}
+                y={pin.y + 3}
+                textAnchor={onLeft ? 'start' : 'end'}
+              >
+                {pinNames[pin.pinIndex - 1] || pin.pinIndex}
+              </text>
+            </g>
+          );
+        })}
+        <text className="diagram-small" x={x} y={y + 4} textAnchor="middle">{label}</text>
+      </>
+    );
+  }
+
   return (
     <>
       <rect className="diagram-symbol" x={left} y={top} width={width} height={height} rx="6" />
@@ -266,6 +296,19 @@ export function DiagramSymbol({ component }) {
     </>
   );
 }
+
+// Positional pin names for the canvas MCU symbol. Duplicated per chunk like the
+// other per-kind maps; keep in sync with MCU_PINS in the realistic view.
+const MCU_SYMBOL_LABELS = {
+  arduino_uno: 'ARDUINO UNO',
+  raspberry_pi: 'RASPBERRY PI',
+  esp32: 'ESP32',
+};
+const MCU_SYMBOL_PINS = {
+  arduino_uno: ['5V', '3V3', 'GND', 'VIN', 'D0', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'D13', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5'],
+  raspberry_pi: ['5V', '3V3', 'GND', 'GPIO2', 'GPIO3', 'GPIO4', 'GPIO17', 'GPIO18', 'GPIO27', 'GPIO22'],
+  esp32: ['3V3', 'GND', 'VIN', 'EN', 'GPIO2', 'GPIO4', 'GPIO5', 'GPIO13', 'GPIO18', 'GPIO19', 'GPIO21', 'GPIO22'],
+};
 
 export function GroundSymbol({ x, y }) {
   return (

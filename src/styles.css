@@ -13,14 +13,26 @@
   --color-surface-soft: #ffffff;
   --color-canvas: #fffdf7;
   --color-code: #fffdf7;
+  --color-bench: #efe9dc;
+
+  /* Ink & chips: ink draws every border/line, chips are the raised light
+     slabs (buttons, cards). Both flip in the dark theme, while
+     --color-on-accent stays dark because the flat accents stay bright. */
+  --color-ink: #111111;
+  --color-chip: #ffffff;
+  --color-shadow: #111111;
+  --color-on-accent: #111111;
+  --color-hover-tint: rgba(17, 17, 17, 0.06);
+  --color-dot-grid: rgba(17, 17, 17, 0.07);
+  --color-dot-grid-strong: rgba(17, 17, 17, 0.1);
 
   /* Ink */
-  --color-text: #111111;
+  --color-text: var(--color-ink);
   --color-text-muted: #57534a;
   --color-text-subtle: #8b8577;
 
   /* Borders: black is the house style; soft is for interior grids only */
-  --color-border: #111111;
+  --color-border: var(--color-ink);
   --color-border-soft: #ded2bc;
 
   /* Flat accent set */
@@ -38,7 +50,7 @@
   --color-primary-hover: #2b6bef;
   --color-primary-pressed: #1e5bd8;
   --color-primary-soft: var(--nb-blue-soft);
-  --color-primary-border: #111111;
+  --color-primary-border: var(--color-ink);
 
   /* Live/streaming = hot pink */
   --color-signal: var(--nb-pink);
@@ -55,16 +67,16 @@
   --color-success-bg: #dff5d8;
   --color-error-bg: #ffe0e0;
   --color-error-text: #d92b2b;
-  --color-error-border: #111111;
+  --color-error-border: var(--color-ink);
   --color-warning-bg: #ffe8cc;
-  --color-warning-text: #111111;
-  --color-warning-border: #111111;
+  --color-warning-text: var(--color-ink);
+  --color-warning-border: var(--color-ink);
 
   /* The hard-shadow system: no blur, ever */
-  --shadow-xs: 2px 2px 0 #111111;
-  --shadow-sm: 3px 3px 0 #111111;
-  --shadow-md: 5px 5px 0 #111111;
-  --shadow-lg: 8px 8px 0 #111111;
+  --shadow-xs: 2px 2px 0 var(--color-shadow);
+  --shadow-sm: 3px 3px 0 var(--color-shadow);
+  --shadow-md: 5px 5px 0 var(--color-shadow);
+  --shadow-lg: 8px 8px 0 var(--color-shadow);
 
   /* Type */
   --font-display: 'Archivo Black', 'Inter', ui-sans-serif, system-ui, sans-serif;
@@ -76,6 +88,56 @@
   color-scheme: light;
   font-family: var(--font-sans);
   line-height: 1.5;
+}
+
+/* ── Dark theme: warm charcoal paper, light ink, pure-black shadows. The
+   flat accents stay bright (their -soft tints go deep), so anything sitting
+   on a full accent keeps --color-on-accent dark text. Activated by the
+   data-theme attribute the theme toggle writes on <html>. ── */
+:root[data-theme='dark'] {
+  --color-page: #171512;
+  --color-panel: #211f1b;
+  --color-surface: #2a2723;
+  --color-surface-soft: #211f1b;
+  --color-canvas: #1c1a16;
+  --color-code: #1c1a16;
+  --color-bench: #26241f;
+
+  --color-ink: #ece7da;
+  --color-chip: #32302a;
+  --color-shadow: #000000;
+  --color-hover-tint: rgba(236, 231, 218, 0.08);
+  --color-dot-grid: rgba(236, 231, 218, 0.06);
+  --color-dot-grid-strong: rgba(236, 231, 218, 0.08);
+
+  --color-text: #f0ead9;
+  --color-text-muted: #b0a894;
+  --color-text-subtle: #857e6e;
+
+  --color-border-soft: #3a362e;
+
+  --nb-yellow-soft: #45390f;
+  --nb-blue: #6497ff;
+  --nb-blue-soft: #1c2a4a;
+  --nb-pink-soft: #47202f;
+  --nb-purple-soft: #322549;
+
+  --color-primary-hover: #83aeff;
+  --color-primary-pressed: #4f87ff;
+
+  --color-chart-bg: #1c1a16;
+  --color-diagram-bg: #1c1a16;
+  --color-diagram-grid-small: #2a2723;
+  --color-diagram-grid-large: #38342c;
+
+  --color-success: #51cf66;
+  --color-success-bg: #1c3a24;
+  --color-error-bg: #46201d;
+  --color-error-text: #ff8a7a;
+  --color-warning-bg: #453413;
+  --color-warning-text: #f0ead9;
+
+  color-scheme: dark;
 }
 
 * {
@@ -94,13 +156,13 @@ body {
 
 ::selection {
   background: var(--nb-yellow);
-  color: #111111;
+  color: var(--color-on-accent);
 }
 
 /* Chunky ink scrollbars */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #111111 transparent;
+  scrollbar-color: var(--color-ink) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -113,7 +175,7 @@ body {
 }
 
 *::-webkit-scrollbar-thumb {
-  background: #111111;
+  background: var(--color-ink);
   border: 3px solid var(--color-page);
   border-radius: 999px;
 }
@@ -131,11 +193,11 @@ textarea {
 /* The house button: white slab, black border, hard shadow that the
    cursor physically presses down. */
 button {
-  background: #ffffff;
-  border: 2px solid #111111;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
   border-radius: 8px;
   box-shadow: var(--shadow-sm);
-  color: #111111;
+  color: var(--color-ink);
   cursor: pointer;
   font-weight: 600;
   min-height: 40px;
@@ -144,12 +206,12 @@ button {
 }
 
 button:hover:not(:disabled) {
-  box-shadow: 4px 4px 0 #111111;
+  box-shadow: 4px 4px 0 var(--color-shadow);
   transform: translate(-1px, -1px);
 }
 
 button:active:not(:disabled) {
-  box-shadow: 1px 1px 0 #111111;
+  box-shadow: 1px 1px 0 var(--color-shadow);
   transform: translate(2px, 2px);
 }
 
@@ -162,6 +224,58 @@ button:disabled {
 
 button.primary {
   background: var(--nb-yellow);
+  color: var(--color-on-accent);
+}
+
+/* Sun/moon theme switch: a compact round chip. Lives in the user bar on the
+   workspace and floats top-right on the pages that have no bar. */
+.theme-toggle {
+  align-items: center;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
+  border-radius: 999px;
+  box-shadow: none;
+  color: var(--color-ink);
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0;
+  width: 26px;
+}
+
+.theme-toggle svg {
+  display: block;
+}
+
+.theme-toggle:hover:not(:disabled) {
+  background: var(--nb-yellow);
+  box-shadow: none;
+  color: var(--color-on-accent);
+  transform: none;
+}
+
+.theme-toggle:active:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+}
+
+/* The user bar restyles its buttons; keep the toggle a square icon chip. */
+.user-bar .theme-toggle {
+  background: var(--color-chip);
+  padding: 0;
+  width: 26px;
+}
+
+.theme-toggle-floating {
+  box-shadow: var(--shadow-xs);
+  height: 34px;
+  min-height: 34px;
+  position: fixed;
+  right: 16px;
+  top: 12px;
+  width: 34px;
+  z-index: 60;
 }
 
 .text-button {
@@ -185,8 +299,8 @@ button.primary {
 
 textarea,
 input {
-  background: #ffffff;
-  border: 2px solid #111111;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
   border-radius: 8px;
   color: var(--color-text);
   padding: 12px;
@@ -208,7 +322,7 @@ input:focus {
 
 .app-shell {
   background: var(--color-page);
-  background-image: radial-gradient(rgba(17, 17, 17, 0.07) 1.5px, transparent 1.5px);
+  background-image: radial-gradient(var(--color-dot-grid) 1.5px, transparent 1.5px);
   background-size: 22px 22px;
   min-height: 100vh;
   padding: 24px;
@@ -225,14 +339,14 @@ input:focus {
 .main-panel,
 .panel-block {
   background: var(--color-panel);
-  border: 2px solid #111111;
+  border: 2px solid var(--color-ink);
   border-radius: 12px;
   box-shadow: var(--shadow-md);
 }
 
 .side-panel {
   background: var(--color-panel);
-  border: 2px solid #111111;
+  border: 2px solid var(--color-ink);
   border-radius: 12px;
   box-shadow: var(--shadow-md);
   display: flex;
@@ -328,7 +442,7 @@ h3 {
 
 .chat-conversation-header {
   align-items: center;
-  border-bottom: 2px solid #111111;
+  border-bottom: 2px solid var(--color-ink);
   display: grid;
   gap: 8px;
   grid-template-columns: auto minmax(0, 1fr);
@@ -427,6 +541,8 @@ h3 {
   font-weight: 400;
 }
 
+/* No box around the thread: the message list flows flat on the panel and
+   the composer below is the only framed box. */
 .chat-thread {
   display: flex;
   flex: 1;
@@ -436,16 +552,13 @@ h3 {
 }
 
 .chat-messages {
-  background: var(--color-canvas);
-  border: 2px solid #111111;
-  border-radius: 10px;
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   min-height: 360px;
   overflow-y: auto;
-  padding: 12px 10px;
+  padding: 4px 2px;
 }
 
 .chat-welcome {
@@ -461,17 +574,16 @@ h3 {
   margin: 6px 0 0;
 }
 
+/* Boxed messages: sender is shown by alignment (AI left, You right) and by
+   tint — a soft yellow box for your own messages, a neutral surface box for
+   the AI's replies. The sender labels ("You"/"AI") were removed. */
 .chat-message {
   align-self: flex-start;
   animation: message-in 300ms cubic-bezier(0.2, 1, 0.5, 1) both;
-  background: #ffffff;
-  border: 2px solid #111111;
-  border-radius: 10px;
-  box-shadow: var(--shadow-xs);
   display: grid;
-  gap: 6px;
-  max-width: 90%;
-  padding: 9px 11px;
+  gap: 4px;
+  max-width: 92%;
+  padding: 2px;
 }
 
 @keyframes message-in {
@@ -488,11 +600,19 @@ h3 {
 
 .chat-message.user {
   align-self: flex-end;
-  background: var(--nb-yellow);
+  background: var(--nb-yellow-soft);
+  border-radius: 10px;
+  padding: 8px 11px;
+}
+
+.chat-message.assistant {
+  background: var(--color-surface-soft);
+  border: 1px solid var(--color-border-soft);
+  border-radius: 10px;
+  padding: 8px 11px;
 }
 
 .chat-message.pending {
-  box-shadow: 3px 3px 0 var(--nb-pink);
   color: var(--color-text-muted);
 }
 
@@ -512,7 +632,6 @@ h3 {
 
 .chat-artifact-chip {
   background: var(--nb-purple-soft);
-  border: 2px solid #111111;
   border-radius: 6px;
   color: var(--color-text);
   display: grid;
@@ -529,6 +648,196 @@ h3 {
 
 .chat-artifact-chip strong {
   font-size: 12px;
+}
+
+/* ── Clarifying questions card ── */
+
+.clarify-card {
+  background: var(--nb-blue-soft);
+  border-radius: 6px;
+  display: grid;
+  gap: 12px;
+  padding: 10px;
+}
+
+.clarify-card.resolved {
+  opacity: 0.75;
+}
+
+.clarify-question {
+  display: grid;
+  gap: 6px;
+}
+
+.clarify-question > p {
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.clarify-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.clarify-chip {
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
+  border-radius: 999px;
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  min-height: 0;
+  padding: 4px 10px;
+}
+
+.clarify-chip.selected {
+  background: var(--nb-yellow);
+  color: var(--color-on-accent);
+}
+
+.clarify-chip:disabled {
+  box-shadow: none;
+  cursor: default;
+}
+
+.clarify-custom {
+  display: flex;
+  gap: 6px;
+}
+
+.clarify-custom input {
+  border: 2px solid var(--color-ink);
+  border-radius: 6px;
+  flex: 1;
+  font-size: 11px;
+  min-height: 0;
+  padding: 4px 8px;
+}
+
+.clarify-custom button {
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  min-height: 0;
+  padding: 4px 10px;
+}
+
+.clarify-custom button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.clarify-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.clarify-actions small {
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.clarify-submit {
+  background: var(--nb-yellow);
+  color: var(--color-on-accent);
+  border: 2px solid var(--color-ink);
+  border-radius: 6px;
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  min-height: 0;
+  padding: 6px 12px;
+}
+
+.clarify-skip {
+  background: transparent;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  min-height: 0;
+  padding: 6px 4px;
+  text-decoration: underline;
+}
+
+.clarify-submit:disabled,
+.clarify-skip:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.clarify-resolved-note {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ── Plan-mode card (Build this) ── */
+
+.plan-card {
+  background: var(--nb-blue-soft);
+  border-radius: 6px;
+  display: grid;
+  gap: 12px;
+  padding: 10px;
+}
+
+.plan-card.resolved {
+  opacity: 0.75;
+}
+
+.plan-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.plan-actions small {
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.plan-build {
+  background: var(--nb-yellow);
+  color: var(--color-on-accent);
+  border: 2px solid var(--color-ink);
+  border-radius: 6px;
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  min-height: 0;
+  padding: 6px 12px;
+}
+
+.plan-build:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.plan-resolved-note {
+  color: var(--color-text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Plan/Ask replies are multi-line plain text with "-" bullets. */
+.chat-message p.chat-multiline {
+  white-space: pre-wrap;
 }
 
 /* Generation stage trail: Circuit → Review → Reply */
@@ -560,8 +869,8 @@ h3 {
 }
 
 .stage-node::before {
-  background: #ffffff;
-  border: 2px solid #111111;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
   border-radius: 50%;
   content: "";
   height: 9px;
@@ -600,9 +909,50 @@ h3 {
 }
 
 .stage-link {
-  background: #111111;
+  background: var(--color-ink);
   height: 2px;
   width: 12px;
+}
+
+/* Live model reasoning streamed while a request is in flight. The scroll box
+   is ~4 lines tall and App pins it to the newest text; the whole window
+   disappears when the real reply lands. */
+.thinking-window {
+  border-left: 3px solid var(--color-text-subtle);
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+  padding-left: 10px;
+}
+
+.thinking-window-label {
+  align-items: center;
+  color: var(--color-text-subtle);
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  gap: 6px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.thinking-window-scroll {
+  /* ~4 lines of the 12px reasoning text below */
+  max-height: 66px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.thinking-window-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.thinking-window-scroll p {
+  color: var(--color-text-subtle);
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 0;
+  white-space: pre-wrap;
 }
 
 .typing-dots {
@@ -648,6 +998,115 @@ h3 {
   gap: 8px;
 }
 
+/* Conversation composer: the single rounded box, sitting below the flat
+   message list. The textarea and its controls blend into this one frame. */
+.chat-thread .chat-composer {
+  background: var(--color-canvas);
+  border: 2px solid var(--color-ink);
+  border-radius: 12px;
+  padding: 6px;
+}
+
+.chat-thread .chat-composer-input textarea {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  height: 72px;
+  min-height: 0;
+}
+
+/* Drop the mode dropdown and send button to the bottom edge so they clear
+   the typed text above them. */
+.chat-thread .composer-mode-menu,
+.chat-thread .composer-send-button {
+  bottom: 7px;
+}
+
+.chat-thread .chat-composer-input textarea:focus {
+  box-shadow: none;
+}
+
+/* Mode dropdown pinned inside the composer's bottom-left corner. */
+.composer-mode-menu {
+  bottom: 10px;
+  left: 10px;
+  position: absolute;
+}
+
+/* Ghost buttons: strip the house slab/shadow/press-lift treatment. */
+.composer-mode-trigger,
+.composer-mode-option {
+  box-shadow: none;
+}
+
+.composer-mode-trigger:hover:not(:disabled),
+.composer-mode-trigger:active:not(:disabled),
+.composer-mode-option:hover:not(:disabled),
+.composer-mode-option:active:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+}
+
+.composer-mode-trigger {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  font-size: 11px;
+  font-weight: 700;
+  gap: 4px;
+  min-height: 0;
+  padding: 4px 6px;
+}
+
+.composer-mode-trigger:hover:not(:disabled),
+.composer-mode-trigger[aria-expanded='true'] {
+  background: var(--color-hover-tint);
+  color: var(--color-ink);
+}
+
+.composer-mode-list {
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
+  border-radius: 6px;
+  bottom: calc(100% + 6px);
+  box-shadow: var(--shadow-xs);
+  display: grid;
+  gap: 2px;
+  left: 0;
+  list-style: none;
+  margin: 0;
+  min-width: 116px;
+  padding: 4px;
+  position: absolute;
+  z-index: 5;
+}
+
+.composer-mode-option {
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  min-height: 0;
+  padding: 6px 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.composer-mode-option:hover {
+  background: var(--color-hover-tint);
+}
+
+.composer-mode-option.selected {
+  background: var(--nb-yellow);
+  color: var(--color-on-accent);
+}
+
 .chat-composer-input {
   position: relative;
 }
@@ -655,17 +1114,18 @@ h3 {
 .chat-composer-input textarea {
   min-height: 92px;
   resize: none;
+  padding-bottom: 34px;
   padding-right: 48px;
 }
 
 .composer-send-button {
   align-items: center;
   background: var(--nb-yellow);
-  border: 2px solid #111111;
+  border: 2px solid var(--color-ink);
   border-radius: 50%;
   bottom: 10px;
   box-shadow: var(--shadow-xs);
-  color: #111111;
+  color: var(--color-on-accent);
   cursor: pointer;
   display: flex;
   height: 32px;
@@ -700,7 +1160,7 @@ h3 {
 .live-code-editor,
 .code-editor:read-only {
   background: var(--nb-pink-soft);
-  border-color: #111111;
+  border-color: var(--color-ink);
   box-shadow: 3px 3px 0 var(--nb-pink);
 }
 
@@ -731,13 +1191,15 @@ h3 {
   display: flex;
   flex-direction: column;
   min-height: calc(100vh - 48px);
+  /* Tabs sit flush at the very top of the panel — no gap above them. */
+  padding-top: 0;
 }
 
 /* ── Editor tab strip ── */
 
 .editor-launchbar {
   align-items: flex-end;
-  border-bottom: 2px solid #111111;
+  border-bottom: 2px solid var(--color-ink);
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -762,7 +1224,7 @@ h3 {
 }
 
 .editor-launchbar button:hover:not(:disabled) {
-  background: #ffffff;
+  background: var(--color-chip);
   box-shadow: none;
   color: var(--color-text);
   transform: none;
@@ -774,15 +1236,15 @@ h3 {
 }
 
 .editor-launchbar button.open {
-  background: #ffffff;
-  border-color: #111111;
+  background: var(--color-chip);
+  border-color: var(--color-ink);
   color: var(--color-text);
 }
 
 .editor-launchbar button.active {
   background: var(--nb-yellow);
-  border-color: #111111;
-  color: #111111;
+  border-color: var(--color-ink);
+  color: var(--color-on-accent);
   font-weight: 700;
 }
 
@@ -848,7 +1310,7 @@ h3 {
 }
 
 .editor-resize-handle::before {
-  background: #111111;
+  background: var(--color-ink);
   content: "";
   position: absolute;
   transition: background 120ms ease, transform 120ms ease;
@@ -865,7 +1327,7 @@ h3 {
 }
 
 .editor-resize-handle span {
-  background: #111111;
+  background: var(--color-ink);
   border-radius: 999px;
   display: block;
   position: relative;
@@ -921,11 +1383,12 @@ h3 {
   min-height: 300px;
 }
 
+/* The editor window has no frame of its own — the surrounding .main-panel is
+   the single box. The titlebar + section border-bottoms act as dividers, so
+   the schematic no longer reads as a box-inside-a-box-inside-a-box. */
 .editor-window {
   background: var(--color-canvas);
-  border: 2px solid #111111;
   border-radius: 10px;
-  box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -933,31 +1396,9 @@ h3 {
   overflow: hidden;
 }
 
-/* The focused window's shadow turns blue — the brutalist "active" tell. */
+/* The focused window is signalled by its titlebar tint (below), not a frame. */
 .editor-window.active {
-  box-shadow: 5px 5px 0 var(--nb-blue);
-}
-
-.editor-window-titlebar {
-  align-items: center;
-  background: var(--color-surface);
-  border-bottom: 2px solid #111111;
-  display: flex;
-  flex: 0 0 auto;
-  justify-content: space-between;
-  min-height: 34px;
-  padding: 0 5px 0 12px;
-}
-
-.editor-window.active .editor-window-titlebar {
-  background: var(--nb-blue-soft);
-}
-
-.editor-window-titlebar strong {
-  font-size: 12.5px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  box-shadow: none;
 }
 
 .editor-window-controls {
@@ -984,6 +1425,7 @@ h3 {
 .editor-window-control:hover:not(:disabled) {
   background: var(--nb-yellow);
   box-shadow: none;
+  color: var(--color-on-accent);
   transform: none;
 }
 
@@ -1009,6 +1451,13 @@ h3 {
 
 .code-window-body {
   overflow: auto;
+}
+
+/* Canvas views (realistic schematic) fill the window edge-to-edge — the inner
+   view supplies its own section chrome, so extra body padding would just
+   reintroduce a visible gap/box between frames. */
+.canvas-window-body {
+  padding: 0;
 }
 
 .editor-window-code {
@@ -1068,8 +1517,8 @@ h3 {
 }
 
 .component-value-editor input {
-  background: #ffffff;
-  border: 2px solid #111111;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
   border-radius: 6px;
   color: var(--color-text);
   font-family: var(--font-mono);
@@ -1123,7 +1572,7 @@ pre {
 
 .simulation-ok {
   background: var(--color-success-bg);
-  border: 2px solid #111111;
+  border: 2px solid var(--color-ink);
   border-radius: 8px;
   color: var(--color-text);
   font-size: 14px;
@@ -1147,7 +1596,7 @@ pre {
   align-items: center;
   background: var(--nb-yellow);
   border-radius: 999px;
-  color: #111111;
+  color: var(--color-on-accent);
   display: inline-flex;
   font-size: 17px;
   justify-content: center;
@@ -1192,7 +1641,7 @@ pre {
 
 .waveform-page-header {
   background: var(--color-panel);
-  border: 2px solid #111111;
+  border: 2px solid var(--color-ink);
   border-radius: 12px;
   box-shadow: var(--shadow-md);
   padding: 22px;
@@ -1218,7 +1667,7 @@ pre {
 
 .waveform-card {
   background: var(--color-chart-bg);
-  border: 2px solid #111111;
+  border: 2px solid var(--color-ink);
   border-radius: 10px;
   margin-top: 18px;
   overflow: hidden;
@@ -1227,7 +1676,7 @@ pre {
 
 .waveform-toolbar {
   background: var(--color-surface);
-  border-bottom: 2px solid #111111;
+  border-bottom: 2px solid var(--color-ink);
   display: grid;
   gap: 10px;
   margin: -12px -12px 12px;
@@ -1251,8 +1700,8 @@ pre {
 
 .trace-picker label {
   align-items: center;
-  background: #ffffff;
-  border: 2px solid #111111;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
   border-radius: 999px;
   box-shadow: var(--shadow-xs);
   color: var(--color-text);
@@ -1294,12 +1743,12 @@ pre {
 }
 
 .axis-line {
-  stroke: #111111;
+  stroke: var(--color-ink);
   stroke-width: 2;
 }
 
 .trace-picker i {
-  border: 1px solid #111111;
+  border: 1px solid var(--color-ink);
   border-radius: 999px;
   display: inline-block;
   height: 10px;
@@ -1313,9 +1762,9 @@ pre {
 }
 
 .cursor-box {
-  fill: #ffffff;
+  fill: var(--color-chip);
   opacity: 0.97;
-  stroke: #111111;
+  stroke: var(--color-ink);
   stroke-width: 1.5;
 }
 
@@ -1338,7 +1787,7 @@ pre {
 
 .diagram-card {
   background: var(--color-diagram-bg);
-  border: 2px solid #111111;
+  border: 2px solid var(--color-ink);
   border-radius: 10px;
   margin-top: 18px;
   overflow: auto;
@@ -1380,6 +1829,7 @@ pre {
 
 .active-tool {
   background: var(--nb-yellow);
+  color: var(--color-on-accent);
 }
 
 .diagram-card svg {
@@ -1412,7 +1862,7 @@ pre {
 .diagram-wire,
 .diagram-symbol {
   fill: none;
-  stroke: #111111;
+  stroke: var(--color-ink);
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
@@ -1443,26 +1893,26 @@ pre {
 
 .diagram-bridge-arc {
   fill: none;
-  stroke: #111111;
+  stroke: var(--color-ink);
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
 }
 
 .diagram-fill {
-  fill: #ffffff;
-  stroke: #111111;
+  fill: var(--color-chip);
+  stroke: var(--color-ink);
   stroke-linejoin: round;
   stroke-width: 2;
 }
 
 .diagram-node {
-  fill: #111111;
+  fill: var(--color-ink);
 }
 
 .diagram-net {
   fill: var(--color-surface);
-  stroke: #111111;
+  stroke: var(--color-ink);
 }
 
 .diagram-slot-rect {
@@ -1490,13 +1940,13 @@ pre {
 
 .diagram-ground {
   fill: none;
-  stroke: #111111;
+  stroke: var(--color-ink);
   stroke-linecap: round;
   stroke-width: 2;
 }
 
 .diagram-text {
-  fill: #111111;
+  fill: var(--color-ink);
   font-size: 14px;
   font-weight: 700;
   pointer-events: none;
@@ -1555,7 +2005,7 @@ pre {
 }
 
 .terminal-dot {
-  fill: #ffffff;
+  fill: var(--color-chip);
   opacity: 0;
   stroke: var(--nb-blue);
   stroke-width: 2;
@@ -1599,7 +2049,7 @@ pre {
 
 .code-editor {
   background: var(--color-code);
-  border: 2px solid #111111;
+  border: 2px solid var(--color-ink);
   border-radius: 8px;
   color: var(--color-text);
   font-family: var(--font-mono);
@@ -1626,7 +2076,7 @@ pre {
 .netlist-review-button {
   border-width: 2px;
   box-shadow: var(--shadow-xs);
-  color: #111111;
+  color: var(--color-ink);
   font-size: 14px;
   font-weight: 800;
   height: 26px;
@@ -1665,7 +2115,7 @@ pre {
 }
 
 .netlist-diff .diff-line.changed code {
-  color: #111111;
+  color: var(--color-on-accent);
 }
 
 /* ── Responsive ── */

@@ -82,6 +82,27 @@ export interface CurrentDesign {
   kicadNetlist?: string;
 }
 
+// ── Clarifying questions ──
+
+export interface ClarifyQuestion {
+  id: string;
+  question: string;
+  options: string[];
+}
+
+export interface ClarifyResult {
+  questions: ClarifyQuestion[];
+}
+
+// ── Plan / Ask assist modes ──
+
+export type AssistMode = 'plan' | 'ask';
+
+export interface AssistResult {
+  mode: AssistMode;
+  reply: string;
+}
+
 // ── AI provider ──
 
 export interface ProviderConfig {
@@ -91,36 +112,60 @@ export interface ProviderConfig {
   apiKey: string;
 }
 
+// A functional design-rule finding from the shared topology checker
+// (src/core/topologyRules.js). Error-severity violations gate the generation
+// retry loop; whatever survives is surfaced in the UI, never fatal.
+export interface RuleViolation {
+  id: string;
+  severity: 'error' | 'warning';
+  refs: string[];
+  nets: string[];
+  message: string;
+  fix: string;
+  autoFixed?: boolean;
+}
+
+export interface GenerationMeta {
+  attempts: number;
+  // True when the retry budget ran out with error-severity violations left:
+  // the best-scoring candidate was accepted and its issues surfaced.
+  degraded: boolean;
+}
+
 export interface ParsedCircuitResponse {
   reply: string;
   circuit: Circuit;
-  /** Firmware source for the circuit's MCU board; '' when the circuit has none. */
+  spice: string;
+  // Firmware source for the circuit's MCU board; '' when the circuit has none.
   code: string;
+}
+
+// What the generation retry loop resolves to: the parsed response plus the
+// topology-rule findings and retry metadata.
+export interface GeneratedCircuit extends ParsedCircuitResponse {
+  issues: RuleViolation[];
+  generation: GenerationMeta;
+}
+
+export interface StreamState {
+  attempt: number;
+  correcting: boolean;
+}
+
+// Live reasoning tokens (e.g. GLM reasoning_content) forwarded to the client
+// while a request is in flight; never part of the persisted result.
+export type ThinkingCallback = (delta: string) => void;
+
+export interface OpenAiStreamHandlers {
+  onThinking?: ThinkingCallback;
+  // Called with the cumulative assistant text after each content chunk.
+  onContent?: (content: string) => void;
 }
 
 export interface CorrectionContext {
   content: string;
   error: string;
 }
-
-// ── Multi-stage pipeline ──
-
-export type PipelineStageName = 'circuit' | 'reviewing' | 'reply';
-
-export interface PipelineStageEvent {
-  type: 'stage';
-  stage: PipelineStageName;
-}
-
-export interface PipelineContentEvent {
-  type: 'content';
-  stage: 'circuit';
-  content: string;
-  attempt: number;
-  correcting: boolean;
-}
-
-export type PipelineEvent = PipelineStageEvent | PipelineContentEvent;
 
 // ── Diagram & response ──
 
@@ -170,6 +215,8 @@ export interface CircuitResponse {
   reply?: string;
   code?: string;
   memory?: ChatMemory;
+  issues?: RuleViolation[];
+  generation?: GenerationMeta;
   contextDiagnostics?: Record<string, unknown>;
 }
 
@@ -197,6 +244,17 @@ export interface SimulationResult {
   warnings: string[];
   rawOutput: string;
   waveform: Waveform;
+}
+
+// ── Firmware compilation ──
+
+export interface CompileResult {
+  ok: boolean;
+  // Intel HEX text of the compiled sketch ('' on failure).
+  hex: string;
+  errors: string[];
+  warnings: string[];
+  rawOutput: string;
 }
 
 // ── Auth ──
@@ -239,3 +297,34 @@ export interface StreamingSpiceResult {
   title: string;
   spice: string;
 }
+
+export interface OllamaRequestBody {
+  model: string;
+  stream: boolean;
+  format: Record<string, unknown>;
+  options: {
+    num_ctx: number;
+    num_predict: number;
+    temperature: number;
+  };
+  messages: Array<{ role: string; content: string }>;
+}
+
+// ── Multi-stage pipeline ──
+
+export type PipelineStageName = 'circuit' | 'reviewing' | 'reply';
+
+export interface PipelineStageEvent {
+  type: 'stage';
+  stage: PipelineStageName;
+}
+
+export interface PipelineContentEvent {
+  type: 'content';
+  stage: 'circuit';
+  content: string;
+  attempt: number;
+  correcting: boolean;
+}
+
+export type PipelineEvent = PipelineStageEvent | PipelineContentEvent;
