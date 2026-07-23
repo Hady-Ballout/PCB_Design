@@ -46,19 +46,21 @@ plain-text reply, no circuit, no SPICE, and deliberately **no `updateChatMemory`
 `{type: 'error', code: 'assist_failed', error}` (or plain JSON pre-stream) and the client
 surfaces them as a chat message without touching the design.
 
-`/api/generate-circuit` streams `{type: 'thinking', delta, attempt}` and
-`{type: 'spice', provisional: true, ...}` events as the AI
-response arrives (via `streamCircuitWithOllama`'s callbacks, spice deduped by
-`${attempt}:${spice}`; an attempt bump tells the client to reset the thinking window for
-the correction retry), then a final `{type: 'complete', data: {...}}` event containing the
-reconciled circuit, SPICE, reply, firmware `code` (`''` when the circuit has no MCU board),
-updated chat memory, plus the generation-quality fields:
+`/api/generate-circuit` runs the **3-stage pipeline** (`runCircuitPipeline` in
+`server/ai/circuitPipeline.ts`): it streams `{type: 'stage', stage}` transitions
+(`circuit` → `reviewing` → `reply`, rendered as ChatPanel's stage trail) and
+`{type: 'spice', provisional: true, ...}` events as the stage-1 response arrives (spice
+deduped by `${attempt}:${spice}`), then a final `{type: 'complete', data: {...}}` event
+containing the reconciled circuit, SPICE, reply, firmware `code` (`''` when the circuit
+has no MCU board), updated chat memory, plus:
 
 - `issues: RuleViolation[]` — topology-rule findings (`{id, severity, refs, nets, message,
-  fix, autoFixed}`) re-checked on the reconciled circuit, with any `autoFixed` entries from
-  the retry loop preserved.
-- `generation: {attempts, degraded}` — how many attempts ran and whether the retry budget
-  expired with error violations left (best candidate accepted, issues surfaced).
+  fix, autoFixed}`) checked on the reconciled circuit (the pipeline's reviewer stage has
+  already corrected what it could; survivors are surfaced in the UI, never fatal).
+
+Generation emits no `thinking` events (the pipeline streams stage-1 content as provisional
+SPICE instead); the thinking window is fed by `/api/clarify-circuit` and
+`/api/assist-circuit`, which do stream `{type: 'thinking', delta}`.
 
 Errors become `{type: 'error'}` if the stream already started, or a plain 500 JSON body if
 it hasn't — but since the retry loop accepts the best parsed candidate rather than failing,
@@ -78,6 +80,15 @@ a hard error only occurs when all `MAX_GENERATION_ATTEMPTS` (3) attempts failed 
 
 ## `server/ai`
 
+- **`circuitPipeline.ts`** — the 3-stage circuit generation pipeline that drives
+  `/api/generate-circuit`: stage 1 generates the circuit JSON (streamed as provisional
+  SPICE), stage 2 is a reviewer model that checks/corrects it and writes MCU firmware
+  (skippable via `AI_PIPELINE_REVIEWER=0`; reviewer and reply failures are non-fatal),
+  stage 3 writes the conversational reply. Each stage picks its model from
+  `AI_MODEL_CIRCUIT` / `AI_MODEL_REVIEWER` / `AI_MODEL_REPLY`, falling back to `AI_MODEL`
+  (or `OLLAMA_MODEL`), so one free-tier rate limit isn't shared across the whole request.
+  Its prompts and `CIRCUIT_SCHEMA` derive the allowed kinds and MCU pin contracts from
+  `src/core/componentKinds.js`, so registry additions reach the model automatically.
 - **`ollamaProvider.ts`** (~730 ln, largest backend file) — owns the system prompt that
   defines the circuit JSON contract (SPICE-safe ref prefixes per component kind, ground
   node `"0"`, `LM358` as the only opamp model, voltage_source vs signal_source rules),
@@ -95,6 +106,10 @@ a hard error only occurs when all `MAX_GENERATION_ATTEMPTS` (3) attempts failed 
   `buildOllamaRequestBody`, and `generateCircuitWithOllama`/`streamCircuitWithOllama`
   (both resolve to `GeneratedCircuit` = parsed response + `issues` + `generation`;
   `streamCircuitWithOllama` also takes `onThinking(delta, state)` alongside `onContent`).
+  Since the pipeline took over `/api/generate-circuit`, this file's single-shot
+  generators are unused by routes; it now chiefly serves as the shared provider-helper
+  surface (`providerConfig`, `ollamaUrl`, `streamOpenAiCompatibleContent`, …) imported by
+  `clarifyProvider.ts` and `assistProvider.ts`.
   Also supports an OpenAI-compatible provider path (`AI_PROVIDER`, e.g. Z.ai/GLM) as an
   alternative to Ollama, including `streamOpenAiCompatibleContent` — an SSE streaming
   call that forwards `delta.reasoning_content` chunks to `onThinking` and cumulative

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "dev:web": "vite --host 127.0.0.1 --port 5173 --strictPort --configLoader native",
+    "dev:web": "vite --host 127.0.0.1 --port 5174 --strictPort --configLoader native",
     "dev:api": "tsx server/index.ts",
     "build": "vite build --configLoader native",
     "build:server": "tsc -p tsconfig.server.json && node -e \"require('fs').cpSync('src/core','dist/server/src/core',{recursive:true})\"",

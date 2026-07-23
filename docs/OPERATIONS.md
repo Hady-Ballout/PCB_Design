@@ -73,9 +73,12 @@ failing opaquely; the rest of the app (including non-firmware simulation) is una
 
 ## Deployment
 
-- **`Dockerfile`** — `node:20-slim` + `apt-get install ngspice`, installs prod deps only,
-  copies `server/` and `src/core/` (only the pieces the API needs — no frontend build step
-  inside this image), runs `node server/index.js` on port 8787 with `HOST=0.0.0.0`.
+- **`Dockerfile`** — `node:20-slim` + `apt-get install ngspice`. Installs all deps
+  (devDependencies included, needed for `tsc`), copies `server/` and `src/core/`, runs
+  `npm run build:server` (compiles the TS server to `dist/server` and copies `src/core`
+  beside it), then `npm prune --omit=dev` and runs the compiled
+  `dist/server/server/index.js` on port 8787 with `HOST=0.0.0.0`. No frontend build step
+  inside this image.
 - **`firebase.json`** — hosts the static `dist/` build (Vite frontend) with an SPA rewrite
   (`**` -> `/index.html`). Deployed via `.github/workflows/firebase-deploy.yml`.
 - So the frontend (Firebase Hosting, static) and API (Docker container, wherever it's run)

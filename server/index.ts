@@ -27,7 +27,7 @@ const host = process.env.HOST || '127.0.0.1';
 // back whichever configured origin matches the request (never the raw list —
 // a comma-joined value is invalid and browsers reject it, which surfaces to
 // the user as a bare "Network error").
-const corsOrigins = (process.env.CORS_ORIGIN || 'http://127.0.0.1:5173')
+const corsOrigins = (process.env.CORS_ORIGIN || 'http://127.0.0.1:5174')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);

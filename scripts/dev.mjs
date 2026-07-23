@@ -6,7 +6,7 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const viteBin = resolve(projectRoot, 'node_modules', 'vite', 'bin', 'vite.js');
 const tsxBin = resolve(projectRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 const webHost = process.env.WEB_HOST || '127.0.0.1';
-const webPort = process.env.WEB_PORT || '5173';
+const webPort = process.env.WEB_PORT || '5174';
 const spawnOptions = {
   cwd: projectRoot,
   stdio: 'inherit',
