@@ -94,6 +94,11 @@ failing opaquely; the rest of the app (including non-firmware simulation) is una
 
 ## Deployment
 
+- **Flow:** all work lands on `main`; `Deployment` is kept as a fast-forward of `main`
+  (`git checkout Deployment && git merge --ff-only main && git push`). Pushing
+  `Deployment` is what deploys: it triggers the Firebase Hosting workflow (frontend) and
+  Render's auto-deploy (backend). Never let the branches diverge — as of the 2026-07
+  reconciliation merge they carry identical content.
 - **`Dockerfile`** — `node:20-slim` + `apt-get install ngspice`. Installs all deps
   (devDependencies included, needed for `tsc`), copies `server/` and `src/core/`, runs
   `npm run build:server` (compiles the TS server to `dist/server` and copies `src/core`
