@@ -31,7 +31,7 @@ export async function getBillingUser(id: number): Promise<BillingUser | null> {
     'SELECT id, plan, plan_status, plan_period_end, stripe_customer_id, usage_generations, usage_assists, usage_month FROM users WHERE id = $1',
     [id]
   );
-  const row = result.rows[0] as BillingRow | undefined;
+  const row = result.rows[0] as unknown as BillingRow | undefined;
   if (!row) return null;
   return {
     id: row.id,
