@@ -41,6 +41,11 @@ aren't tracked content-wise beyond `.env.production/env.production`.
 
 ## Stripe billing
 
+**Dormant since 2026-07-25:** the frontend auth/billing UI was removed (landing page +
+Start button, no login), and the API accepts anonymous requests. The server-side billing
+code, routes, and env vars below are intact and waiting; re-enabling means restoring the
+frontend from git tag `pre-frontend-auth-removal` plus the dashboard/env setup below.
+
 Sandbox first: build/test everything against test-mode keys and card `4242 4242 4242 4242`.
 
 **Dashboard setup (once per mode):** two Products (Impedo Pro $15/mo + $150/yr, Impedo

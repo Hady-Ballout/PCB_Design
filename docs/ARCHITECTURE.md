@@ -10,7 +10,7 @@ src/
                routing.js, generationStream.js. The integration point that
                wires feature chunks together.
   features/
-    auth/      auth.jsx + auth.css — self-contained, talks to /api/auth/*
+    landing/   LandingPage.jsx + landing.css — public landing page + app chrome styles
     chat/      chatStore.js, chatFormat.js, ChatPanel.jsx
     schematic/ CircuitDiagram.jsx, symbols.jsx, geometry.js
     blockSchematic/ BlockSchematic.jsx (React Flow block view) + model/css

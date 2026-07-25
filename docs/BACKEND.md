@@ -15,20 +15,22 @@ A single `createServer` callback does manual `request.url`/`request.method` matc
 | `/api/auth/login` | POST | no | returns a JWT |
 | `/api/auth/verify` | POST | no | consumes the email verification token |
 | `/api/auth/me` | GET | via header | |
-| `/api/clarify-circuit` | POST | **yes** | streams NDJSON, pre-generation question round |
-| `/api/assist-circuit` | POST | **yes** | streams NDJSON, Plan/Ask conversational reply |
-| `/api/generate-circuit` | POST | **yes** (`Authorization: Bearer <jwt>`) | streams NDJSON, consumes the **generation** quota |
-| `/api/simulate-circuit` | POST | **yes** | runs Ngspice (unmetered) |
+| `/api/clarify-circuit` | POST | optional | streams NDJSON, pre-generation question round |
+| `/api/assist-circuit` | POST | optional | streams NDJSON, Plan/Ask conversational reply |
+| `/api/generate-circuit` | POST | optional | streams NDJSON; consumes the **generation** quota only with a JWT |
+| `/api/simulate-circuit` | POST | optional | runs Ngspice (unmetered) |
 | `/api/stripe/webhook` | POST | Stripe signature | raw body; registered **above** the JWT gate |
 | `/api/billing/checkout` | POST | **yes** | `{plan, interval}` → hosted Checkout URL |
 | `/api/billing/portal` | POST | **yes** | hosted Customer Portal URL |
 | `/api/billing/status` | GET | **yes** | `{plan, planStatus, periodEnd, usage, limits}` |
 
-Every route below `/api/auth/*` (except the Stripe webhook, which is authenticated by its
-signature) requires a valid JWT (`getUser` via `verifyJwt`); there is no anonymous circuit
-generation path. `/api/clarify-circuit` and `/api/assist-circuit` consume the shared
-**assist** quota meter (enforced for Free-tier users only). Quota exhaustion returns HTTP
-`402 {code: 'quota_exceeded', plan, meter, limit, usage}` before any stream starts.
+**Auth is optional since 2026-07-25** (the frontend ships without login): `getUser` still
+parses a `Bearer` JWT when present, but anonymous requests pass straight through to the AI
+and simulation endpoints. Quotas are only checked/consumed for token-bearing requests, and
+the three `/api/billing/*` routes 401 individually without a user. The auth/billing modules
+below are otherwise unchanged and dormant, ready for the login UI's return. With a JWT,
+quota exhaustion still returns HTTP `402 {code: 'quota_exceeded', plan, meter, limit,
+usage}` before any stream starts.
 
 All three AI chat endpoints stream NDJSON and share a `{type: 'thinking', delta}` event:
 live model reasoning tokens (GLM `reasoning_content` via the streaming SSE call in
