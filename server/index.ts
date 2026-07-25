@@ -227,13 +227,15 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
     return;
   }
 
+  // Auth is optional while the frontend ships without login: anonymous
+  // requests pass through, and quotas only apply to token-bearing requests.
   const user = getUser(request);
-  if (!user) {
-    sendJson(response, 401, { error: 'Authentication required.' });
-    return;
-  }
 
   if (request.url === '/api/billing/checkout' && request.method === 'POST') {
+    if (!user) {
+      sendJson(response, 401, { error: 'Authentication required.' });
+      return;
+    }
     try {
       const body = await readJsonBody(request);
       const result = await handleCreateCheckout(user, body);
@@ -245,6 +247,10 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
   }
 
   if (request.url === '/api/billing/portal' && request.method === 'POST') {
+    if (!user) {
+      sendJson(response, 401, { error: 'Authentication required.' });
+      return;
+    }
     try {
       const result = await handleCreatePortal(user);
       sendJson(response, result.status, result.body);
@@ -255,6 +261,10 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
   }
 
   if (request.url === '/api/billing/status' && request.method === 'GET') {
+    if (!user) {
+      sendJson(response, 401, { error: 'Authentication required.' });
+      return;
+    }
     try {
       const result = await handleBillingStatus(user);
       sendJson(response, result.status, result.body);
@@ -273,14 +283,16 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         return;
       }
 
-      try {
-        await checkAndConsumeQuota(user.id, 'assist');
-      } catch (quotaError) {
-        if (quotaError instanceof QuotaError) {
-          sendQuotaExceeded(response, quotaError);
-          return;
+      if (user) {
+        try {
+          await checkAndConsumeQuota(user.id, 'assist');
+        } catch (quotaError) {
+          if (quotaError instanceof QuotaError) {
+            sendQuotaExceeded(response, quotaError);
+            return;
+          }
+          throw quotaError;
         }
-        throw quotaError;
       }
 
       const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
@@ -317,14 +329,16 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         return;
       }
 
-      try {
-        await checkAndConsumeQuota(user.id, 'assist');
-      } catch (quotaError) {
-        if (quotaError instanceof QuotaError) {
-          sendQuotaExceeded(response, quotaError);
-          return;
+      if (user) {
+        try {
+          await checkAndConsumeQuota(user.id, 'assist');
+        } catch (quotaError) {
+          if (quotaError instanceof QuotaError) {
+            sendQuotaExceeded(response, quotaError);
+            return;
+          }
+          throw quotaError;
         }
-        throw quotaError;
       }
 
       const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
@@ -357,14 +371,16 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         return;
       }
 
-      try {
-        await checkAndConsumeQuota(user.id, 'generation');
-      } catch (quotaError) {
-        if (quotaError instanceof QuotaError) {
-          sendQuotaExceeded(response, quotaError);
-          return;
+      if (user) {
+        try {
+          await checkAndConsumeQuota(user.id, 'generation');
+        } catch (quotaError) {
+          if (quotaError instanceof QuotaError) {
+            sendQuotaExceeded(response, quotaError);
+            return;
+          }
+          throw quotaError;
         }
-        throw quotaError;
       }
 
       const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
