@@ -1,0 +1,503 @@
+/* ══════════════════════════════════════════════════════════════════
+   PCB Pilot — landing page + app chrome (buttons, user bar,
+   floating toggle). Neo Brutalism: flat cream paper, dot grid,
+   floating bordered shapes, sticker wordmark, hard-shadow cards.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Flat pattern backdrop (replaces the old shader) ── */
+
+.page-backdrop {
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: fixed;
+  z-index: 0;
+}
+
+.page-backdrop-grid {
+  background-image: radial-gradient(var(--color-dot-grid-strong) 1.5px, transparent 1.5px);
+  background-size: 24px 24px;
+  inset: 0;
+  position: absolute;
+}
+
+/* Decorative bordered shapes floating on the paper. */
+.page-backdrop-shape {
+  border: 3px solid var(--color-ink);
+  position: absolute;
+}
+
+.page-backdrop-shape.shape-circle {
+  background: var(--nb-pink);
+  border-radius: 50%;
+  height: 120px;
+  left: max(2vw, 16px);
+  top: 12vh;
+  width: 120px;
+}
+
+.page-backdrop-shape.shape-square {
+  background: var(--nb-yellow);
+  border-radius: 14px;
+  height: 96px;
+  right: max(4vw, 20px);
+  top: 20vh;
+  transform: rotate(12deg);
+  width: 96px;
+}
+
+.page-backdrop-shape.shape-pill {
+  background: var(--nb-blue);
+  border-radius: 999px;
+  bottom: 10vh;
+  height: 44px;
+  right: 12vw;
+  transform: rotate(-8deg);
+  width: 150px;
+}
+
+@media (max-width: 900px) {
+  .page-backdrop-shape {
+    display: none;
+  }
+}
+
+/* ── Home page ── */
+
+.home-page {
+  align-items: center;
+  background: var(--color-page);
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 40px 20px;
+  position: relative;
+}
+
+.home-page > *:not(.page-backdrop) {
+  position: relative;
+  z-index: 1;
+}
+
+.home-hero {
+  margin-bottom: 64px;
+  max-width: 680px;
+  text-align: center;
+}
+
+.home-eyebrow {
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
+  border-radius: 999px;
+  box-shadow: 3px 3px 0 var(--color-shadow);
+  color: var(--color-ink);
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  margin: 0 0 22px;
+  padding: 8px 16px;
+  text-transform: uppercase;
+}
+
+/* The wordmark is a sticker: yellow slab, black border, hard shadow,
+   slightly rotated off the grid. */
+.home-title {
+  background: var(--nb-yellow);
+  border: 4px solid var(--color-ink);
+  border-radius: 16px;
+  box-shadow: 10px 10px 0 var(--color-shadow);
+  color: var(--color-on-accent);
+  display: inline-block;
+  font-family: var(--font-display);
+  font-size: clamp(2.4rem, 6.5vw, 4rem);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+  margin: 0 0 26px;
+  padding: 18px 34px;
+  transform: rotate(-1.5deg);
+}
+
+.home-subtitle {
+  color: var(--color-text);
+  font-size: 1.12rem;
+  font-weight: 500;
+  line-height: 1.65;
+  margin: 0 auto 32px;
+  max-width: 520px;
+}
+
+.home-actions {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+}
+
+.home-pipeline {
+  align-items: stretch;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: center;
+  max-width: 980px;
+}
+
+.pipeline-step {
+  background: var(--color-chip);
+  border: 3px solid var(--color-ink);
+  border-radius: 14px;
+  box-shadow: 6px 6px 0 var(--color-shadow);
+  padding: 24px 20px;
+  position: relative;
+  text-align: center;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+  width: 195px;
+}
+
+.pipeline-step:hover {
+  box-shadow: 9px 9px 0 var(--color-shadow);
+  transform: translate(-3px, -3px);
+}
+
+.pipeline-step h3 {
+  color: var(--color-ink);
+  font-size: 1rem;
+  font-weight: 800;
+  margin: 10px 0 6px;
+  text-transform: uppercase;
+}
+
+.pipeline-step p {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.pipeline-number {
+  align-items: center;
+  border: 2px solid var(--color-ink);
+  border-radius: 50%;
+  box-shadow: 2px 2px 0 var(--color-shadow);
+  color: var(--color-on-accent);
+  display: inline-flex;
+  font-size: 0.95rem;
+  font-weight: 800;
+  height: 36px;
+  justify-content: center;
+  width: 36px;
+}
+
+/* Each step gets its own flat accent. */
+.pipeline-step:nth-child(1) .pipeline-number {
+  background: var(--nb-yellow);
+}
+
+.pipeline-step:nth-child(3) .pipeline-number {
+  background: var(--nb-blue);
+  color: #ffffff;
+}
+
+.pipeline-step:nth-child(5) .pipeline-number {
+  background: var(--nb-pink);
+}
+
+.pipeline-step:nth-child(7) .pipeline-number {
+  background: var(--nb-purple);
+  color: #ffffff;
+}
+
+.pipeline-arrow {
+  align-self: center;
+  color: var(--color-ink);
+  font-size: 1.6rem;
+  font-weight: 800;
+  margin-top: 10px;
+}
+
+/* ── Home use-case showcase ── */
+
+.home-cases {
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+  margin-top: 110px;
+  max-width: 880px;
+  width: 100%;
+}
+
+.home-cases-header {
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.home-cases-title {
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 3.5vw, 2.1rem);
+  font-weight: 400;
+  margin: 0 0 14px;
+}
+
+.home-cases-subtitle {
+  color: var(--color-text-muted);
+  font-size: 1rem;
+  line-height: 1.6;
+  margin: 0 auto;
+  max-width: 540px;
+}
+
+.case-card {
+  align-items: center;
+  background: var(--color-chip);
+  border: 3px solid var(--color-ink);
+  border-radius: 16px;
+  box-shadow: 8px 8px 0 var(--color-shadow);
+  display: flex;
+  gap: 30px;
+  padding: 28px;
+}
+
+/* Alternate the illustration side so the page zig-zags as you scroll. */
+.case-card:nth-of-type(even) {
+  flex-direction: row-reverse;
+}
+
+.case-visual {
+  align-items: center;
+  aspect-ratio: 4 / 3;
+  background: var(--color-canvas);
+  border: 3px solid var(--color-ink);
+  border-radius: 12px;
+  display: flex;
+  flex: 0 0 46%;
+  justify-content: center;
+  overflow: hidden;
+  padding: 12px;
+}
+
+/* The real breadboard SVG fits inside the box via its own preserveAspectRatio
+   (meet), so boards of any aspect ratio stay centered and fully visible. */
+.case-art {
+  display: block;
+  height: 100%;
+  width: 100%;
+}
+
+.case-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.case-body h3 {
+  color: var(--color-ink);
+  font-size: 1.2rem;
+  font-weight: 800;
+  line-height: 1.3;
+  margin: 12px 0 10px;
+}
+
+.case-body > p {
+  color: var(--color-text-muted);
+  font-size: 0.92rem;
+  line-height: 1.6;
+  margin: 0 0 16px;
+}
+
+.case-tag {
+  border: 2px solid var(--color-ink);
+  border-radius: 999px;
+  box-shadow: 2px 2px 0 var(--color-shadow);
+  color: var(--color-on-accent);
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  padding: 5px 12px;
+  text-transform: uppercase;
+}
+
+.case-accent-pink .case-tag {
+  background: var(--nb-pink);
+}
+
+.case-accent-blue .case-tag {
+  background: var(--nb-blue);
+  color: #ffffff;
+}
+
+.case-accent-purple .case-tag {
+  background: var(--nb-purple);
+  color: #ffffff;
+}
+
+/* The prompt that produces this build, styled as a typed-in chip. */
+.case-prompt {
+  background: var(--color-canvas);
+  border: 2px dashed var(--color-ink);
+  border-radius: 8px;
+  color: var(--color-ink);
+  display: inline-block;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin: 0;
+  padding: 8px 12px;
+}
+
+/* Scroll reveal — the hidden state only exists for motion-friendly users,
+   so reduced-motion (and no-JS) visitors always see the cards. */
+@media (prefers-reduced-motion: no-preference) {
+  .case-card,
+  .home-cases-header {
+    opacity: 0;
+    transform: translateY(34px);
+    transition: opacity 550ms ease, transform 550ms cubic-bezier(0.22, 0.9, 0.3, 1);
+  }
+
+  .case-card.is-revealed,
+  .home-cases-header.is-revealed {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Shared buttons ── */
+
+.btn {
+  border: 2px solid var(--color-ink);
+  border-radius: 8px;
+  box-shadow: 4px 4px 0 var(--color-shadow);
+  color: var(--color-ink);
+  cursor: pointer;
+  display: inline-block;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  padding: 11px 26px;
+  text-decoration: none;
+  transition: transform 100ms ease, box-shadow 100ms ease, background 140ms ease;
+}
+
+.btn:hover {
+  box-shadow: 6px 6px 0 var(--color-shadow);
+  transform: translate(-2px, -2px);
+}
+
+.btn:active {
+  box-shadow: 1px 1px 0 var(--color-shadow);
+  transform: translate(3px, 3px);
+}
+
+.btn-primary {
+  background: var(--nb-yellow);
+  color: var(--color-on-accent);
+}
+
+.btn-primary:disabled {
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.5;
+  transform: none;
+}
+
+.btn-outline {
+  background: var(--color-chip);
+}
+
+.btn-outline:hover {
+  background: var(--nb-blue-soft);
+}
+
+/* ── User bar ── */
+
+.user-bar {
+  align-items: center;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
+  border-radius: 999px;
+  box-shadow: var(--shadow-xs);
+  color: var(--color-text-muted);
+  display: flex;
+  font-size: 0.8rem;
+  font-weight: 600;
+  gap: 12px;
+  padding: 4px 6px 4px 14px;
+}
+
+.user-bar button {
+  background: var(--color-surface);
+  border: 2px solid var(--color-ink);
+  border-radius: 999px;
+  box-shadow: none;
+  color: var(--color-ink);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  min-height: 0;
+  padding: 4px 10px;
+}
+
+.user-bar button:hover:not(:disabled) {
+  background: var(--nb-yellow);
+  box-shadow: none;
+  color: var(--color-on-accent);
+  transform: none;
+}
+
+.user-bar button:active:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+}
+
+/* Floating user bar inside the workspace shell */
+.app-user-bar {
+  position: fixed;
+  right: 16px;
+  top: 12px;
+  z-index: 50;
+}
+
+/* ── Mobile ── */
+
+@media (max-width: 640px) {
+  .home-title {
+    font-size: 2rem;
+    padding: 14px 22px;
+  }
+
+  .home-pipeline {
+    align-items: center;
+    flex-direction: column;
+  }
+
+  .pipeline-arrow {
+    transform: rotate(90deg);
+  }
+
+  .home-cases {
+    margin-top: 70px;
+  }
+
+  .case-card,
+  .case-card:nth-of-type(even) {
+    flex-direction: column;
+    gap: 20px;
+    padding: 20px;
+  }
+
+  .case-visual {
+    flex: none;
+    width: 100%;
+  }
+
+  .app-user-bar {
+    justify-content: flex-end;
+    margin-bottom: 12px;
+    position: static;
+  }
+}
