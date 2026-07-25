@@ -1,5 +1,7 @@
 export class DiagramLayoutError extends Error {
-  violations?: Array<{ type: string; [key: string]: unknown }>;
+  code: string;
+  violations: Array<{ type: string; [key: string]: unknown }>;
+  constructor(message: string, violations?: Array<{ type: string; [key: string]: unknown }>);
 }
 
 export function validateCircuit(circuit: unknown): { ok: boolean; errors?: string[]; warnings?: string[] };

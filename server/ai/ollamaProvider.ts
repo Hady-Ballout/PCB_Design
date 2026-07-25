@@ -717,13 +717,13 @@ const parseWithCorrectionRetry = async (
     if (!errorCount) {
       return { ...parsed, issues: violations, generation: { attempts: attempt + 1, degraded: false } };
     }
-    correction = { content, error: composeTopologyCorrection(violations) };
+    correction = { content, error: composeTopologyCorrection(violations as never) };
   }
 
   if (best) {
     // Additive-only repairs (gate pull-down, flyback diode) are safe to apply
     // deterministically; the deck is regenerated so SPICE stays in sync.
-    const { circuit, violations, applied } = applySafeAutoFixes(best.parsed.circuit, best.issues) as {
+    const { circuit, violations, applied } = applySafeAutoFixes(best.parsed.circuit, best.issues as never) as {
       circuit: Circuit; violations: RuleViolation[]; applied: boolean;
     };
     let spice = best.parsed.spice;

@@ -1,0 +1,68 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:web"
+      ],
+      "port": 5174
+    },
+    {
+      "name": "web-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5175",
+        "--strictPort",
+        "--configLoader",
+        "native"
+      ],
+      "port": 5175
+    },
+    {
+      "name": "web-preview-2",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5176",
+        "--strictPort",
+        "--configLoader",
+        "native"
+      ],
+      "port": 5176
+    },
+    {
+      "name": "web-preview-3",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5177",
+        "--strictPort",
+        "--configLoader",
+        "native"
+      ],
+      "port": 5177
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:api"
+      ],
+      "port": 8787
+    }
+  ]
+}

@@ -123,7 +123,7 @@ export function normalizeSchematicHints(circuit: Partial<Circuit> & { components
   const rawTerminals = Array.isArray((raw as Record<string, unknown>).externalTerminals) ? (raw as Record<string, unknown>).externalTerminals as unknown[] : [];
   const externalTerminals: ExternalTerminal[] = rawTerminals
     .filter(isPlainObject)
-    .map((terminal) => {
+    .map((terminal): ExternalTerminal | null => {
       const net = String(terminal.net || '');
       if (!nodeNames.has(net) || net === '0') return null;
       const role = netRoles.get(net) || roleForNet(net);
@@ -154,7 +154,7 @@ export function normalizeSchematicHints(circuit: Partial<Circuit> & { components
   const rawComponentRoles = Array.isArray((raw as Record<string, unknown>).componentRoles) ? (raw as Record<string, unknown>).componentRoles as unknown[] : [];
   const componentRoles: ComponentRole[] = rawComponentRoles
     .filter(isPlainObject)
-    .map((hint) => {
+    .map((hint): ComponentRole | null => {
       const ref = String(hint.ref || '').toUpperCase();
       if (!componentRefs.has(ref)) return null;
       const component = components.find((item) => item.ref === ref)!;
@@ -280,15 +280,18 @@ interface BuildDiagramOptions {
   buildDiagram?: (circuit: Circuit) => Diagram;
 }
 
-const buildInitialDiagram = (circuit: Circuit, buildDiagram: (circuit: Circuit) => Diagram = buildCircuitDiagram): Diagram => {
+const buildInitialDiagram = (
+  circuit: Circuit,
+  buildDiagram: (circuit: Circuit) => Diagram = buildCircuitDiagram as (circuit: Circuit) => Diagram,
+): Diagram => {
   try {
     return buildDiagram(circuit);
   } catch (error) {
     if (!(error instanceof DiagramLayoutError)) throw error;
     return {
-      ...buildFallbackCircuitDiagram(circuit),
+      ...(buildFallbackCircuitDiagram(circuit) as Diagram),
       layoutError: (error as Error).message,
-      layoutViolations: (error as Error & { violations?: unknown[] }).violations || [],
+      layoutViolations: (error as DiagramLayoutError).violations || [],
     };
   }
 };

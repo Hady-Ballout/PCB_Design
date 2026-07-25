@@ -2,34 +2,27 @@ FROM node:20-slim
 
 # Install Ngspice
 RUN apt-get update && \
-    apt-get install -y ngspice curl ca-certificates --no-install-recommends && \
+    apt-get install -y ngspice --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
-
-# Install arduino-cli + the AVR toolchain (for /api/compile-sketch)
-RUN curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | BINDIR=/usr/local/bin sh && \
-    arduino-cli core update-index && \
-    arduino-cli core install arduino:avr && \
-    arduino-cli lib install "LiquidCrystal I2C" "Keypad" "Adafruit SSD1306" \
-      "Adafruit GFX Library" "Adafruit BusIO" "Servo" \
-      "DHT sensor library" "Adafruit Unified Sensor" \
-      "RTClib" "Adafruit MPU6050" "Adafruit BMP280 Library" "Adafruit NeoPixel" \
-      "Stepper" "IRremote" "MFRC522" "PMW3360 Module"
 
 WORKDIR /app
 
-# Install dependencies. The server runs as TypeScript via tsx, which lives in
-# devDependencies — install it explicitly on top of the prod-only deps.
+# Install dependencies (incl. devDependencies, needed to compile TypeScript below)
 COPY package*.json ./
-RUN npm ci --omit=dev && npm install --no-save tsx@^4.23.0
+RUN npm ci
 
-# Copy server source
+# Copy server source + the src/core modules it imports, then compile TS -> JS
+COPY tsconfig.server.json ./
 COPY server/ ./server/
 COPY src/core/ ./src/core/
-RUN ls -la /app/server/
+RUN npm run build:server
+
+# Drop devDependencies now that the build is done
+RUN npm prune --omit=dev
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 
 EXPOSE 8787
 
-CMD ["npx", "tsx", "server/index.ts"]
+CMD ["node", "dist/server/server/index.js"]

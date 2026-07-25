@@ -21,6 +21,7 @@ import {
   synchronizeResult,
 } from '../core/circuitSync.js';
 import { toDiagramSvg } from '../core/pcbGenerator.js';
+import { toKiCadSchematic } from '../core/kicadSchematic.js';
 import { changedLineIndexes } from '../core/lineDiff.js';
 import { layoutCircuitDiagram } from '../core/schematicLayout.js';
 import { API_BASE } from '../core/config.js';
@@ -33,6 +34,12 @@ import { EDITOR_SPLIT_STORAGE_KEY, EDITOR_VIEW_LABELS, loadEditorSplit } from '.
 import { firmwareTargetForCircuit } from '../features/editors/firmwareInfo.js';
 import { WaveformChart } from '../features/waveform/WaveformChart.jsx';
 import { CircuitDiagram } from '../features/schematic/CircuitDiagram.jsx';
+import { KiCanvasEmbed } from '../features/kicanvas/KiCanvasEmbed.jsx';
+
+// three.js is heavy; load the 3D board viewer only when its window opens.
+const Pcb3DViewer = React.lazy(() =>
+  import('../features/pcb3d/Pcb3DViewer.jsx').then((module) => ({ default: module.Pcb3DViewer })),
+);
 import { BlockSchematic } from '../features/blockSchematic/BlockSchematic.jsx';
 import { RealisticSchematic } from '../features/realisticSchematic/RealisticSchematic.jsx';
 import { ComponentToolIcon } from '../features/schematic/symbols.jsx';
@@ -60,6 +67,7 @@ function App() {
   });
   const [chatStore, setChatStore] = useState(loadChatStore);
   const [diagramTool, setDiagramTool] = useState('select');
+  const [canvasMode, setCanvasMode] = useState('kicad');
   const [diagramSelection, setDiagramSelection] = useState(null);
   const [pendingTerminal, setPendingTerminal] = useState(null);
   const [openEditorViews, setOpenEditorViews] = useState(['realisticSchematic']);
@@ -71,6 +79,7 @@ function App() {
   const [newChatPrompt, setNewChatPrompt] = useState('');
   const [page, setPage] = useState(pageFromHash);
   const [generatingChatId, setGeneratingChatId] = useState(null);
+  const [generationStage, setGenerationStage] = useState(null);
   const [clarifyingChatId, setClarifyingChatId] = useState(null);
   const [assistingChatId, setAssistingChatId] = useState(null);
   // Live model reasoning for the single in-flight AI request. Ephemeral: reset
@@ -530,6 +539,17 @@ function App() {
     [editableCircuitJson, result?.circuit],
   );
 
+  // Regenerated on every diagram edit so the KiCanvas view tracks the canvas
+  // (and the downloadable .kicad_sch) in real time.
+  const kicadSchematicSource = useMemo(() => {
+    if (!result?.circuit || isGenerating) return '';
+    try {
+      return toKiCadSchematic(result.circuit, editedDiagram || result.diagram);
+    } catch {
+      return '';
+    }
+  }, [result?.circuit, result?.diagram, editedDiagram, isGenerating]);
+
   const openEditorView = (view) => {
     setOpenEditorViews((current) => {
       if (current.includes(view)) return current;
@@ -925,6 +945,7 @@ function App() {
     const isRevision = Boolean(currentDesign);
 
     setGeneratingChatId(chatId);
+    setGenerationStage(null);
     openEditorView('realisticSchematic');
     updateChat(chatId, (chat) => ({
       ...chat,
@@ -972,6 +993,10 @@ function App() {
               // A new attempt (correction retry) restarts the reasoning, so
               // appendThinking replaces the window instead of appending.
               appendThinking(chatId, event.delta, event.attempt || 0);
+              return;
+            }
+            if (event.type === 'stage') {
+              setGenerationStage(event.stage);
               return;
             }
             if (event.type !== 'spice') return;
@@ -1054,6 +1079,7 @@ function App() {
       if (quota) refreshBillingStatus();
     } finally {
       setGeneratingChatId(null);
+      setGenerationStage(null);
       clearThinking();
     }
   };
@@ -1417,9 +1443,38 @@ function App() {
           <strong>No canvas available</strong>
           <p>Generate a circuit to open its editable schematic canvas.</p>
         </div>
+      ) : canvasMode === 'kicad' ? (
+        <>
+          <div className="canvas-window-toolbar">
+            <div className="diagram-editbar canvas-mode-toggle" aria-label="Schematic view mode">
+              <button className="active-tool" type="button">KiCad view</button>
+              <button onClick={() => setCanvasMode('edit')} type="button">Edit</button>
+            </div>
+            <div className="button-row">
+              <button
+                onClick={() => downloadText(`${(result.circuit?.title || 'schematic').replace(/[^a-z0-9]+/gi, '_').toLowerCase()}.kicad_sch`, kicadSchematicSource)}
+                disabled={!kicadSchematicSource}
+              >
+                Download .kicad_sch
+              </button>
+            </div>
+          </div>
+          {kicadSchematicSource ? (
+            <KiCanvasEmbed source={kicadSchematicSource} />
+          ) : (
+            <div className="editor-window-empty">
+              <strong>Schematic not ready</strong>
+              <p>The KiCad schematic appears here once generation finishes.</p>
+            </div>
+          )}
+        </>
       ) : (
         <>
           <div className="canvas-window-toolbar">
+            <div className="diagram-editbar canvas-mode-toggle" aria-label="Schematic view mode">
+              <button onClick={() => setCanvasMode('kicad')} type="button">KiCad view</button>
+              <button className="active-tool" type="button">Edit</button>
+            </div>
             <div className="canvas-tool-stack">
               <div className="diagram-editbar" aria-label="Diagram tools">
                 <button className={diagramTool === 'select' ? 'active-tool' : ''} onClick={() => { setDiagramTool('select'); setPendingTerminal(null); }}>Select</button>
@@ -1597,6 +1652,21 @@ function App() {
     ...(generation?.validation?.warnings || []).map((message) => ({ id: 'erc', severity: 'warning', message, fix: '' })),
   ];
 
+  const renderPcb3dView = () => (
+    <div className="editor-window-body canvas-window-body">
+      {!result ? (
+        <div className="editor-window-empty">
+          <strong>No PCB available</strong>
+          <p>Generate a circuit to view its 3D printed circuit board.</p>
+        </div>
+      ) : (
+        <React.Suspense fallback={<div className="editor-window-empty"><p>Loading 3D viewer...</p></div>}>
+          <Pcb3DViewer circuit={result.circuit} />
+        </React.Suspense>
+      )}
+    </div>
+  );
+
   const renderRealisticSchematicView = () => (
     <div className="editor-window-body canvas-window-body">
       {!result ? (
@@ -1673,6 +1743,7 @@ function App() {
         {view === 'canvas' && renderCanvasView()}
         {view === 'blockSchematic' && renderBlockSchematicView()}
         {view === 'realisticSchematic' && renderRealisticSchematicView()}
+        {view === 'pcb3d' && renderPcb3dView()}
       </article>
     );
   };
@@ -1847,6 +1918,7 @@ function App() {
           activeChat={activeChat}
           openChat={openChat}
           isGenerating={isGenerating}
+          generationStage={generationStage}
           isClarifying={isClarifying}
           isAssisting={isAssisting}
           composerMode={composerMode}

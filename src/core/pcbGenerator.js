@@ -47,6 +47,17 @@ import {
 
 export { MCU_KINDS, MCU_PIN_COUNTS };
 
+// Named pin tables and display titles for the boards, consumed by the KiCad
+// schematic exporter's synthesized module boxes (kicadSchematic.js).
+export const MCU_PIN_NAMES = Object.fromEntries(
+  [...MCU_KINDS].map((kind) => [kind, FIXED_PIN_NAMES[kind] || []]),
+);
+export const MCU_BOARD_TITLES = {
+  arduino_uno: 'Arduino UNO R3',
+  raspberry_pi: 'Raspberry Pi',
+  esp32: 'ESP32 DevKit',
+};
+
 export const validateCircuit = (circuit) => {
   const errors = [];
   const warnings = [];

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Workbench harness (dev only)</title>
+</head>
+<body>
+  <div id="root"></div>
+  <!-- Dev-only: stub the session endpoint before the app module loads so the
+       logged-in workspace renders without a backend. -->
+  <script>
+    localStorage.setItem('pcb_token', 'harness-token');
+    const realFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url.includes('/api/auth/me')) {
+        return Promise.resolve(new Response(
+          JSON.stringify({ user: { email: 'harness@test.dev' } }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ));
+      }
+      return realFetch(input, init);
+    };
+  </script>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+</html>

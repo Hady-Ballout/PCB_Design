@@ -316,3 +316,22 @@ export interface OllamaRequestBody {
   };
   messages: Array<{ role: string; content: string }>;
 }
+
+// ── Multi-stage pipeline ──
+
+export type PipelineStageName = 'circuit' | 'reviewing' | 'reply';
+
+export interface PipelineStageEvent {
+  type: 'stage';
+  stage: PipelineStageName;
+}
+
+export interface PipelineContentEvent {
+  type: 'content';
+  stage: 'circuit';
+  content: string;
+  attempt: number;
+  correcting: boolean;
+}
+
+export type PipelineEvent = PipelineStageEvent | PipelineContentEvent;

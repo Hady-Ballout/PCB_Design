@@ -3,7 +3,7 @@ import { loadEnv } from './env.js';
 import { parseAllowedOrigins, resolveCorsOrigin } from './cors.js';
 import { buildCircuitResponse, reconcileCircuitRevision } from './circuit/circuitResponse.js';
 import { normalizeChatMemory, sanitizeConversationHistory, updateChatMemory } from './ai/chatMemory.js';
-import { streamCircuitWithOllama } from './ai/ollamaProvider.js';
+import { runCircuitPipeline } from './ai/circuitPipeline.js';
 import { checkCircuitTopology } from '../src/core/topologyRules.js';
 import { generateClarifyingQuestions } from './ai/clarifyProvider.js';
 import { generateAssistReply } from './ai/assistProvider.js';
@@ -14,7 +14,7 @@ import { initDb } from './auth/db.js';
 import { handleSignup, handleLogin, handleVerifyEmail, handleMe, verifyJwt } from './auth/auth.js';
 import { handleBillingStatus, handleCreateCheckout, handleCreatePortal, handleStripeWebhook } from './billing/billing.js';
 import { QuotaError, checkAndConsumeQuota } from './billing/quota.js';
-import type { ChatMemory, ChatMessage, Circuit, CurrentDesign, JwtPayload, StreamState } from './types.js';
+import type { ChatMemory, ChatMessage, Circuit, CurrentDesign, JwtPayload, PipelineEvent, StreamState } from './types.js';
 
 loadEnv();
 
@@ -103,6 +103,7 @@ const sendQuotaExceeded = (response: ServerResponse, error: QuotaError): void =>
 };
 
 const startJsonStream = (response: ServerResponse): void => {
+  // Access-Control-Allow-Origin is set per-request in the server handler.
   response.writeHead(200, {
     'Content-Type': 'application/x-ndjson; charset=utf-8',
     'Cache-Control': 'no-cache, no-transform',
@@ -385,40 +386,30 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       });
 
       let lastSpiceEvent = '';
-      let thinkingAttempt = 0;
-      const thinking = createThinkingBatcher((delta) => (
-        writeStreamEvent(response, { type: 'thinking', delta, attempt: thinkingAttempt })
-      ));
-      const aiResponse = await streamCircuitWithOllama(prompt, messages, currentDesign, (content: string, streamState: StreamState) => {
-        const partial = buildStreamingSpice(content, prompt, currentDesign?.circuit ?? null);
-        const eventKey = `${streamState.attempt}:${partial.spice}`;
+      const aiResponse = await runCircuitPipeline(prompt, messages, currentDesign, memory, (event: PipelineEvent) => {
+        if (event.type === 'stage') {
+          writeStreamEvent(response, { type: 'stage', stage: event.stage });
+          return;
+        }
+        const partial = buildStreamingSpice(event.content, prompt, currentDesign?.circuit ?? null);
+        const eventKey = `${event.attempt}:${partial.spice}`;
         if (eventKey === lastSpiceEvent) return;
         lastSpiceEvent = eventKey;
         writeStreamEvent(response, {
           type: 'spice',
           provisional: true,
-          correcting: streamState.correcting,
+          correcting: event.correcting,
           ...partial,
         });
-      }, memory, (delta: string, streamState: StreamState) => {
-        // A correction retry restarts the model's reasoning; flush the old
-        // attempt's tail before the client resets its display.
-        if (streamState.attempt !== thinkingAttempt) {
-          thinking.flush();
-          thinkingAttempt = streamState.attempt;
-        }
-        thinking.push(delta);
       });
       const circuit = reconcileCircuitRevision(aiResponse.circuit as unknown as Record<string, unknown>, prompt, currentDesign?.circuit ?? null);
       // Reconciliation can merge the candidate with the prior confirmed
-      // design, so re-run the topology check on what actually ships (keeping
-      // the retry loop's auto-fixed entries, which no longer trip the checker
-      // precisely because they were fixed); fall back to the retry loop's
-      // findings if the checker itself fails.
-      let issues = aiResponse.issues || [];
+      // design, so run the topology check on what actually ships; the
+      // pipeline's reviewer stage already corrected what it could, so the
+      // checker's surviving findings are surfaced in the UI, never fatal.
+      let issues: Array<Record<string, unknown>> = [];
       try {
-        const fresh = (checkCircuitTopology(circuit) as { violations: typeof issues }).violations;
-        issues = [...issues.filter((issue) => issue.autoFixed), ...fresh];
+        issues = (checkCircuitTopology(circuit) as unknown as { violations: typeof issues }).violations;
       } catch (topologyError) {
         console.error(`[topology-check] ${(topologyError as Error).message}`);
       }
@@ -436,7 +427,6 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
           code: aiResponse.code || '',
           memory: updatedMemory,
           issues,
-          generation: aiResponse.generation,
           ...(process.env.OLLAMA_CONTEXT_DIAGNOSTICS === '1' ? { contextDiagnostics } : {}),
         },
       });
