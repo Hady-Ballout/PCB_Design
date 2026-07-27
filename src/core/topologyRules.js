@@ -45,6 +45,12 @@ const ISOLATOR_OUTPUT_PINS = {
 const DIODE_KINDS = new Set(['diode', 'led', 'ir_led', 'zener', 'schottky']);
 const GPIO_PIN_PATTERN = /^(D\d+|A\d+|GPIO\d+)$/;
 const MCU_LOGIC_VOLTS = { arduino_uno: 5, raspberry_pi: 3.3, esp32: 3.3 };
+// 3.3V-only parts whose bare silicon is not 5V tolerant AND whose catalog
+// entry already steers them to 3V3. Deliberately short: breakouts with onboard
+// regulators/level circuitry (imu_sensor, oled_display, ...) stay out so the
+// rule never false-positives on a tolerant module.
+const MAX_INPUT_VOLTS = { raspberry_pi: 3.6, esp32: 3.6, rfid_reader: 3.6, mouse_sensor: 3.6 };
+const SUPPLY_PIN_NAMES = new Set(['5V', '3V3', 'VIN', 'VCC', 'GND', 'VS', 'EN']);
 
 // Canonical positional pin roles for kinds without a fixedPins contract.
 const ROLE_PINS = {
@@ -835,6 +841,33 @@ const TOPOLOGY_RULES = [
             'buck_insufficient_headroom', 'warning', [part.ref, ...sourceRefs], [vinNet],
             `${part.ref} (${kindLabel(part.kind)}) regulates to ${outVolts}V but the highest source reaching its VIN is only ${maxVolts}V — a buck converter needs at least 2V of input headroom above its output.`,
             `Supply at least ${needed}V to ${part.ref}'s VIN, or use a lower-output buck variant.`,
+          ));
+        }
+      }
+      return found;
+    },
+  },
+  {
+    // A push-pull 5V MCU output sharing a net with a pin of a 3.3V-only part:
+    // first transition puts 5V on the pad. TC7 (Uno TX -> Pi GPIO) and TC2
+    // (Uno SPI -> RC522) both die here.
+    id: 'voltage_domain_overdrive',
+    severity: 'error',
+    check: (graph) => {
+      const found = [];
+      for (const [net, pins] of graph.netPins) {
+        const driver = (graph.gpioNets.get(net) || [])
+          .map((pin) => ({ ...pin, volts: MCU_LOGIC_VOLTS[pin.kind] || 3.3 }))
+          .sort((a, b) => b.volts - a.volts)[0];
+        if (!driver) continue;
+        for (const pin of pins) {
+          const max = MAX_INPUT_VOLTS[pin.kind];
+          if (max == null || driver.volts <= max) continue;
+          if (pin.ref === driver.ref || SUPPLY_PIN_NAMES.has(pin.pinName)) continue;
+          found.push(violation(
+            'voltage_domain_overdrive', 'error', [driver.ref, pin.ref], [net],
+            `${driver.pinName} of ${driver.ref} drives ${driver.volts}V into ${pin.pinName} of ${pin.ref} (${kindLabel(pin.kind)}), which tolerates at most ${max}V — this can destroy the part.`,
+            `Put a level shifter (or series resistor + divider) between ${driver.ref} ${driver.pinName} and ${pin.ref} ${pin.pinName}, or drive it from a 3.3V MCU pin.`,
           ));
         }
       }

@@ -419,6 +419,36 @@ describe('raspberry_pi SPI pin extension', () => {
   });
 });
 
+describe('voltage_domain_overdrive', () => {
+  it('flags a 5V Uno pin driving a Pi GPIO (TC7)', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('arduino_uno', 'U1', { '5V': 'VCC5', GND: '0', D1: 'UART_TX' }),
+      mcuPart('raspberry_pi', 'U3', { '5V': 'VCC5', GND: '0', GPIO9: 'UART_TX' }),
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'voltage_domain_overdrive');
+    expect(hit).toBeDefined();
+    expect(hit.severity).toBe('error');
+    expect(hit.refs).toEqual(expect.arrayContaining(['U1', 'U3']));
+    expect(hit.message).toContain('GPIO9');
+  });
+  it('flags Uno SPI pins into an RC522 (TC2)', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('arduino_uno', 'U1', { '3V3': 'VCC33', GND: '0', D11: 'MOSI_NET' }),
+      { ref: 'U2', kind: 'rfid_reader', value: 'RC522',
+        nodes: ['VCC33', 'NC_U2_2', '0', 'NC_U2_4', 'NC_U2_5', 'MOSI_NET', 'NC_U2_7', 'NC_U2_8'] },
+    ]));
+    expect(idsOf(result)).toContain('voltage_domain_overdrive');
+  });
+  it('stays silent when both ends share a 3.3V domain', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('esp32', 'U1', { '3V3': 'VCC33', GND: '0', GPIO5: 'MOSI_NET' }),
+      { ref: 'U2', kind: 'rfid_reader', value: 'RC522',
+        nodes: ['VCC33', 'NC_U2_2', '0', 'NC_U2_4', 'NC_U2_5', 'MOSI_NET', 'NC_U2_7', 'NC_U2_8'] },
+    ]));
+    expect(idsOf(result)).not.toContain('voltage_domain_overdrive');
+  });
+});
+
 describe('tier-3 discrete kinds', () => {
   it('flags a reversed schottky like a plain diode', () => {
     const result = checkCircuitTopology(circuitOf([

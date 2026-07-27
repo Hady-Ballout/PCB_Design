@@ -231,7 +231,8 @@ retry only on structural JSON/schema failures.
    divider-powered-load pattern, LEDs without series resistors, reversed polarity, floating
    bases/gates, missing flyback diodes, missing pull-ups, GPIO current budgets, floating op-amp
    inputs, wrong fixed-pin node counts, stepper coils without a ULN2003 driver
-   (`stepper_missing_driver`), and WS2812 strips powered from a GPIO (`led_strip_power_from_gpio`).
+   (`stepper_missing_driver`), WS2812 strips powered from a GPIO (`led_strip_power_from_gpio`), and
+   a 5V MCU output sharing a net with a 3.3V-only part's pin (`voltage_domain_overdrive`).
    Error-severity violations on the first attempt become a corrective message
    (`composeTopologyCorrection`) fed back to the model for one retry; **warning**-severity
    violations never block or trigger a retry.
@@ -315,6 +316,12 @@ transistor anywhere. Every net checks out; the GPIO cannot switch the load.
   never across the isolation barrier, and `led_no_series_resistor` covers its input LED;
   the `current_sensor` conducts only IP+↔IP- (its shunt path), so series-loop rules see
   through it.
+- `voltage_domain_overdrive` (error) flags a push-pull 5V MCU output (highest-volts pin in
+  `graph.gpioNets` per net, via `MCU_LOGIC_VOLTS`) sharing a net with a non-supply pin of a
+  3.3V-only part (`MAX_INPUT_VOLTS`: `raspberry_pi`, `esp32`, `rfid_reader`, `mouse_sensor` —
+  deliberately short, so a tolerant breakout with onboard level circuitry never false-positives).
+  `SUPPLY_PIN_NAMES` exempts the target's own power/ground/enable pins so a shared 5V rail
+  doesn't trip the rule.
 - `applySafeAutoFixes(circuit, violations)` applies additive-only repairs (100k gate
   pull-down, 1N4007 flyback diode) in the degraded path and marks them `autoFixed`;
   anything that would rearrange existing parts stays a surfaced violation.
