@@ -54,6 +54,9 @@ const MCU_LOGIC_VOLTS = { arduino_uno: 5, raspberry_pi: 3.3, esp32: 3.3 };
 // rule never false-positives on a tolerant module.
 const MAX_INPUT_VOLTS = { raspberry_pi: 3.6, esp32: 3.6, rfid_reader: 3.6, mouse_sensor: 3.6 };
 const SUPPLY_PIN_NAMES = new Set(['5V', '3V3', 'VIN', 'VCC', 'GND', 'VS', 'EN']);
+// E24 standard resistor mantissas (5% series) — used to flag values that
+// aren't purchasable off the shelf.
+const E24 = [1.0, 1.1, 1.2, 1.3, 1.5, 1.6, 1.8, 2.0, 2.2, 2.4, 2.7, 3.0, 3.3, 3.6, 3.9, 4.3, 4.7, 5.1, 5.6, 6.2, 6.8, 7.5, 8.2, 9.1];
 
 // Canonical positional pin roles for kinds without a fixedPins contract.
 const ROLE_PINS = {
@@ -996,6 +999,56 @@ const TOPOLOGY_RULES = [
             `${part.ref} (${kindLabel(part.kind)}) connects only to power and ground — no signal pin participates, so it does nothing in this circuit.`,
             `Wire ${part.ref}'s data/control pins into the circuit, or remove it.`,
           ));
+        }
+      }
+      return found;
+    },
+  },
+  {
+    // Values the breadboard itself swamps: below contact resistance the board
+    // IS the resistor; near insulation leakage the board bypasses it (TC6).
+    id: 'resistor_extreme_value',
+    severity: 'warning',
+    check: (graph, circuit) => {
+      const found = [];
+      for (const part of circuit.components) {
+        if (part.kind !== 'resistor' && part.kind !== 'load') continue;
+        const ohms = parseResistance(part.value);
+        if (ohms === null) {
+          found.push(violation('resistor_extreme_value', 'warning', [part.ref], [],
+            `${part.ref} has an unparseable resistance value "${part.value}".`,
+            'Use a plain value such as "330", "4.7k", or "1Meg".'));
+        } else if (ohms < 1) {
+          found.push(violation('resistor_extreme_value', 'warning', [part.ref], [],
+            `${part.ref} = ${part.value} is below breadboard contact resistance (~0.05–0.1Ω per contact) — the board dominates the value; milliohm parts need Kelvin connections.`,
+            'Use ≥1Ω, or move the shunt off-board (the current_sensor kind models a proper shunt).'));
+        } else if (ohms > 1e8) {
+          found.push(violation('resistor_extreme_value', 'warning', [part.ref], [],
+            `${part.ref} = ${part.value} approaches breadboard insulation leakage (~1e9Ω) — the board leaks more than the part conducts.`,
+            'Keep resistances ≤100MΩ on a solderless board, or mount the part off-board with guarding.'));
+        }
+      }
+      return found;
+    },
+  },
+  {
+    // Not purchasable: a value off the E24 grid (TC1's 250Ω). Warning only —
+    // exact values are sometimes intentional.
+    id: 'non_standard_resistor',
+    severity: 'warning',
+    check: (graph, circuit) => {
+      const found = [];
+      for (const part of circuit.components) {
+        if (part.kind !== 'resistor') continue;
+        const ohms = parseResistance(part.value);
+        if (ohms === null || ohms < 1 || ohms > 1e8) continue; // resistor_extreme_value owns those
+        const decade = 10 ** Math.floor(Math.log10(ohms));
+        const mantissa = ohms / decade;
+        const nearest = E24.reduce((best, step) => (Math.abs(step - mantissa) < Math.abs(best - mantissa) ? step : best), E24[0]);
+        if (Math.abs(nearest - mantissa) / nearest > 0.02) {
+          found.push(violation('non_standard_resistor', 'warning', [part.ref], [],
+            `${part.ref} = ${part.value} is not an E24 standard value (nearest: ${nearest * decade}).`,
+            `Use ${nearest * decade} unless the exact value is intentional.`));
         }
       }
       return found;

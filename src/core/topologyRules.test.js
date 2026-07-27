@@ -990,6 +990,76 @@ describe('dead_active_device', () => {
   });
 });
 
+describe('resistor_extreme_value', () => {
+  it('flags both ends of a 1G/0.001 divider (TC6)', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '1G', nodes: ['VCC', 'VOUT'] },
+      { ref: 'R2', kind: 'resistor', value: '0.001', nodes: ['VOUT', '0'] },
+    ]));
+    const hits = result.violations.filter((entry) => entry.id === 'resistor_extreme_value');
+    expect(hits).toHaveLength(2);
+    expect(hits.every((entry) => entry.severity === 'warning')).toBe(true);
+    expect(hits.find((entry) => entry.refs.includes('R1')).message).toContain('insulation leakage');
+    expect(hits.find((entry) => entry.refs.includes('R2')).message).toContain('contact resistance');
+    expect(result.ok).toBe(true); // warning severity never flips ok
+  });
+
+  it('flags an unparseable resistance value', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'R1', kind: 'resistor', value: 'banana', nodes: ['A', '0'] },
+    ]));
+    expect(idsOf(result)).toContain('resistor_extreme_value');
+  });
+
+  it('stays silent for an off-board fuse even though its "1A" value is unparseable as resistance', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'F1', kind: 'fuse', value: '1A', nodes: ['VCC', 'FOUT'] },
+      { ref: 'DLED1', kind: 'led', value: 'red', nodes: ['FOUT', '0'] },
+      { ref: 'RLED', kind: 'resistor', value: '330', nodes: ['FOUT', '0'] },
+    ]));
+    expect(idsOf(result)).not.toContain('resistor_extreme_value');
+  });
+
+  it('stays silent for ordinary E24 values', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'R1', kind: 'resistor', value: '330', nodes: ['A', '0'] },
+      { ref: 'R2', kind: 'resistor', value: '4.7k', nodes: ['B', '0'] },
+    ]));
+    expect(idsOf(result)).not.toContain('resistor_extreme_value');
+  });
+});
+
+describe('non_standard_resistor', () => {
+  it('flags an off-grid value and names the nearest E24 step (TC1)', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'R1', kind: 'resistor', value: '250', nodes: ['A', '0'] },
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'non_standard_resistor');
+    expect(hit).toBeDefined();
+    expect(hit.severity).toBe('warning');
+    expect(hit.message).toContain('240');
+    expect(result.ok).toBe(true); // warning severity never flips ok
+  });
+
+  it('stays silent for ordinary E24 values', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'R1', kind: 'resistor', value: '330', nodes: ['A', '0'] },
+      { ref: 'R2', kind: 'resistor', value: '4.7k', nodes: ['B', '0'] },
+    ]));
+    expect(idsOf(result)).not.toContain('non_standard_resistor');
+  });
+
+  it('defers extreme values to resistor_extreme_value instead of double-flagging', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'R1', kind: 'resistor', value: '1G', nodes: ['A', '0'] },
+      { ref: 'R2', kind: 'resistor', value: '0.001', nodes: ['B', '0'] },
+    ]));
+    expect(idsOf(result)).not.toContain('non_standard_resistor');
+  });
+});
+
 describe('composeTopologyCorrection', () => {
   it('renders numbered errors with fixes and a correction instruction', () => {
     const { violations } = checkCircuitTopology(esp32BuzzerBug);

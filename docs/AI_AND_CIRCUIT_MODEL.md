@@ -350,6 +350,17 @@ transistor anywhere. Every net checks out; the GPIO cannot switch the load.
   member — it participates in nothing (TC7's ESP32 with only `3V3`/`GND` wired, TC1's
   Arduino). A part with every pin left `NC_` (freshly dropped from the library, precedent:
   `stepper_missing_driver`'s all-NC skip) stays silent rather than flagged.
+- `resistor_extreme_value` (warning) flags a `resistor`/`load` part whose `parseResistance(value)`
+  is unparseable, below 1Ω (breadboard contact resistance dominates — milliohm parts need Kelvin
+  connections), or above 100MΩ (approaches breadboard insulation leakage, ~1e9Ω) — TC6's
+  1G/0.001Ω divider trips both bounds. Kept narrow to `resistor`/`load` so an off-board fuse's
+  ampere rating (e.g. `1A`) never gets parsed as an unparseable ohms value.
+- `non_standard_resistor` (warning) flags a `resistor` part whose value lands off the E24 (5%)
+  grid — the mantissa in its decade compared against the standard `E24` table, nearest step
+  named in the message (TC1's 250Ω names 240 as nearest). Skips anything
+  `resistor_extreme_value` already owns (`null`, `<1`, `>1e8`) so the two rules never double-fire
+  on the same part; a >2% deviation from the nearest E24 step is required to flag, so intentional
+  precision values pass through quietly.
 - `applySafeAutoFixes(circuit, violations)` applies additive-only repairs (100k gate
   pull-down, 1N4007 flyback diode) in the degraded path and marks them `autoFixed`;
   anything that would rearrange existing parts stays a surfaced violation.
