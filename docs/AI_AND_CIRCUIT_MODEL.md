@@ -361,6 +361,11 @@ transistor anywhere. Every net checks out; the GPIO cannot switch the load.
   `resistor_extreme_value` already owns (`null`, `<1`, `>1e8`) so the two rules never double-fire
   on the same part; a >2% deviation from the nearest E24 step is required to flag, so intentional
   precision values pass through quietly.
+- `buck_unreal_part_number` (warning) flags a `buck_converter` whose `buckVolts(value)` isn't
+  3.3, 5, or 12 — the only fixed-output LM2596 variants that actually exist. Anything else names
+  the ADJ part, which needs an external feedback divider this model doesn't carry (TC4 generated
+  an "LM2596-4.0"). `buckVolts` defaults to 5V for a bare "LM2596" with no numeric suffix, so a
+  generic reference stays silent rather than being misread as an unreal variant.
 - `applySafeAutoFixes(circuit, violations)` applies additive-only repairs (100k gate
   pull-down, 1N4007 flyback diode) in the degraded path and marks them `autoFixed`;
   anything that would rearrange existing parts stays a surfaced violation.

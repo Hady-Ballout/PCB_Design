@@ -1054,6 +1054,25 @@ const TOPOLOGY_RULES = [
       return found;
     },
   },
+  {
+    // Only fixed LM2596 variants exist (3.3, 5.0, 12); anything else is the
+    // ADJ part, which needs a feedback divider this model doesn't carry (TC4
+    // generated an "LM2596-4.0").
+    id: 'buck_unreal_part_number',
+    severity: 'warning',
+    check: (graph, circuit) => {
+      const found = [];
+      for (const part of circuit.components) {
+        if (part.kind !== 'buck_converter') continue;
+        const volts = buckVolts(part.value);
+        if (volts === 3.3 || volts === 5 || volts === 12) continue;
+        found.push(violation('buck_unreal_part_number', 'warning', [part.ref], [],
+          `${part.ref} is "${part.value}" — LM2596 fixed-output variants are only -3.3, -5.0 and -12; a ${volts}V version is not a real part.`,
+          'Pick LM2596-3.3, LM2596-5.0 or LM2596-12, or restate the requirement so a real fixed variant fits.'));
+      }
+      return found;
+    },
+  },
 ];
 
 // Kinds whose pin meaning is positional; a wrong node count silently maps the

@@ -1060,6 +1060,36 @@ describe('non_standard_resistor', () => {
   });
 });
 
+describe('buck_unreal_part_number', () => {
+  it('warns when the LM2596 value names a non-existent fixed variant (TC4 "LM2596-4.0")', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-4.0', nodes: ['VIN', 'SW', '0', 'FB', '0'] },
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'buck_unreal_part_number');
+    expect(hit).toBeDefined();
+    expect(hit.severity).toBe('warning');
+    expect(hit.message).toContain('-3.3, -5.0 and -12');
+    // Not asserting result.ok here: this minimal fixture has no inductor/catch
+    // diode, so buck_missing_inductor (error) also fires — unrelated to this
+    // warning-severity rule, which is exercised in isolation above.
+  });
+
+  it('stays silent for real fixed variants (-5.0 and -3.3)', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'FB', '0'] },
+      { ref: 'U2', kind: 'buck_converter', value: 'LM2596-3.3', nodes: ['VIN2', 'SW2', '0', 'FB2', '0'] },
+    ]));
+    expect(idsOf(result)).not.toContain('buck_unreal_part_number');
+  });
+
+  it('stays silent for the -12 variant', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'U1', kind: 'buck_converter', value: 'LM2596-12', nodes: ['VIN', 'SW', '0', 'FB', '0'] },
+    ]));
+    expect(idsOf(result)).not.toContain('buck_unreal_part_number');
+  });
+});
+
 describe('composeTopologyCorrection', () => {
   it('renders numbered errors with fixes and a correction instruction', () => {
     const { violations } = checkCircuitTopology(esp32BuzzerBug);
