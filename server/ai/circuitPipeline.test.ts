@@ -77,6 +77,69 @@ const unoCircuit = {
   notes: [],
 };
 
+// The named ESP32 buzzer-divider bug (mirrors esp32BuzzerBug in
+// src/core/topologyRules.test.js): GPIO2 fights the buzzer directly through a
+// resistor divider with no transistor driver. Trips divider_powered_load
+// (error). footprint: '' on every part because the stage-1 schema requires a
+// footprint string (circuitPipeline.ts validateCircuitResponse).
+const esp32BuzzerBugCircuit = {
+  title: 'ESP32 Buzzer',
+  type: 'buzzer_driver',
+  supplyVoltage: 3.3,
+  nodes: ['3V3', '0', 'BUZZER', 'NC_U1_3', 'NC_U1_4', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+  components: [
+    {
+      ref: 'U1',
+      kind: 'esp32',
+      value: 'DevKit V1',
+      nodes: ['3V3', '0', 'NC_U1_3', 'NC_U1_4', 'BUZZER', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+      footprint: '',
+    },
+    { ref: 'R2', kind: 'resistor', value: '330', nodes: ['BUZZER', '0'], footprint: '' },
+    { ref: 'RBZ1', kind: 'buzzer', value: '5V active', nodes: ['3V3', 'BUZZER'], footprint: '' },
+  ],
+  notes: [],
+};
+
+// The corrected transistor-driver topology (mirrors esp32BuzzerFixed): GPIO2 ->
+// 1k base resistor -> NPN, buzzer between 3V3 and the collector. Zero errors.
+const esp32BuzzerFixedCircuit = {
+  title: 'ESP32 Buzzer',
+  type: 'buzzer_driver',
+  supplyVoltage: 3.3,
+  nodes: ['3V3', '0', 'CTRL', 'BASE', 'BZ_LOW', 'NC_U1_3', 'NC_U1_4', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+  components: [
+    {
+      ref: 'U1',
+      kind: 'esp32',
+      value: 'DevKit V1',
+      nodes: ['3V3', '0', 'NC_U1_3', 'NC_U1_4', 'CTRL', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+      footprint: '',
+    },
+    { ref: 'R2', kind: 'resistor', value: '1k', nodes: ['CTRL', 'BASE'], footprint: '' },
+    { ref: 'Q1', kind: 'bjt_npn', value: '2N2222', nodes: ['BZ_LOW', 'BASE', '0'], footprint: '' },
+    { ref: 'RBZ1', kind: 'buzzer', value: '5V active', nodes: ['3V3', 'BZ_LOW'], footprint: '' },
+  ],
+  notes: [],
+};
+
+// A transistor-switched DC motor with no flyback diode (mirrors the
+// missing_flyback_diode fixture in topologyRules.test.js). The error survives a
+// retry but applySafeAutoFixes can repair it by adding a DFB1 diode.
+const switchedMotorCircuit = {
+  title: 'Motor Driver',
+  type: 'motor_driver',
+  supplyVoltage: 5,
+  nodes: ['VCC', '0', 'SW', 'BASE'],
+  components: [
+    { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'], footprint: '' },
+    { ref: 'RM1', kind: 'dc_motor', value: '6V', nodes: ['VCC', 'SW'], footprint: '' },
+    { ref: 'Q1', kind: 'bjt_npn', value: '2N2222', nodes: ['SW', 'BASE', '0'], footprint: '' },
+    { ref: 'RB1', kind: 'resistor', value: '1k', nodes: ['VCC', 'BASE'], footprint: '' },
+  ],
+  notes: [],
+};
+
 // Ollama's streaming NDJSON response shape (used only by the stage-1 circuit call).
 const streamResponse = (content: string) => new Response(
   `${JSON.stringify({ message: { content } })}\n`,
@@ -234,6 +297,43 @@ describe('circuit generation pipeline', () => {
     expect(result.circuit).toEqual(opampCircuit);
     const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(retryBody.messages.at(-1).content).toContain('Floating op-amp input');
+  });
+
+  it('gates stage 1 on topology errors and retries with the rule violation as correction', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(JSON.stringify({ circuit: esp32BuzzerBugCircuit })))
+      .mockResolvedValueOnce(streamResponse(JSON.stringify({ circuit: esp32BuzzerFixedCircuit })))
+      .mockResolvedValueOnce(okReviewer())
+      .mockResolvedValueOnce(okReply());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runCircuitPipeline('Drive a buzzer from an ESP32', []);
+
+    // The corrected topology from the retry is what ships.
+    expect(result.circuit).toEqual(esp32BuzzerFixedCircuit);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(retryBody.messages.at(-1).content).toContain('functional design errors');
+    expect(retryBody.messages.at(-1).content).toContain('divider_powered_load');
+  });
+
+  it('auto-fixes the best attempt before the reviewer when an error survives the retry', async () => {
+    // Both attempts keep the same missing_flyback_diode error; the best attempt
+    // gets an additive DFB1 diode applied BEFORE the reviewer stage runs.
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(JSON.stringify({ circuit: switchedMotorCircuit })))
+      .mockResolvedValueOnce(streamResponse(JSON.stringify({ circuit: switchedMotorCircuit })))
+      .mockResolvedValueOnce(okReviewer())
+      .mockResolvedValueOnce(okReply());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runCircuitPipeline('Switch a motor with a transistor', []);
+
+    const flyback = result.circuit.components.find((part) => part.ref === 'DFB1');
+    expect(flyback).toMatchObject({ ref: 'DFB1', kind: 'diode' });
+    // The reviewer request (call index 2) must already contain the repaired part.
+    const reviewerBody = JSON.parse(fetchMock.mock.calls[2][1].body);
+    expect(reviewerBody.messages.at(-1).content).toContain('DFB1');
   });
 
   it('reports a classified error after stage 1 fails schema validation twice', async () => {

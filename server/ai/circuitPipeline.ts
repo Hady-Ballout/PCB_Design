@@ -6,6 +6,12 @@ import {
   MCU_KINDS,
   WIRING_ONLY_KINDS,
 } from '../../src/core/componentKinds.js';
+import {
+  applySafeAutoFixes,
+  checkCircuitTopology,
+  composeTopologyCorrection,
+} from '../../src/core/topologyRules.js';
+import type { TopologyViolation } from '../../src/core/topologyRules.js';
 import type {
   ChatMemory,
   ChatMessage,
@@ -621,28 +627,6 @@ const retryableOutputCodes = new Set([
   'json_missing', 'json_truncated', 'json_syntax', 'schema_validation',
 ]);
 
-// Detect the classic simulation-killer: an op-amp input sitting on a node no
-// other component uses (floating high-impedance input → singular matrix). Kept
-// deliberately narrow so it never rejects a legitimately driven output node.
-const floatingOpampInputCorrection = (circuit: Circuit): string | null => {
-  const components = Array.isArray(circuit?.components) ? circuit.components : [];
-  const nodeUse = new Map<string, number>();
-  for (const part of components) {
-    for (const node of part.nodes || []) nodeUse.set(String(node), (nodeUse.get(String(node)) || 0) + 1);
-  }
-  const problems: string[] = [];
-  for (const part of components) {
-    if (part.kind !== 'opamp') continue;
-    const [plus, minus] = (part.nodes || []).map(String);
-    ([['non-inverting (+)', plus], ['inverting (-)', minus]] as const).forEach(([label, node]) => {
-      if (!node || node === '0') return; // a grounded input is fine
-      if ((nodeUse.get(node) || 0) < 2) problems.push(`${part.ref}'s ${label} input (node "${node}")`);
-    });
-  }
-  if (!problems.length) return null;
-  return `Floating op-amp input(s): ${problems.join('; ')} connect to no other component. Each op-amp input must join the rest of the circuit: the inverting input to the feedback/summing network, and the non-inverting input to a reference node — ground "0" or a mid-rail bias-divider node. Reuse the existing reference node name for that input; do not leave it on its own node. Return the corrected circuit and matching SPICE.`;
-};
-
 async function parseWithCorrectionRetry<T>(
   label: string,
   requestAttempt: (correction: CorrectionContext | null, attempt: number) => Promise<string>,
@@ -890,6 +874,19 @@ export async function runCircuitPipeline(
   const stage1Config = providerConfig('circuit');
   const useOllamaStream = stage1Config.provider === 'ollama';
 
+  // Topology gate: every parsed candidate is scored on the shared rule engine
+  // (src/core/topologyRules.js). Error-severity violations become the corrective
+  // feedback for one retry via parseWithCorrectionRetry's checkCorrection hook;
+  // warnings surface later but never block. The gate subsumes the old
+  // floatingOpampInputCorrection (now the opamp_input_floating rule).
+  const attempts: Array<{ circuit: Circuit; violations: TopologyViolation[]; errorCount: number }> = [];
+  const topologyGate = (parsed: Circuit): string | null => {
+    const { violations } = checkCircuitTopology(parsed);
+    const errorCount = violations.filter((entry) => entry.severity === 'error').length;
+    attempts.push({ circuit: parsed, violations, errorCount });
+    return errorCount ? composeTopologyCorrection(violations) : null;
+  };
+
   const circuit = await parseWithCorrectionRetry(
     'Circuit generation',
     async (correction, attempt) => {
@@ -904,10 +901,16 @@ export async function runCircuitPipeline(
       return content;
     },
     parseStage1Circuit,
-    (parsedCircuit) => floatingOpampInputCorrection(parsedCircuit),
+    topologyGate,
   );
 
-  let finalCircuit = circuit;
+  // Never fail the turn once a candidate parsed: accept the best attempt (fewest
+  // error violations, later attempt wins ties) and apply additive-only repairs
+  // (flyback diode, gate pull-down) before the reviewer stage sees the circuit.
+  const best = attempts.reduce((a, b) => (b.errorCount <= a.errorCount ? b : a), attempts[0])
+    ?? { circuit, violations: [] as TopologyViolation[], errorCount: 0 };
+  const repaired = applySafeAutoFixes(best.circuit, best.violations);
+  let finalCircuit: Circuit = repaired.applied ? (repaired.circuit as Circuit) : best.circuit;
   let reviewIssues: string[] = [];
   let code = '';
   if (reviewerEnabled()) {
