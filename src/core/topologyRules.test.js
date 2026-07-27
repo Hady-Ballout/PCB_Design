@@ -449,6 +449,33 @@ describe('voltage_domain_overdrive', () => {
   });
 });
 
+describe('pullup_exceeds_domain', () => {
+  it('flags a 10k pull-up referencing 5V on a Pi UART net (TC7 + RPU1)', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('arduino_uno', 'U1', { '5V': 'VCC5', GND: '0', D1: 'UART_TX' }),
+      mcuPart('raspberry_pi', 'U3', { '5V': 'VCC5', GND: '0', GPIO9: 'UART_TX' }),
+      { ref: 'RPU1', kind: 'resistor', value: '10k', nodes: ['UART_TX', 'VCC5'] },
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'pullup_exceeds_domain');
+    expect(hit).toBeDefined();
+    expect(hit.severity).toBe('error');
+    expect(hit.refs).toEqual(expect.arrayContaining(['RPU1', 'U3']));
+    expect(hit.message).toContain('GPIO9');
+    // Same net also drives voltage_domain_overdrive independently (U1's 5V TX
+    // into U3's GPIO9); both rules legitimately fire on this fixture.
+    expect(idsOf(result)).toContain('voltage_domain_overdrive');
+  });
+
+  it('stays silent when the pull-up references a 3.3V rail (esp32 3V3)', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('esp32', 'U1', { '3V3': 'VCC33', GND: '0', GPIO21: 'UART_TX' }),
+      mcuPart('raspberry_pi', 'U3', { '5V': 'VCC5', GND: '0', GPIO9: 'UART_TX' }),
+      { ref: 'RPU1', kind: 'resistor', value: '10k', nodes: ['UART_TX', 'VCC33'] },
+    ]));
+    expect(idsOf(result)).not.toContain('pullup_exceeds_domain');
+  });
+});
+
 describe('tier-3 discrete kinds', () => {
   it('flags a reversed schottky like a plain diode', () => {
     const result = checkCircuitTopology(circuitOf([

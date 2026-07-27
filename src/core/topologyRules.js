@@ -214,6 +214,28 @@ export const buildCircuitGraph = (circuit) => {
 
 const pinsOn = (graph, net) => graph.netPins.get(String(net)) || [];
 
+// Best-effort DC volts for nets that carry a known rail. Nets without a
+// confident value are simply absent — consumers must treat missing as unknown.
+const buildNetVolts = (graph, circuit) => {
+  const volts = new Map();
+  const claim = (net, value) => {
+    if (!net || net === '0' || value == null) return;
+    const existing = volts.get(net);
+    if (existing == null || value > existing) volts.set(net, value);
+  };
+  for (const part of circuit.components) {
+    const fixed = FIXED_PIN_NAMES[part.kind];
+    if (MCU_KINDS.has(part.kind) && fixed) {
+      if (fixed.indexOf('5V') >= 0) claim(String(part.nodes[fixed.indexOf('5V')] ?? ''), 5);
+      if (fixed.indexOf('3V3') >= 0) claim(String(part.nodes[fixed.indexOf('3V3')] ?? ''), 3.3);
+    }
+    if (part.kind === 'voltage_source' || part.kind === 'solar_panel') claim(String(part.nodes[0] ?? ''), parseVolts(part.value, null));
+    if (part.kind === 'regulator') claim(String(part.nodes[2] ?? ''), parseVolts(part.value, null));
+    if (part.kind === 'buck_converter') claim(String(part.nodes[1] ?? ''), buckVolts(part.value));
+  }
+  return volts;
+};
+
 // A driver output (collector/emitter or drain/source) or relay switch
 // terminal on one of these nets means the load is switched, not GPIO-driven.
 const hasDriverOutputOn = (graph, nets) => {
@@ -869,6 +891,35 @@ const TOPOLOGY_RULES = [
             `${driver.pinName} of ${driver.ref} drives ${driver.volts}V into ${pin.pinName} of ${pin.ref} (${kindLabel(pin.kind)}), which tolerates at most ${max}V — this can destroy the part.`,
             `Put a level shifter (or series resistor + divider) between ${driver.ref} ${driver.pinName} and ${pin.ref} ${pin.pinName}, or drive it from a 3.3V MCU pin.`,
           ));
+        }
+      }
+      return found;
+    },
+  },
+  {
+    // A pull-up referencing a rail above the weakest device's input rating on
+    // that net: the line idles at the destructive voltage even with every
+    // driver tri-stated (TC7's RPU1 to 5V on a Pi net).
+    id: 'pullup_exceeds_domain',
+    severity: 'error',
+    check: (graph, circuit) => {
+      const netVolts = buildNetVolts(graph, circuit);
+      const found = [];
+      for (const part of circuit.components) {
+        if (part.kind !== 'resistor' || (part.nodes ?? []).length !== 2) continue;
+        const [a, b] = part.nodes.map(String);
+        for (const [signalNet, railNet] of [[a, b], [b, a]]) {
+          const rail = netVolts.get(railNet);
+          if (rail == null) continue;
+          for (const pin of pinsOn(graph, signalNet)) {
+            const max = MAX_INPUT_VOLTS[pin.kind];
+            if (max == null || rail <= max || SUPPLY_PIN_NAMES.has(pin.pinName)) continue;
+            found.push(violation(
+              'pullup_exceeds_domain', 'error', [part.ref, pin.ref], [signalNet],
+              `${part.ref} pulls net "${signalNet}" up to ${rail}V, but ${pin.pinName} of ${pin.ref} (${kindLabel(pin.kind)}) tolerates at most ${max}V — the line idles at a destructive level.`,
+              `Reference the pull-up to the ${max >= 3.3 ? '3.3V' : 'lower'} rail instead of "${railNet}", or remove it if both ends are push-pull.`,
+            ));
+          }
         }
       }
       return found;

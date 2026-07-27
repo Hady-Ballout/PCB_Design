@@ -232,7 +232,8 @@ retry only on structural JSON/schema failures.
    bases/gates, missing flyback diodes, missing pull-ups, GPIO current budgets, floating op-amp
    inputs, wrong fixed-pin node counts, stepper coils without a ULN2003 driver
    (`stepper_missing_driver`), WS2812 strips powered from a GPIO (`led_strip_power_from_gpio`), and
-   a 5V MCU output sharing a net with a 3.3V-only part's pin (`voltage_domain_overdrive`).
+   a 5V MCU output sharing a net with a 3.3V-only part's pin (`voltage_domain_overdrive`), and a
+   pull-up referencing a rail above a net member's input rating (`pullup_exceeds_domain`).
    Error-severity violations on the first attempt become a corrective message
    (`composeTopologyCorrection`) fed back to the model for one retry; **warning**-severity
    violations never block or trigger a retry.
@@ -322,6 +323,14 @@ transistor anywhere. Every net checks out; the GPIO cannot switch the load.
   deliberately short, so a tolerant breakout with onboard level circuitry never false-positives).
   `SUPPLY_PIN_NAMES` exempts the target's own power/ground/enable pins so a shared 5V rail
   doesn't trip the rule.
+- `pullup_exceeds_domain` (error) flags a resistor whose two nodes are a signal net and a rail
+  net where the rail (from the module-level `buildNetVolts(graph, circuit)` best-effort net→volts
+  map — MCU 5V/3V3 pins, `voltage_source`/`solar_panel`, `regulator` OUT, `buck_converter` OUT)
+  exceeds `MAX_INPUT_VOLTS` for some other pin sharing the signal net: the line idles at the
+  destructive voltage even with every driver tri-stated (TC7's `RPU1` pulling a Raspberry Pi UART
+  net up to 5V). Like `voltage_domain_overdrive`, `SUPPLY_PIN_NAMES` exempts the target's own
+  power pins, and nets `buildNetVolts` has no confident value for are simply absent from the map
+  rather than treated as 0V.
 - `applySafeAutoFixes(circuit, violations)` applies additive-only repairs (100k gate
   pull-down, 1N4007 flyback diode) in the degraded path and marks them `autoFixed`;
   anything that would rearrange existing parts stays a surfaced violation.
