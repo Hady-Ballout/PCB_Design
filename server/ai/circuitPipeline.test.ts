@@ -41,12 +41,19 @@ const opampCircuit = {
   notes: [],
 };
 
-// Arduino Uno pin order: 5V,3V3,GND,VIN,D2,D3,D5,D9,D13,A0,A1,A2 (1-based pin numbers below).
+// Arduino Uno pin order (FIXED_PIN_NAMES.arduino_uno, 24 pins):
+// 5V,3V3,GND,VIN,D0..D13,A0..A5. GND -> '0' (index 2), D13 -> 'D13' (index 17),
+// every other pin is NC_U1_<index+1>.
 const unoCircuit = {
   title: 'Uno Blink',
   type: 'mcu_blink',
   supplyVoltage: 5,
-  nodes: ['0', 'D13', 'LED_A', 'NC_U1_1', 'NC_U1_2', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+  nodes: [
+    '0', 'D13', 'LED_A',
+    'NC_U1_1', 'NC_U1_2', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8',
+    'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12', 'NC_U1_13', 'NC_U1_14', 'NC_U1_15',
+    'NC_U1_16', 'NC_U1_17', 'NC_U1_19', 'NC_U1_20', 'NC_U1_21', 'NC_U1_22', 'NC_U1_23', 'NC_U1_24',
+  ],
   components: [
     {
       ref: 'U1',
@@ -55,7 +62,10 @@ const unoCircuit = {
       nodes: [
         'NC_U1_1', 'NC_U1_2', '0', 'NC_U1_4',
         'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8',
-        'D13', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12',
+        'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12',
+        'NC_U1_13', 'NC_U1_14', 'NC_U1_15', 'NC_U1_16',
+        'NC_U1_17', 'D13', 'NC_U1_19', 'NC_U1_20',
+        'NC_U1_21', 'NC_U1_22', 'NC_U1_23', 'NC_U1_24',
       ],
       footprint: 'Module:Arduino_UNO_R3',
     },
@@ -296,7 +306,8 @@ describe('circuit generation pipeline', () => {
 
     expect(result.circuit).toEqual(opampCircuit);
     const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
-    expect(retryBody.messages.at(-1).content).toContain('Floating op-amp input');
+    expect(retryBody.messages.at(-1).content).toContain('functional design errors');
+    expect(retryBody.messages.at(-1).content).toContain('opamp_input_floating');
   });
 
   it('gates stage 1 on topology errors and retries with the rule violation as correction', async () => {

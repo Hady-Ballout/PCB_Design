@@ -207,48 +207,67 @@ non-`D` ref still exports as `D_<ref>`).
 
 ## Reliability pipeline
 
-1. Ollama (or the OpenAI-compatible provider under `AI_PROVIDER`) is called with the JSON
-   schema as structured-output format (`CIRCUIT_SCHEMA`/`AI_RESPONSE_SCHEMA`).
-2. `parseCircuitResponse` repairs malformed/truncated JSON where possible.
-3. `validateCircuitResponse` / `validateCircuit` (frontend) check schema conformance,
-   including exact node counts for every positional kind (`POSITIONAL_NODE_KINDS`): all
-   `fixedPins` kinds, the compound kinds (`potentiometer` 3, `switch_spdt` 3, `rgb_led` 4,
-   `seven_segment` 9), plus `opamp`/`comparator`/`pushbutton`/BJTs/MOSFETs — everything
-   whose pins are mapped by index downstream (breadboard leg layouts, SPICE expansion).
-4. A parseable circuit is then gated on the **topology rule engine**
-   (`checkCircuitTopology`, `src/core/topologyRules.js`) — functional design rules that
-   net-continuity checks cannot see: GPIO driving a heavy load with no transistor stage,
-   the divider-powered-load pattern, LEDs without series resistors, reversed polarity,
-   floating bases/gates, missing flyback diodes, missing pull-ups, GPIO current budgets,
-   floating op-amp inputs, stepper coils without a ULN2003 driver
-   (`stepper_missing_driver`), and WS2812 strips powered from a GPIO
-   (`led_strip_power_from_gpio`). Error-severity violations become a corrective message
-   (`composeTopologyCorrection`) fed back to the model.
-5. Up to `MAX_GENERATION_ATTEMPTS` (3) attempts run in `parseWithCorrectionRetry`:
-   structural failures (bad JSON/schema/SPICE) retry with the parser error; topology
-   errors retry with the rule violations. Compound-part SPICE mismatches (e.g. one bare
-   `DLED1` diode line instead of derived `DLED1_R/_G/_B` lines) produce a correction
-   message that spells out the expected derived-line names.
-6. If the final attempt still fails only the SPICE-vs-JSON consistency check
-   (`spice_validation`), the deck is regenerated deterministically from the canonical
-   JSON via `toSpice` instead of failing the chat turn.
-7. **Never a terminal failure once anything parsed**: after the retry budget, the
-   best-scoring candidate (fewest error violations; later attempt wins ties) is accepted
-   with `generation.degraded: true`, safe additive auto-fixes are applied
-   (`applySafeAutoFixes`: MOSFET gate pull-down, flyback diode — marked `autoFixed`), and
-   the surviving violations ship in the response `issues` for the UI to surface. A hard
-   throw only happens when all three attempts failed structurally.
-8. `reconcileCircuitRevision` merges the new circuit against the previous confirmed design
-   (a revision, not a fresh generation, when `currentDesign` is present); the server
-   re-runs the topology check on the reconciled circuit before responding.
-9. Streamed SPICE is marked `provisional`/`correcting` until the full circuit validates.
-10. On structural failure, the previous confirmed SPICE/circuit is restored — the UI never
-    silently replaces a working design with a broken one.
+The live path is `runCircuitPipeline` (`server/ai/circuitPipeline.ts`), which `/api/generate-circuit`
+(`server/index.ts`) calls for every generate turn. It runs three sequential AI stages — circuit
+generation (stage 1), reviewer (stage 2), reply (stage 3) — sharing one retry helper
+(`parseWithCorrectionRetry`: the first attempt, then at most one retry per stage with corrective
+feedback appended to the prompt). **Only stage 1 is gated on functional topology**; stages 2 and 3
+retry only on structural JSON/schema failures.
+
+1. Ollama (or the OpenAI-compatible provider under `AI_PROVIDER`) is called with the JSON schema
+   as structured-output format (`CIRCUIT_SCHEMA`/`STAGE1_RESPONSE_SCHEMA` for stage 1).
+2. `parseStage1Circuit` extracts the top-level `circuit` object (`findBalancedJson` detects a
+   missing/truncated/malformed JSON object and throws a retryable error) and
+   `validateCircuitResponse` / `validateCircuit` (frontend) check schema conformance, including
+   exact node counts for every positional kind (`POSITIONAL_NODE_KINDS`): all `fixedPins` kinds,
+   the compound kinds (`potentiometer` 3, `switch_spdt` 3, `rgb_led` 4, `seven_segment` 9), plus
+   `opamp`/`comparator`/`pushbutton`/BJTs/MOSFETs — everything whose pins are mapped by index
+   downstream (breadboard leg layouts, SPICE expansion). A schema failure retries once with the
+   validation error as corrective feedback.
+3. Every circuit that parses on either attempt is scored by the **topology rule engine**
+   (`checkCircuitTopology`, `src/core/topologyRules.js`) via a `topologyGate` closure passed as
+   `parseWithCorrectionRetry`'s `checkCorrection` hook — functional design rules that
+   net-continuity checks cannot see: GPIO driving a heavy load with no transistor stage, the
+   divider-powered-load pattern, LEDs without series resistors, reversed polarity, floating
+   bases/gates, missing flyback diodes, missing pull-ups, GPIO current budgets, floating op-amp
+   inputs, wrong fixed-pin node counts, stepper coils without a ULN2003 driver
+   (`stepper_missing_driver`), and WS2812 strips powered from a GPIO (`led_strip_power_from_gpio`).
+   Error-severity violations on the first attempt become a corrective message
+   (`composeTopologyCorrection`) fed back to the model for one retry; **warning**-severity
+   violations never block or trigger a retry.
+4. **Never a terminal failure once one attempt parsed**: the gate keeps every attempt's circuit
+   and violation list, and after the (at most two-attempt) budget the **best attempt** (fewest
+   error-severity violations; later attempt wins ties) is accepted. `applySafeAutoFixes` then
+   applies additive-only repairs (MOSFET gate pull-down, flyback diode — marked `autoFixed`) to
+   that best attempt **before the reviewer stage runs**, so stages 2 and 3 see the repaired
+   circuit. A hard throw only happens when stage 1 fails structurally on both attempts.
+5. The reviewer stage (`runReviewerStage`) may independently revise the circuit
+   (`ok: false` + a corrected `circuit`); its issues are folded into the reply-stage prompt.
+   Neither the reviewer nor the reply stage re-runs the topology gate.
+6. `reconcileCircuitRevision` (`server/circuit/circuitResponse.ts`) merges the pipeline's final
+   circuit against the previous confirmed design (a revision, not a fresh generation, when
+   `currentDesign` is present); `server/index.ts` then re-runs `checkCircuitTopology` on the
+   reconciled circuit and ships any surviving violations in the response `issues` for the UI to
+   surface — never fatal at this point.
+7. SPICE is always derived deterministically from the JSON circuit (`toSpice`), never requested
+   from the model on this path, so there is no SPICE-vs-JSON consistency retry here. Streamed
+   SPICE is marked `provisional`/`correcting` until the full circuit validates.
+8. On structural failure, the previous confirmed SPICE/circuit is restored — the UI never
+   silently replaces a working design with a broken one.
+
+A structurally similar but independent single-shot generator, `generateCircuitWithOllama`
+(`server/ai/ollamaProvider.ts`), keeps an older 3-attempt (`MAX_GENERATION_ATTEMPTS`)
+topology-gated retry loop that also asks the model for SPICE directly and retries once on a
+SPICE-vs-JSON mismatch (`spice_validation`) before regenerating the deck deterministically as a
+last resort. It reuses the same `checkCircuitTopology` / `composeTopologyCorrection` /
+`applySafeAutoFixes` calls, but it is **not called from any live route** — `/api/generate-circuit`
+uses `runCircuitPipeline` exclusively. It remains covered by `ollamaProvider.test.ts`.
 
 ## Topology rule engine (`src/core/topologyRules.js`)
 
-A pure, shared module (plain JS + `.d.ts`, imported by both the server retry loop and the
-frontend) that checks *functional* correctness on top of schema/continuity validation. It
+A pure, shared module (plain JS + `.d.ts`, imported by the server's stage-1 topology gate in
+`circuitPipeline.ts`, the legacy retry loop in `ollamaProvider.ts`, and the frontend) that checks
+*functional* correctness on top of schema/continuity validation. It
 exists because a circuit can have perfect net continuity and still be wrong — the canonical
 case: a buzzer on an ESP32 GPIO net fed from 3V3 with a resistor divider to ground and no
 transistor anywhere. Every net checks out; the GPIO cannot switch the load.
