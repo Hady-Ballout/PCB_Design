@@ -113,10 +113,29 @@ describe('microcontroller boards', () => {
       ],
     };
     const text = describeBreadboard(circuit, circuitToBreadboard(circuit));
-    expect(text).toContain('U1  arduino_uno Uno R3  [arduino_uno]');
+    expect(text).toContain('U1  arduino_uno Uno R3  [off-board module — flying leads]');
     expect(text).toMatch(/pin18 \(D13\): LED/);
     expect(text).toMatch(/pin2 \(3V3\): not connected -> unplaced/);
     expect(text).toContain('OK: wiring matches the netlist (this checks connectivity only — see DESIGN RULE FINDINGS and WARNINGS for everything else).');
+  });
+
+  it('labels off-board modules instead of claiming a strip', () => {
+    const circuit = {
+      title: 'uno', type: 'test', supplyVoltage: 5,
+      nodes: ['VCC', 'MID', '0'],
+      components: [
+        {
+          ref: 'U1', kind: 'arduino_uno', value: 'arduino_uno', footprint: '',
+          nodes: Array.from({ length: 24 }, (_, i) => (i === 0 ? 'VCC' : i === 2 ? '0' : `NC_U1_${i + 1}`)),
+        },
+        { ref: 'R1', kind: 'resistor', value: '330', nodes: ['VCC', 'MID'], footprint: '' },
+        { ref: 'D1', kind: 'led', value: 'red', nodes: ['MID', '0'], footprint: '' },
+      ],
+    };
+    const text = describe_(circuit);
+    const u1Line = text.split('\n').find((line) => /^ {2}U1 {2}arduino_uno/.test(line));
+    expect(u1Line).toMatch(/\[off-board module — flying leads\]/);
+    expect(u1Line).not.toMatch(/on (top|bottom) strip/);
   });
 });
 

@@ -93,7 +93,10 @@ export function describeBreadboard(circuit, model) {
   if (!(model?.parts?.length)) push('  (none)');
   (model?.parts ?? []).forEach((part) => {
     const value = part.value ? ` ${part.value}` : '';
-    push(`  ${part.ref}  ${part.kind}${value}  [${part.body}] on ${part.strip} strip`);
+    const where = part.meta?.slot
+      ? '[off-board module — flying leads]'
+      : `[${part.body}] on ${part.strip} strip`;
+    push(`  ${part.ref}  ${part.kind}${value}  ${where}`);
     const labels = pinLabelsFor(part);
     (part.pinNets ?? []).forEach((net, index) => {
       const label = labels?.[index] ? ` (${labels[index]})` : '';
