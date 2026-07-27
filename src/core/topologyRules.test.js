@@ -952,6 +952,44 @@ describe('orphan_supply', () => {
   });
 });
 
+describe('dead_active_device', () => {
+  // TC7's ESP32: only 3V3/GND wired (every other pin left NC), sitting next to
+  // a working LED loop so the circuit as a whole is clearly "doing something"
+  // — just not through U2. The LED loop's supply shares U2's 3V3 net so that
+  // net carries 2 members and single_pin_net (Task 7) doesn't co-fire noise;
+  // the assertion below checks id/ref containment regardless.
+  it('flags an esp32 wired only to power and ground next to a working LED loop (TC7)', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('esp32', 'U2', { '3V3': 'VCC33', GND: '0' }),
+      { ref: 'R1', kind: 'resistor', value: '330', nodes: ['VCC33', 'LEDA'] },
+      { ref: 'DLED1', kind: 'led', value: 'red', nodes: ['LEDA', '0'] },
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'dead_active_device');
+    expect(hit).toBeDefined();
+    expect(hit.severity).toBe('warning');
+    expect(hit.refs).toContain('U2');
+    expect(hit.message).toContain('U2');
+    expect(result.ok).toBe(true); // warning severity never flips ok
+  });
+
+  it('stays silent when a GPIO pin is wired to a signal net', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('esp32', 'U1', { '3V3': '3V3', GND: '0', GPIO2: 'SIG' }),
+      { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['SIG', '0'] },
+    ]));
+    expect(idsOf(result)).not.toContain('dead_active_device');
+  });
+
+  it('stays silent for a freshly dropped esp32 with every pin unconnected', () => {
+    // Precedent: stepper_missing_driver's all-NC skip — a part just dragged
+    // onto the canvas shouldn't be flagged before the user has wired anything.
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('esp32', 'U1', {}),
+    ]));
+    expect(idsOf(result)).not.toContain('dead_active_device');
+  });
+});
+
 describe('composeTopologyCorrection', () => {
   it('renders numbered errors with fixes and a correction instruction', () => {
     const { violations } = checkCircuitTopology(esp32BuzzerBug);

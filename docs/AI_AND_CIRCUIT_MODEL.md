@@ -345,6 +345,11 @@ transistor anywhere. Every net checks out; the GPIO cannot switch the load.
   post-LC rail going nowhere). Deliberately conservative: any downstream pin outside that
   filter-kinds set silences it, since verifying the load is *appropriate* is out of scope —
   only that one exists at all.
+- `dead_active_device` (warning) flags an MCU (`MCU_KINDS`) or wiring-only module
+  (`WIRING_ONLY_KINDS`) whose only connected pins land on ground or a `graph.supplyNets`
+  member — it participates in nothing (TC7's ESP32 with only `3V3`/`GND` wired, TC1's
+  Arduino). A part with every pin left `NC_` (freshly dropped from the library, precedent:
+  `stepper_missing_driver`'s all-NC skip) stays silent rather than flagged.
 - `applySafeAutoFixes(circuit, violations)` applies additive-only repairs (100k gate
   pull-down, 1N4007 flyback diode) in the degraded path and marks them `autoFixed`;
   anything that would rearrange existing parts stays a surfaced violation.

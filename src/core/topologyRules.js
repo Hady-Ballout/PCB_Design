@@ -19,6 +19,7 @@ import {
   DEFAULT_PIN_COUNT_BY_KIND,
   FIXED_PIN_NAMES,
   MCU_KINDS,
+  WIRING_ONLY_KINDS,
   kindLabel,
 } from './componentKinds.js';
 import { buckVolts, parseVolts } from './sim/simValues.js';
@@ -969,6 +970,31 @@ const TOPOLOGY_RULES = [
             'orphan_supply', 'warning', [part.ref], [outNet],
             `${part.ref} (${kindLabel(part.kind)}) regulates net "${outNet}" but nothing consumes it — only its own filter parts sit downstream.`,
             `Feed a load from "${outNet}" (for example the MCU's supply input), or remove ${part.ref} and its filter parts.`,
+          ));
+        }
+      }
+      return found;
+    },
+  },
+  {
+    // An MCU or wiring-only module whose only live connections are power and
+    // ground: it participates in nothing (TC7's ESP32, TC1's Arduino).
+    id: 'dead_active_device',
+    severity: 'warning',
+    check: (graph, circuit) => {
+      const found = [];
+      for (const part of circuit.components) {
+        if (!MCU_KINDS.has(part.kind) && !WIRING_ONLY_KINDS.has(part.kind)) continue;
+        const live = (part.nodes ?? [])
+          .map((node, index) => ({ net: String(node), index }))
+          .filter(({ net, index }) => net && !isUnconnectedTerminal(net, part.ref, index + 1));
+        if (!live.length) continue; // fresh library part: stay silent
+        const signals = live.filter(({ net }) => net !== '0' && !graph.supplyNets.has(net));
+        if (!signals.length) {
+          found.push(violation(
+            'dead_active_device', 'warning', [part.ref], live.map(({ net }) => net),
+            `${part.ref} (${kindLabel(part.kind)}) connects only to power and ground — no signal pin participates, so it does nothing in this circuit.`,
+            `Wire ${part.ref}'s data/control pins into the circuit, or remove it.`,
           ));
         }
       }
