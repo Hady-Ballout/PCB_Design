@@ -366,6 +366,11 @@ transistor anywhere. Every net checks out; the GPIO cannot switch the load.
   the ADJ part, which needs an external feedback divider this model doesn't carry (TC4 generated
   an "LM2596-4.0"). `buckVolts` defaults to 5V for a bare "LM2596" with no numeric suffix, so a
   generic reference stays silent rather than being misread as an unreal variant.
+- `missing_supply_decoupling` (warning) flags a board with two or more `DECOUPLED_IC_KINDS`
+  parts (`opamp`, `comparator`, `timer_555`, `shift_register`, `adc_module`) sharing the
+  supply and not one `capacitor` anywhere with one node on `graph.supplyNets` and the other
+  on ground (TC1: ten op amps, zero decoupling). One warning for the whole board, not one per
+  IC — a single 100nF bypass cap from any supply net to ground silences it.
 - `applySafeAutoFixes(circuit, violations)` applies additive-only repairs (100k gate
   pull-down, 1N4007 flyback diode) in the degraded path and marks them `autoFixed`;
   anything that would rearrange existing parts stays a surfaced violation.

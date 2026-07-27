@@ -1090,6 +1090,65 @@ describe('buck_unreal_part_number', () => {
   });
 });
 
+describe('missing_supply_decoupling', () => {
+  // Two op amps on one supply net, each legally wired (unity-buffer feedback,
+  // IN+ pulled to a 2-member net) so the only relevant finding is decoupling —
+  // neither opamp_input_floating nor single_pin_net should fire.
+  const twoOpampsOn1Supply = (extraComponents = []) => circuitOf([
+    { ref: 'V1', kind: 'voltage_source', value: '9V', nodes: ['VCC', '0'] },
+    { ref: 'XU1', kind: 'opamp', value: 'LM358', nodes: ['VIN1', 'VOUT1', 'VOUT1', 'VCC', '0'] },
+    { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VIN1', '0'] },
+    { ref: 'XU2', kind: 'opamp', value: 'LM358', nodes: ['VIN2', 'VOUT2', 'VOUT2', 'VCC', '0'] },
+    { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['VIN2', '0'] },
+    ...extraComponents,
+  ]);
+
+  it('warns once for ten op amps sharing a rail with zero decoupling (TC1-shaped)', () => {
+    const components = [{ ref: 'V1', kind: 'voltage_source', value: '9V', nodes: ['VCC', '0'] }];
+    for (let index = 1; index <= 10; index += 1) {
+      components.push({ ref: `XU${index}`, kind: 'opamp', value: 'LM358', nodes: [`VIN${index}`, `VOUT${index}`, `VOUT${index}`, 'VCC', '0'] });
+      components.push({ ref: `R${index}`, kind: 'resistor', value: '10k', nodes: [`VIN${index}`, '0'] });
+    }
+    const result = checkCircuitTopology(circuitOf(components));
+    const hits = result.violations.filter((entry) => entry.id === 'missing_supply_decoupling');
+    expect(hits).toHaveLength(1);
+    expect(hits[0].severity).toBe('warning');
+    for (let index = 1; index <= 10; index += 1) {
+      expect(hits[0].refs).toContain(`XU${index}`);
+    }
+  });
+
+  it('flags two op amps sharing a supply net with zero capacitors, listing both refs', () => {
+    const result = checkCircuitTopology(twoOpampsOn1Supply());
+    const hit = result.violations.find((entry) => entry.id === 'missing_supply_decoupling');
+    expect(hit).toBeDefined();
+    expect(hit.severity).toBe('warning');
+    expect(hit.refs).toEqual(expect.arrayContaining(['XU1', 'XU2']));
+    // Only the decoupling warning is relevant: the fixture must not trip the
+    // floating-input or single-pin-net rules, and must not carry any error.
+    expect(idsOf(result)).not.toContain('opamp_input_floating');
+    expect(idsOf(result)).not.toContain('single_pin_net');
+    expect(result.ok).toBe(true);
+  });
+
+  it('stays silent with one 100nF capacitor from the supply net to ground', () => {
+    const result = checkCircuitTopology(twoOpampsOn1Supply([
+      { ref: 'C1', kind: 'capacitor', value: '100n', nodes: ['VCC', '0'] },
+    ]));
+    expect(idsOf(result)).not.toContain('missing_supply_decoupling');
+    expect(result.ok).toBe(true);
+  });
+
+  it('stays silent with a single IC (below the two-IC threshold)', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '9V', nodes: ['VCC', '0'] },
+      { ref: 'XU1', kind: 'opamp', value: 'LM358', nodes: ['VIN1', 'VOUT1', 'VOUT1', 'VCC', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VIN1', '0'] },
+    ]));
+    expect(idsOf(result)).not.toContain('missing_supply_decoupling');
+  });
+});
+
 describe('composeTopologyCorrection', () => {
   it('renders numbered errors with fixes and a correction instruction', () => {
     const { violations } = checkCircuitTopology(esp32BuzzerBug);

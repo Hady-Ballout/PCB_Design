@@ -24,6 +24,9 @@ import {
 } from './componentKinds.js';
 import { buckVolts, parseVolts } from './sim/simValues.js';
 
+// ICs that need local supply decoupling: expected to have a bypass cap from
+// their supply net to ground somewhere on the board.
+const DECOUPLED_IC_KINDS = new Set(['opamp', 'comparator', 'timer_555', 'shift_register', 'adc_module']);
 const RESISTIVE_KINDS = new Set(['resistor', 'load', 'photoresistor', 'thermistor', 'ir_phototransistor', 'potentiometer']);
 const DRIVER_KINDS = new Set(['bjt_npn', 'bjt_pnp', 'mosfet_n', 'mosfet_p']);
 const HEAVY_LOAD_KINDS = new Set(['buzzer', 'dc_motor', 'vibration_motor']);
@@ -1071,6 +1074,27 @@ const TOPOLOGY_RULES = [
           'Pick LM2596-3.3, LM2596-5.0 or LM2596-12, or restate the requirement so a real fixed variant fits.'));
       }
       return found;
+    },
+  },
+  {
+    // Two or more ICs sharing a rail with not one capacitor from any supply
+    // net to ground (TC1: ten op amps, zero decoupling). One warning for the
+    // whole board, not one per IC.
+    id: 'missing_supply_decoupling',
+    severity: 'warning',
+    check: (graph, circuit) => {
+      const ics = circuit.components.filter((part) => DECOUPLED_IC_KINDS.has(part.kind));
+      if (ics.length < 2) return [];
+      const decoupled = circuit.components.some((part) => {
+        if (part.kind !== 'capacitor' || (part.nodes ?? []).length !== 2) return false;
+        const [a, b] = part.nodes.map(String);
+        const railSide = a === '0' ? b : b === '0' ? a : null;
+        return railSide !== null && graph.supplyNets.has(railSide);
+      });
+      if (decoupled) return [];
+      return [violation('missing_supply_decoupling', 'warning', ics.map((part) => part.ref), [],
+        `${ics.length} ICs (${ics.map((part) => part.ref).join(', ')}) share the supply with no decoupling capacitor anywhere from a supply net to ground.`,
+        "Add a 100nF capacitor across each IC's supply and ground pins, plus one 10µF bulk capacitor on the rail.")];
     },
   },
 ];
