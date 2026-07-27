@@ -43,6 +43,8 @@ const ISOLATOR_OUTPUT_PINS = {
   optocoupler: new Set(['E', 'C']),
 };
 const DIODE_KINDS = new Set(['diode', 'led', 'ir_led', 'zener', 'schottky']);
+// Kinds that belong to a regulator's own filter, not to its load.
+const SUPPLY_FILTER_KINDS = new Set(['capacitor', 'inductor', 'schottky', 'diode', 'resistor']);
 const GPIO_PIN_PATTERN = /^(D\d+|A\d+|GPIO\d+)$/;
 const MCU_LOGIC_VOLTS = { arduino_uno: 5, raspberry_pi: 3.3, esp32: 3.3 };
 // 3.3V-only parts whose bare silicon is not 5V tolerant AND whose catalog
@@ -941,6 +943,34 @@ const TOPOLOGY_RULES = [
           `Net "${net}" connects only ${pin.pinName} of ${pin.ref} — a one-pin net is either a missing connection or a pin that should be marked unused.`,
           `Connect net "${net}" to its intended destination, or rename the node to NC_${pin.ref}_${pin.pinIndex + 1}.`,
         ));
+      }
+      return found;
+    },
+  },
+  {
+    // A complete regulator subcircuit whose output feeds nothing but its own
+    // filter passives (TC4's dead LM2596). Conservative: any non-filter pin
+    // downstream silences it.
+    id: 'orphan_supply',
+    severity: 'warning',
+    check: (graph, circuit) => {
+      const found = [];
+      for (const part of circuit.components) {
+        if (part.kind !== 'regulator' && part.kind !== 'buck_converter') continue;
+        const outIndex = part.kind === 'regulator' ? 2 : 1;
+        const outNet = String(part.nodes[outIndex] ?? '');
+        if (!outNet || isUnconnectedTerminal(outNet, part.ref, outIndex + 1)) continue;
+        const island = graph.reach(outNet, { skipRefs: [part.ref] });
+        const consumer = [...island.nets]
+          .flatMap((net) => pinsOn(graph, net))
+          .find((pin) => pin.ref !== part.ref && !SUPPLY_FILTER_KINDS.has(pin.kind));
+        if (!consumer) {
+          found.push(violation(
+            'orphan_supply', 'warning', [part.ref], [outNet],
+            `${part.ref} (${kindLabel(part.kind)}) regulates net "${outNet}" but nothing consumes it — only its own filter parts sit downstream.`,
+            `Feed a load from "${outNet}" (for example the MCU's supply input), or remove ${part.ref} and its filter parts.`,
+          ));
+        }
       }
       return found;
     },

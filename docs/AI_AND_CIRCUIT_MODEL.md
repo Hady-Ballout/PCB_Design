@@ -337,6 +337,14 @@ transistor anywhere. Every net checks out; the GPIO cannot switch the load.
   for a one-pin net). Because `buildCircuitGraph` excludes `NC_`-prefixed nodes from
   `netPins` in the first place, this rule never flags an intentionally unused pin — only a
   real net that only one part reaches.
+- `orphan_supply` (warning) flags a `regulator` or `buck_converter` whose regulated output
+  (`nodes[2]`/`nodes[1]` respectively) reaches, via `graph.reach()`, nothing but its own
+  filter passives (`SUPPLY_FILTER_KINDS`: `capacitor`, `inductor`, `schottky`, `diode`,
+  `resistor`) — a complete regulator subcircuit built and wired correctly but never actually
+  feeding a load (TC4's dead LM2596: buck + inductor + catch schottky + output cap, with the
+  post-LC rail going nowhere). Deliberately conservative: any downstream pin outside that
+  filter-kinds set silences it, since verifying the load is *appropriate* is out of scope —
+  only that one exists at all.
 - `applySafeAutoFixes(circuit, violations)` applies additive-only repairs (100k gate
   pull-down, 1N4007 flyback diode) in the degraded path and marks them `autoFixed`;
   anything that would rearrange existing parts stays a surfaced violation.

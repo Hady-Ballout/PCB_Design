@@ -911,6 +911,47 @@ describe('buck_converter (LM2596)', () => {
   });
 });
 
+describe('orphan_supply', () => {
+  // A complete buck subcircuit (inductor, catch schottky, output cap) whose
+  // regulated rail feeds nothing else. Modeled on the buck_converter (LM2596)
+  // fixtures above so the missing-inductor/catch-diode/fb-misrouted/headroom
+  // rules all stay silent and only orphan_supply is left to fire.
+  const buckSubcircuit = () => ([
+    { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VIN', '0'] },
+    { ref: 'U1', kind: 'buck_converter', value: 'LM2596-5.0', nodes: ['VIN', 'SW', '0', 'VOUT', '0'] },
+    { ref: 'L1', kind: 'inductor', value: '33uH', nodes: ['SW', 'VOUT'] },
+    { ref: 'D1', kind: 'schottky', value: '1N5819', nodes: ['0', 'SW'] },
+    { ref: 'C_OUT', kind: 'capacitor', value: '220uF', nodes: ['VOUT', '0'] },
+  ]);
+
+  it('flags a buck converter whose regulated output feeds only its own filter parts (TC4 dead LM2596)', () => {
+    const result = checkCircuitTopology(circuitOf([
+      ...buckSubcircuit(),
+      // The Uno is powered from its own unrelated VIN9 source, not from the
+      // buck's output — the buck's rail is truly dead.
+      { ref: 'V2', kind: 'voltage_source', value: '9V', nodes: ['VIN9', '0'] },
+      mcuPart('arduino_uno', 'U2', { '5V': 'VIN9', GND: '0' }),
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'orphan_supply');
+    expect(hit).toBeDefined();
+    expect(hit.severity).toBe('warning');
+    expect(hit.refs).toContain('U1');
+    expect(idsOf(result)).not.toContain('buck_missing_inductor');
+    expect(idsOf(result)).not.toContain('buck_missing_catch_diode');
+    expect(idsOf(result)).not.toContain('buck_fb_misrouted');
+    expect(idsOf(result)).not.toContain('buck_insufficient_headroom');
+    expect(result.ok).toBe(true); // warning severity never flips ok
+  });
+
+  it('stays silent when the post-LC rail is jumpered to a real load (Uno 5V pin on the output rail)', () => {
+    const result = checkCircuitTopology(circuitOf([
+      ...buckSubcircuit(),
+      mcuPart('arduino_uno', 'U2', { '5V': 'VOUT', GND: '0' }),
+    ]));
+    expect(idsOf(result)).not.toContain('orphan_supply');
+  });
+});
+
 describe('composeTopologyCorrection', () => {
   it('renders numbered errors with fixes and a correction instruction', () => {
     const { violations } = checkCircuitTopology(esp32BuzzerBug);
