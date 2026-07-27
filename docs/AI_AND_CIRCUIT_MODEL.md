@@ -331,6 +331,12 @@ transistor anywhere. Every net checks out; the GPIO cannot switch the load.
   net up to 5V). Like `voltage_domain_overdrive`, `SUPPLY_PIN_NAMES` exempts the target's own
   power pins, and nets `buildNetVolts` has no confident value for are simply absent from the map
   rather than treated as 0V.
+- `single_pin_net` (warning) flags any net in `graph.netPins` with exactly one member pin
+  (ground `0` exempted) — it carries no current, so it's either a missing connection or a
+  pin that should have been named `NC_<ref>_<n>` (TC2's `VCC5` claimed an entire power rail
+  for a one-pin net). Because `buildCircuitGraph` excludes `NC_`-prefixed nodes from
+  `netPins` in the first place, this rule never flags an intentionally unused pin — only a
+  real net that only one part reaches.
 - `applySafeAutoFixes(circuit, violations)` applies additive-only repairs (100k gate
   pull-down, 1N4007 flyback diode) in the degraded path and marks them `autoFixed`;
   anything that would rearrange existing parts stays a surfaced violation.

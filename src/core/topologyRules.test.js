@@ -469,10 +469,42 @@ describe('pullup_exceeds_domain', () => {
   it('stays silent when the pull-up references a 3.3V rail (esp32 3V3)', () => {
     const result = checkCircuitTopology(circuitOf([
       mcuPart('esp32', 'U1', { '3V3': 'VCC33', GND: '0', GPIO21: 'UART_TX' }),
-      mcuPart('raspberry_pi', 'U3', { '5V': 'VCC5', GND: '0', GPIO9: 'UART_TX' }),
+      // No '5V' mapping here: nothing else on the fixture references a 5V
+      // rail, so wiring U3's 5V pin to its own net would leave it a
+      // single-pin net (single_pin_net); the default NC_U3_1 placeholder
+      // keeps this fixture testing exactly one thing — the pull-up domain.
+      mcuPart('raspberry_pi', 'U3', { GND: '0', GPIO9: 'UART_TX' }),
       { ref: 'RPU1', kind: 'resistor', value: '10k', nodes: ['UART_TX', 'VCC33'] },
     ]));
     expect(idsOf(result)).not.toContain('pullup_exceeds_domain');
+  });
+});
+
+describe('single_pin_net', () => {
+  it('warns when a rail is claimed by a single pin (TC2 VCC5)', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('arduino_uno', 'U1', { '5V': 'VCC5', GND: '0', D2: 'LEDA' }),
+      { ref: 'R1', kind: 'resistor', value: '330', nodes: ['LEDA', 'LEDK'] },
+      { ref: 'DLED1', kind: 'led', value: 'red', nodes: ['LEDK', '0'] },
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'single_pin_net');
+    expect(hit).toBeDefined();
+    expect(hit.severity).toBe('warning');
+    expect(hit.refs).toEqual(['U1']);
+    expect(hit.message).toContain('VCC5');
+    expect(hit.fix).toContain('NC_U1_1');
+  });
+
+  it('stays silent when the net has two members', () => {
+    const result = checkCircuitTopology(circuitOf([
+      mcuPart('arduino_uno', 'U1', { '5V': 'VCC5', GND: '0', D2: 'LEDA' }),
+      { ref: 'R1', kind: 'resistor', value: '330', nodes: ['LEDA', 'LEDK'] },
+      { ref: 'DLED1', kind: 'led', value: 'red', nodes: ['LEDK', '0'] },
+      // Second member on VCC5 (a bog-standard decoupling cap) is all it takes
+      // to silence the warning — it doesn't touch the resistor+LED loop.
+      { ref: 'C1', kind: 'capacitor', value: '100nF', nodes: ['VCC5', '0'] },
+    ]));
+    expect(idsOf(result)).not.toContain('single_pin_net');
   });
 });
 

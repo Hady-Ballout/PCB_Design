@@ -925,6 +925,26 @@ const TOPOLOGY_RULES = [
       return found;
     },
   },
+  {
+    // A net with exactly one member pin carries no current: either a missing
+    // connection or a pin that should have been NC_<ref>_<n>. TC2's VCC5
+    // claimed an entire power rail for a one-pin net.
+    id: 'single_pin_net',
+    severity: 'warning',
+    check: (graph) => {
+      const found = [];
+      for (const [net, pins] of graph.netPins) {
+        if (net === '0' || pins.length >= 2) continue;
+        const pin = pins[0];
+        found.push(violation(
+          'single_pin_net', 'warning', [pin.ref], [net],
+          `Net "${net}" connects only ${pin.pinName} of ${pin.ref} — a one-pin net is either a missing connection or a pin that should be marked unused.`,
+          `Connect net "${net}" to its intended destination, or rename the node to NC_${pin.ref}_${pin.pinIndex + 1}.`,
+        ));
+      }
+      return found;
+    },
+  },
 ];
 
 // Kinds whose pin meaning is positional; a wrong node count silently maps the
