@@ -45,8 +45,8 @@ describe('describeBreadboard', () => {
   });
 
   it('passes the connectivity check for a well-formed build', () => {
-    expect(describe_(dividerCircuit)).toContain('OK: every net is one connected node');
-    expect(describe_(opampCircuit)).toContain('OK: every net is one connected node');
+    expect(describe_(dividerCircuit)).toContain('OK: wiring matches the netlist');
+    expect(describe_(opampCircuit)).toContain('OK: wiring matches the netlist');
   });
 
   it('labels op-amp pins by function', () => {
@@ -116,6 +116,38 @@ describe('microcontroller boards', () => {
     expect(text).toContain('U1  arduino_uno Uno R3  [arduino_uno]');
     expect(text).toMatch(/pin18 \(D13\): LED/);
     expect(text).toMatch(/pin2 \(3V3\): not connected -> unplaced/);
-    expect(text).toContain('OK: every net is one connected node on the board and no node mixes nets.');
+    expect(text).toContain('OK: wiring matches the netlist (this checks connectivity only — see DESIGN RULE FINDINGS and WARNINGS for everything else).');
+  });
+});
+
+describe('design rule findings section', () => {
+  it('prints topology violations with severity tags', () => {
+    // led with no series resistor: source -> LED -> ground
+    const circuit = {
+      title: 'bare led', type: 'test', supplyVoltage: 5,
+      nodes: ['VCC', '0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'], footprint: '' },
+        { ref: 'D1', kind: 'led', value: 'red', nodes: ['VCC', '0'], footprint: '' },
+      ],
+    };
+    const text = describeBreadboard(circuit, circuitToBreadboard(circuit));
+    expect(text).toContain('== DESIGN RULE FINDINGS ==');
+    expect(text).toContain('[error] led_no_series_resistor');
+    expect(text).not.toMatch(/== DESIGN RULE FINDINGS ==\n\(none\)/);
+  });
+
+  it('prints (none) when no rules fire', () => {
+    const circuit = {
+      title: 'clean', type: 'test', supplyVoltage: 5,
+      nodes: ['VCC', 'MID', '0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'], footprint: '' },
+        { ref: 'R1', kind: 'resistor', value: '330', nodes: ['VCC', 'MID'], footprint: '' },
+        { ref: 'D1', kind: 'led', value: 'red', nodes: ['MID', '0'], footprint: '' },
+      ],
+    };
+    const text = describeBreadboard(circuit, circuitToBreadboard(circuit));
+    expect(text).toMatch(/== DESIGN RULE FINDINGS ==\n\(none\)/);
   });
 });

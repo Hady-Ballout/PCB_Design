@@ -9,6 +9,7 @@
 import { GROUND_NET, verifyBoardConnectivity } from './breadboardModel.js';
 import { TOP_STRIP_ROW_LETTERS, BOTTOM_STRIP_ROW_LETTERS } from './breadboardGeometry.js';
 import { pinLabelsFor } from './selectionModel.js';
+import { checkCircuitTopology } from '../../core/topologyRules.js';
 
 const isUnconnectedTerminal = (node, ref, pin) =>
   /^NC_/i.test(String(node)) || String(node) === `${ref}_${pin}`;
@@ -116,10 +117,27 @@ export function describeBreadboard(circuit, model) {
   push('== CONNECTIVITY CHECK (rebuilt from holes + jumpers vs. netlist) ==');
   const issues = connectivityReport(model);
   if (!issues.length) {
-    push('OK: every net is one connected node on the board and no node mixes nets.');
+    push('OK: wiring matches the netlist (this checks connectivity only — see DESIGN RULE FINDINGS and WARNINGS for everything else).');
   } else {
     issues.forEach((issue) => push(issue));
   }
+  push();
+
+  // Netlist-level functional/topology findings (checkCircuitTopology) — wiring
+  // can pass the CONNECTIVITY CHECK above and still be functionally broken
+  // (e.g. a bare LED with no series resistor), so this section is invisible to
+  // that check and runs independently. A rule crash must never break the report.
+  push('== DESIGN RULE FINDINGS ==');
+  let findings = [];
+  try {
+    findings = checkCircuitTopology(circuit).violations;
+  } catch { /* a rule crash must never break the report */ }
+  if (!findings.length) push('(none)');
+  findings.forEach((entry) => {
+    const tag = entry.autoFixed ? 'auto-fixed' : entry.severity;
+    push(`- [${tag}] ${entry.id}: ${entry.message}`);
+    if (entry.fix && !entry.autoFixed) push(`  fix: ${entry.fix}`);
+  });
   push();
 
   push('== WARNINGS ==');
