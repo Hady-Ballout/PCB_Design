@@ -125,3 +125,27 @@ describe('rail policy', () => {
     expect(issues).toEqual([]);
   });
 });
+
+describe('board seams', () => {
+  it('flags a 190-column layout with explicit seam columns and a rail-bridging instruction (TC1)', () => {
+    const issues = checkPhysicalModel({
+      board: { columns: 190 },
+      parts: [], jumpers: [], batteries: [], nets: [], rails: {},
+    });
+    const seamIssues = issues.filter((line) => line.startsWith('SEAM:'));
+    expect(seamIssues).toHaveLength(1);
+    expect(seamIssues[0]).toContain('63');
+    expect(seamIssues[0]).toContain('126');
+    expect(seamIssues[0]).toContain('189');
+    expect(seamIssues[0]).toContain('4 full-size boards');
+    expect(seamIssues[0].toLowerCase()).toContain('bridged with a jumper');
+  });
+
+  it('is silent at exactly one full-size board (63 columns)', () => {
+    const issues = checkPhysicalModel({
+      board: { columns: 63 },
+      parts: [], jumpers: [], batteries: [], nets: [], rails: {},
+    });
+    expect(issues).toEqual([]);
+  });
+});

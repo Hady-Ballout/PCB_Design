@@ -10,6 +10,7 @@ const holeKey = (hole) => `${hole.strip}:${hole.row ?? 0}:${hole.column}`;
 const holeName = (hole) => (isRail(hole) ? `${hole.strip} col${hole.column}` : `${hole.strip} r${hole.row} c${hole.column}`);
 
 const MAX_TWO_LEAD_SPAN_COLUMNS = 5; // ~12.7mm: past any axial body + sane lead bend
+const FULL_SIZE_COLUMNS = 63; // mirror of breadboardGeometry's constant (kept literal to stay import-cycle-free)
 
 export function checkPhysicalModel(model) {
   const issues = [];
@@ -17,6 +18,7 @@ export function checkPhysicalModel(model) {
   checkRigidGeometry(model, issues);
   checkTwoLeadSpans(model, issues);
   checkRailPolicy(model, issues);
+  checkBoardSeams(model, issues);
   return issues;
 }
 
@@ -79,4 +81,12 @@ function checkRailPolicy(model, issues) {
     if (roleByNet.get(net) === 'supply') return;
     issues.push(`RAIL-POLICY: ${railKey} carries non-power net "${net}" — power rails are silkscreened red/blue and invite a 5V plug-in; route signals on the terminal strips.`);
   });
+}
+
+function checkBoardSeams(model, issues) {
+  const columns = model.board?.columns ?? 0;
+  if (columns <= FULL_SIZE_COLUMNS) return;
+  const seams = [];
+  for (let seam = FULL_SIZE_COLUMNS; seam < columns; seam += FULL_SIZE_COLUMNS) seams.push(seam);
+  issues.push(`SEAM: this layout is ${columns} columns — ${seams.length + 1} full-size boards butted together with seams after column(s) ${seams.join(', ')}. Every rail must be bridged with a jumper across each seam, and most boards also break their rails mid-board.`);
 }
