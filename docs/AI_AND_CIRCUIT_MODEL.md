@@ -223,7 +223,13 @@ retry only on structural JSON/schema failures.
    the compound kinds (`potentiometer` 3, `switch_spdt` 3, `rgb_led` 4, `seven_segment` 9), plus
    `opamp`/`comparator`/`pushbutton`/BJTs/MOSFETs — everything whose pins are mapped by index
    downstream (breadboard leg layouts, SPICE expansion). A schema failure retries once with the
-   validation error as corrective feedback.
+   validation error as corrective feedback. If that feedback named an unsupported component kind
+   (`components[i].kind "<x>" is not supported`, e.g. a requested `gps_module`/`sim800l`/`nrf24`
+   the library doesn't have), `runCircuitPipeline` harvests the kind into a `droppedKinds` set; once
+   a circuit finally validates, it appends `Requested part "<kind>" is not supported by the
+   component library and was omitted from this design.` to `circuit.notes` and tells the reply
+   stage to mention the omission — so a smaller-than-requested design confesses what it dropped
+   instead of silently shipping short of the prompt.
 3. Every circuit that parses on either attempt is scored by the **topology rule engine**
    (`checkCircuitTopology`, `src/core/topologyRules.js`) via a `topologyGate` closure passed as
    `parseWithCorrectionRetry`'s `checkCorrection` hook — functional design rules that

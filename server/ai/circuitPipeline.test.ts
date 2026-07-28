@@ -347,6 +347,41 @@ describe('circuit generation pipeline', () => {
     expect(reviewerBody.messages.at(-1).content).toContain('DFB1');
   });
 
+  it('confesses an unsupported part dropped during a correction retry instead of shrinking silently', async () => {
+    const gpsCircuit = {
+      ...validCircuit,
+      title: 'Communication Hub',
+      components: [
+        ...validCircuit.components,
+        {
+          ref: 'U2',
+          kind: 'gps_module',
+          value: 'NEO-6M',
+          nodes: ['VCC', '0', 'TX', 'RX'],
+          footprint: 'Module:GPS',
+        },
+      ],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(JSON.stringify({ circuit: gpsCircuit })))
+      .mockResolvedValueOnce(streamResponse(JSON.stringify({ circuit: validCircuit })))
+      .mockResolvedValueOnce(okReviewer())
+      .mockResolvedValueOnce(okReply());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runCircuitPipeline('Make a communication hub with GPS', []);
+
+    expect(result.circuit.notes).toEqual(
+      expect.arrayContaining([expect.stringMatching(/gps_module.*not supported.*omitted/i)]),
+    );
+
+    const retryBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(retryBody.messages.at(-1).content).toContain('gps_module');
+
+    const replyBody = JSON.parse(fetchMock.mock.calls[3][1].body);
+    expect(replyBody.messages.at(-1).content).toContain('gps_module');
+  });
+
   it('reports a classified error after stage 1 fails schema validation twice', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(streamResponse(JSON.stringify({ title: 'Incomplete' })))

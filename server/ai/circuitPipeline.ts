@@ -321,7 +321,7 @@ export function validateCircuitResponse(circuit: Record<string, unknown>): strin
         return;
       }
       if (typeof component.ref !== 'string' || !component.ref) errors.push(`${label}.ref must be a non-empty string`);
-      if (!allowedKinds.has(component.kind as string)) errors.push(`${label}.kind is not supported`);
+      if (!allowedKinds.has(component.kind as string)) errors.push(`${label}.kind "${String(component.kind)}" is not supported`);
       if (typeof component.value !== 'string' || !component.value) errors.push(`${label}.value must be a non-empty string`);
       if (!Array.isArray(component.nodes) || (component.nodes as unknown[]).length === 0 || (component.nodes as unknown[]).some((node: unknown) => typeof node !== 'string')) {
         errors.push(`${label}.nodes must be a non-empty array of strings`);
@@ -605,12 +605,13 @@ const buildStage3Messages = (
   prompt: string,
   circuit: Circuit,
   reviewIssues: string[],
+  droppedKinds: Set<string>,
   correction: CorrectionContext | null,
 ): ChatCompletionMessage[] => [
   { role: 'system', content: REPLY_SYSTEM_PROMPT },
   {
     role: 'user',
-    content: `User request: ${prompt}\nFinal circuit: ${JSON.stringify(circuit)}${reviewIssues.length ? `\nA reviewer also fixed: ${reviewIssues.join('; ')}` : ''}\nWrite the reply now.`,
+    content: `User request: ${prompt}\nFinal circuit: ${JSON.stringify(circuit)}${reviewIssues.length ? `\nA reviewer also fixed: ${reviewIssues.join('; ')}` : ''}${droppedKinds.size ? `\nUnsupported parts that were omitted and MUST be mentioned in the reply: ${[...droppedKinds].join(', ')}.` : ''}\nWrite the reply now.`,
   },
   ...(correction
     ? [{
@@ -854,12 +855,17 @@ async function runReviewerStage(circuit: Circuit): Promise<{ circuit: Circuit; i
   }
 }
 
-async function runReplyStage(prompt: string, circuit: Circuit, reviewIssues: string[]): Promise<string> {
+async function runReplyStage(
+  prompt: string,
+  circuit: Circuit,
+  reviewIssues: string[],
+  droppedKinds: Set<string>,
+): Promise<string> {
   const config = providerConfig('reply');
   try {
     return await parseWithCorrectionRetry(
       'Reply generation',
-      (correction) => sendChatCompletion(config, buildStage3Messages(prompt, circuit, reviewIssues, correction), REPLY_RESPONSE_SCHEMA),
+      (correction) => sendChatCompletion(config, buildStage3Messages(prompt, circuit, reviewIssues, droppedKinds, correction), REPLY_RESPONSE_SCHEMA),
       parseReplyResponse,
     );
   } catch (error) {
@@ -892,9 +898,19 @@ export async function runCircuitPipeline(
     return errorCount ? composeTopologyCorrection(violations) : null;
   };
 
+  // Task 20: when a correction retry was provoked by an unsupported component
+  // kind (validateCircuitResponse's `.kind "<x>" is not supported` error), the
+  // model is told to "return a smaller complete response" and typically drops
+  // the offending part rather than surfacing it. Harvest those kinds here so
+  // the final circuit/reply can confess the omission instead of silently
+  // shrinking the design.
+  const droppedKinds = new Set<string>();
   const circuit = await parseWithCorrectionRetry(
     'Circuit generation',
     async (correction, attempt) => {
+      if (correction) {
+        for (const match of correction.error.matchAll(/\.kind "([^"]+)" is not supported/g)) droppedKinds.add(match[1]);
+      }
       const messages = buildStage1Messages(prompt, history, currentDesign, memory, correction);
       if (useOllamaStream) {
         return streamOllamaChat(stage1Config, messages, STAGE1_RESPONSE_SCHEMA, (content) => {
@@ -916,6 +932,15 @@ export async function runCircuitPipeline(
     ?? { circuit, violations: [] as TopologyViolation[], errorCount: 0 };
   const repaired = applySafeAutoFixes(best.circuit, best.violations);
   let finalCircuit: Circuit = repaired.applied ? (repaired.circuit as Circuit) : best.circuit;
+  if (droppedKinds.size) {
+    finalCircuit = {
+      ...finalCircuit,
+      notes: [
+        ...(finalCircuit.notes ?? []),
+        ...[...droppedKinds].map((kind) => `Requested part "${kind}" is not supported by the component library and was omitted from this design.`),
+      ],
+    };
+  }
   let reviewIssues: string[] = [];
   let code = '';
   if (reviewerEnabled()) {
@@ -929,7 +954,7 @@ export async function runCircuitPipeline(
   }
 
   onEvent({ type: 'stage', stage: 'reply' });
-  const reply = await runReplyStage(prompt, finalCircuit, reviewIssues);
+  const reply = await runReplyStage(prompt, finalCircuit, reviewIssues, droppedKinds);
 
   return { reply, circuit: finalCircuit, code };
 }
