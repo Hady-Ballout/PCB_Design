@@ -67,3 +67,61 @@ describe('rigid geometry', () => {
     expect(issues).toEqual([]);
   });
 });
+
+describe('two-lead span', () => {
+  it('flags a two-lead part spanning 6 columns (TC4 stretched electrolytic)', () => {
+    const issues = checkPhysicalModel({
+      parts: [{ ref: 'C1', kind: 'electrolytic', body: 'twoLead', strip: 'top',
+        pinNets: ['A', 'B'], holes: [hole('top', 0, 2), hole('top', 0, 8)] }],
+      jumpers: [], batteries: [], nets: [], rails: {},
+    });
+    expect(issues.some((line) => line.startsWith('LEAD-SPAN:') && line.includes('C1'))).toBe(true);
+  });
+
+  it('is silent when a two-lead part spans 5 columns or fewer', () => {
+    const issues = checkPhysicalModel({
+      parts: [{ ref: 'C2', kind: 'electrolytic', body: 'twoLead', strip: 'top',
+        pinNets: ['A', 'B'], holes: [hole('top', 0, 2), hole('top', 0, 7)] }],
+      jumpers: [], batteries: [], nets: [], rails: {},
+    });
+    expect(issues).toEqual([]);
+  });
+
+  it('is silent for a rail-connected two-lead part regardless of span (jumper-like)', () => {
+    const issues = checkPhysicalModel({
+      parts: [{ ref: 'C3', kind: 'electrolytic', body: 'twoLead', strip: 'top',
+        pinNets: ['A', 'B'], holes: [hole('railTopPlus', 0, 2), hole('top', 0, 9)] }],
+      jumpers: [], batteries: [], nets: [], rails: {},
+    });
+    expect(issues).toEqual([]);
+  });
+});
+
+describe('rail policy', () => {
+  it('flags a power rail carrying a non-supply net (TC1 SIG on VBIAS rail)', () => {
+    const issues = checkPhysicalModel({
+      parts: [], jumpers: [], batteries: [],
+      nets: [{ net: 'SIG', role: 'signal' }],
+      rails: { railTopPlus: 'SIG' },
+    });
+    expect(issues.some((line) => line.startsWith('RAIL-POLICY:') && line.includes('railTopPlus') && line.includes('SIG'))).toBe(true);
+  });
+
+  it('is silent for a supply-role net on a rail', () => {
+    const issues = checkPhysicalModel({
+      parts: [], jumpers: [], batteries: [],
+      nets: [{ net: 'VCC', role: 'supply' }],
+      rails: { railTopPlus: 'VCC' },
+    });
+    expect(issues).toEqual([]);
+  });
+
+  it('is silent for ground on a rail', () => {
+    const issues = checkPhysicalModel({
+      parts: [], jumpers: [], batteries: [],
+      nets: [],
+      rails: { railBottomMinus: '0' },
+    });
+    expect(issues).toEqual([]);
+  });
+});

@@ -9,10 +9,14 @@ const isRail = (holeOrKey) => String(holeOrKey.strip ?? holeOrKey).startsWith('r
 const holeKey = (hole) => `${hole.strip}:${hole.row ?? 0}:${hole.column}`;
 const holeName = (hole) => (isRail(hole) ? `${hole.strip} col${hole.column}` : `${hole.strip} r${hole.row} c${hole.column}`);
 
+const MAX_TWO_LEAD_SPAN_COLUMNS = 5; // ~12.7mm: past any axial body + sane lead bend
+
 export function checkPhysicalModel(model) {
   const issues = [];
   checkOccupancy(model, issues);
   checkRigidGeometry(model, issues);
+  checkTwoLeadSpans(model, issues);
+  checkRailPolicy(model, issues);
   return issues;
 }
 
@@ -53,5 +57,26 @@ function checkRigidGeometry(model, issues) {
     if (columns.length && columns[columns.length - 1] - columns[0] + 1 !== columns.length) {
       issues.push(`GEOMETRY: ${part.ref}'s pins occupy non-contiguous columns (${columns.join(', ')}) — a rigid package has consecutive legs.`);
     }
+  });
+}
+
+function checkTwoLeadSpans(model, issues) {
+  (model.parts ?? []).forEach((part) => {
+    if (part.meta?.slot) return;
+    const holes = (part.holes ?? []).filter(Boolean);
+    if (holes.length !== 2 || holes.some(isRail)) return;
+    const span = Math.abs(holes[0].column - holes[1].column);
+    if (span > MAX_TWO_LEAD_SPAN_COLUMNS) {
+      issues.push(`LEAD-SPAN: ${part.ref} (${part.kind}) spans ${span} columns (${holeName(holes[0])} -> ${holeName(holes[1])}) — beyond a real part's lead reach; place the legs closer and bridge with a jumper.`);
+    }
+  });
+}
+
+function checkRailPolicy(model, issues) {
+  const roleByNet = new Map((model.nets ?? []).map((entry) => [entry.net, entry.role]));
+  Object.entries(model.rails ?? {}).forEach(([railKey, net]) => {
+    if (net == null || net === GROUND) return;
+    if (roleByNet.get(net) === 'supply') return;
+    issues.push(`RAIL-POLICY: ${railKey} carries non-power net "${net}" — power rails are silkscreened red/blue and invite a 5V plug-in; route signals on the terminal strips.`);
   });
 }
