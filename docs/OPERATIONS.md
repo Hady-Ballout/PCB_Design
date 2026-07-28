@@ -22,8 +22,8 @@ the frontend expects `VITE_API_URL` (see below) or same-origin `/api`.
 | `OLLAMA_NUM_CTX`, `OLLAMA_NUM_PREDICT` | context/output size for circuit generation |
 | `OLLAMA_NUM_PREDICT_CLARIFY`, `OLLAMA_NUM_PREDICT_ASSIST` | output budgets for the clarify round (default 512) and Plan/Ask replies (default 1024) |
 | `OLLAMA_CONTEXT_DIAGNOSTICS` | `1` to log per-request turn count/revision flag |
-| `AI_PROVIDER`, `AI_API_URL`, `AI_MODEL`, `AI_API_KEY`, `AI_MAX_TOKENS` | switch to an OpenAI-compatible provider (e.g. Z.ai/GLM) instead of Ollama |
-| `ZAI_THINKING_TYPE`, `ZAI_REASONING_EFFORT` | Z.ai-specific tuning |
+| `AI_PROVIDER`, `AI_API_URL`, `AI_MODEL`, `AI_API_KEY`, `AI_MAX_TOKENS` | switch to an OpenAI-compatible provider (e.g. Z.ai/GLM) instead of Ollama. `AI_MAX_TOKENS` overrides the request's `max_tokens`; unset, it defaults to 4096, or for Z.ai providers 12000 (30000 when `ZAI_THINKING_TYPE=enabled` — reasoning and JSON output share that one budget, so thinking mode needs the larger default to avoid `finish_reason: length` truncation) |
+| `ZAI_THINKING_TYPE`, `ZAI_REASONING_EFFORT` | Z.ai-specific tuning; `ZAI_THINKING_TYPE` is `disabled` (default) or `enabled` — enabling it raises the `AI_MAX_TOKENS` default from 12000 to 30000 (see above) |
 | `PORT`, `HOST`, `CORS_ORIGIN` | API server bind + allowed frontend origin(s); `CORS_ORIGIN` accepts a comma-separated allowlist (`server/cors.ts`) — the matching request origin is echoed back per-response, and the **first** entry is the canonical frontend URL used in verification-email links |
 | `JWT_SECRET` | **required** — the server refuses to start if it is unset |
 | `MAX_BODY_BYTES` | max request body size before a `413` is returned (default `4 MiB`) |

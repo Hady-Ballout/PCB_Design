@@ -506,6 +506,46 @@ describe('circuit generation pipeline', () => {
     });
   });
 
+  it('raises max_tokens to 30000 when Z.ai thinking is enabled, so reasoning and JSON share a bigger budget', async () => {
+    vi.stubEnv('AI_PROVIDER', 'zai');
+    vi.stubEnv('AI_API_URL', 'https://open.bigmodel.cn/api/paas/v4');
+    vi.stubEnv('AI_MODEL', 'glm-5.2');
+    vi.stubEnv('AI_API_KEY', 'test-key');
+    vi.stubEnv('ZAI_THINKING_TYPE', 'enabled');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(openAiResponse(JSON.stringify({ circuit: validCircuit })))
+      .mockResolvedValueOnce(openAiResponse(JSON.stringify({ ok: true })))
+      .mockResolvedValueOnce(openAiResponse(JSON.stringify({ reply: 'Built it.' })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await runCircuitPipeline('Make an RC filter', []);
+
+    const stage1Body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(stage1Body).toMatchObject({
+      max_tokens: 30000,
+      thinking: { type: 'enabled' },
+    });
+  });
+
+  it('lets an explicit AI_MAX_TOKENS override the Z.ai thinking-mode default', async () => {
+    vi.stubEnv('AI_PROVIDER', 'zai');
+    vi.stubEnv('AI_API_URL', 'https://open.bigmodel.cn/api/paas/v4');
+    vi.stubEnv('AI_MODEL', 'glm-5.2');
+    vi.stubEnv('AI_API_KEY', 'test-key');
+    vi.stubEnv('ZAI_THINKING_TYPE', 'enabled');
+    vi.stubEnv('AI_MAX_TOKENS', '8000');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(openAiResponse(JSON.stringify({ circuit: validCircuit })))
+      .mockResolvedValueOnce(openAiResponse(JSON.stringify({ ok: true })))
+      .mockResolvedValueOnce(openAiResponse(JSON.stringify({ reply: 'Built it.' })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await runCircuitPipeline('Make an RC filter', []);
+
+    const stage1Body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(stage1Body).toMatchObject({ max_tokens: 8000 });
+  });
+
   it('reports length-stopped output as a max-tokens budget problem', async () => {
     vi.stubEnv('AI_PROVIDER', 'zai');
     vi.stubEnv('AI_API_URL', 'https://open.bigmodel.cn/api/paas/v4');

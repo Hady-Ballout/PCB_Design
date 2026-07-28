@@ -673,19 +673,22 @@ const isZaiProvider = (provider: string): boolean => new Set(['zai', 'zhipu', 'b
 
 const shouldUseJsonResponseFormat = (): boolean => process.env.AI_RESPONSE_FORMAT !== 'text';
 
-const buildOpenAiCompatibleBody = (config: ProviderConfig, messages: ChatCompletionMessage[]): Record<string, unknown> => ({
-  model: config.model,
-  temperature: 0,
-  max_tokens: positiveIntegerOption(process.env.AI_MAX_TOKENS, isZaiProvider(config.provider) ? 12000 : 4096),
-  ...(shouldUseJsonResponseFormat() ? { response_format: { type: 'json_object' } } : {}),
-  ...(isZaiProvider(config.provider)
-    ? {
-        thinking: { type: process.env.ZAI_THINKING_TYPE || 'disabled' },
-        reasoning_effort: process.env.ZAI_REASONING_EFFORT || 'none',
-      }
-    : {}),
-  messages,
-});
+const buildOpenAiCompatibleBody = (config: ProviderConfig, messages: ChatCompletionMessage[]): Record<string, unknown> => {
+  const zaiThinking = (process.env.ZAI_THINKING_TYPE || 'disabled') !== 'disabled';
+  return {
+    model: config.model,
+    temperature: 0,
+    max_tokens: positiveIntegerOption(process.env.AI_MAX_TOKENS, isZaiProvider(config.provider) ? (zaiThinking ? 30000 : 12000) : 4096),
+    ...(shouldUseJsonResponseFormat() ? { response_format: { type: 'json_object' } } : {}),
+    ...(isZaiProvider(config.provider)
+      ? {
+          thinking: { type: process.env.ZAI_THINKING_TYPE || 'disabled' },
+          reasoning_effort: process.env.ZAI_REASONING_EFFORT || 'none',
+        }
+      : {}),
+    messages,
+  };
+};
 
 const openAiCompatibleHeaders = (config: ProviderConfig): Record<string, string> => {
   const headers = authHeaders(config.apiKey);

@@ -867,6 +867,40 @@ describe('Ollama circuit output', () => {
     });
   });
 
+  it('raises max_tokens to 30000 when Z.ai thinking is enabled, so reasoning and JSON share a bigger budget', async () => {
+    vi.stubEnv('AI_PROVIDER', 'zai');
+    vi.stubEnv('AI_API_URL', 'https://open.bigmodel.cn/api/paas/v4');
+    vi.stubEnv('AI_MODEL', 'glm-5.2');
+    vi.stubEnv('AI_API_KEY', 'test-key');
+    vi.stubEnv('ZAI_THINKING_TYPE', 'enabled');
+    const fetchMock = vi.fn().mockResolvedValueOnce(openAiResponse(JSON.stringify(validAiResponse)));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(streamCircuitWithOllama('Make an RC filter')).resolves.toMatchObject(parsedAiResponse);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toMatchObject({
+      max_tokens: 30000,
+      thinking: { type: 'enabled' },
+    });
+  });
+
+  it('lets an explicit AI_MAX_TOKENS override the Z.ai thinking-mode default', async () => {
+    vi.stubEnv('AI_PROVIDER', 'zai');
+    vi.stubEnv('AI_API_URL', 'https://open.bigmodel.cn/api/paas/v4');
+    vi.stubEnv('AI_MODEL', 'glm-5.2');
+    vi.stubEnv('AI_API_KEY', 'test-key');
+    vi.stubEnv('ZAI_THINKING_TYPE', 'enabled');
+    vi.stubEnv('AI_MAX_TOKENS', '8000');
+    const fetchMock = vi.fn().mockResolvedValueOnce(openAiResponse(JSON.stringify(validAiResponse)));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(streamCircuitWithOllama('Make an RC filter')).resolves.toMatchObject(parsedAiResponse);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body).toMatchObject({ max_tokens: 8000 });
+  });
+
   it('reads array-style OpenAI-compatible assistant content', async () => {
     vi.stubEnv('AI_PROVIDER', 'zai');
     vi.stubEnv('AI_API_URL', 'https://open.bigmodel.cn/api/paas/v4');
