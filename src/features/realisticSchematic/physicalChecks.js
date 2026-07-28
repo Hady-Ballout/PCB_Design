@@ -12,6 +12,7 @@ const holeName = (hole) => (isRail(hole) ? `${hole.strip} col${hole.column}` : `
 export function checkPhysicalModel(model) {
   const issues = [];
   checkOccupancy(model, issues);
+  checkRigidGeometry(model, issues);
   return issues;
 }
 
@@ -36,5 +37,21 @@ function checkOccupancy(model, issues) {
   occupants.forEach((entries) => {
     if (entries.length < 2) return;
     issues.push(`OCCUPANCY: hole ${holeName(entries[0].holeAddr)} holds ${entries.length} conductors (${entries.map((entry) => entry.label).join(', ')}) — one hole seats one lead, even on the same net.`);
+  });
+}
+
+function checkRigidGeometry(model, issues) {
+  (model.parts ?? []).forEach((part) => {
+    if (part.meta?.slot) return; // off-board module: flying leads may go anywhere
+    const holes = (part.holes ?? []).filter(Boolean);
+    if (holes.length <= 2) return; // two-lead parts bend; Task 15 bounds their span
+    const railHoles = holes.filter(isRail);
+    if (railHoles.length) {
+      issues.push(`GEOMETRY: ${part.ref} has ${railHoles.length} pin(s) on a power rail (${railHoles.map(holeName).join(', ')}) while its body sits in the terminal strips — a rigid package cannot reach the board edge; those pins need jumpers instead.`);
+    }
+    const columns = [...new Set(holes.filter((h) => !isRail(h)).map((h) => h.column))].sort((a, b) => a - b);
+    if (columns.length && columns[columns.length - 1] - columns[0] + 1 !== columns.length) {
+      issues.push(`GEOMETRY: ${part.ref}'s pins occupy non-contiguous columns (${columns.join(', ')}) — a rigid package has consecutive legs.`);
+    }
   });
 }
