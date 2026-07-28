@@ -133,7 +133,7 @@ export function describeBreadboard(circuit, model) {
   push('== DESIGN RULE FINDINGS ==');
   let findings = [];
   try {
-    findings = checkCircuitTopology(circuit).violations;
+    findings = checkCircuitTopology(circuit).violations ?? [];
   } catch { /* a rule crash must never break the report */ }
   if (!findings.length) push('(none)');
   findings.forEach((entry) => {

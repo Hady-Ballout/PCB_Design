@@ -171,6 +171,11 @@ export function circuitToBreadboard(circuit, overrides = {}) {
   // unlike cosmetic `warnings`.
   const integrityIssues = [];
   const rails = { railTopPlus: null, railTopMinus: null, railBottomPlus: null, railBottomMinus: null };
+  // Nets that are genuinely a power supply — battery/source positive terminals
+  // and MCU 5V/3V3 output pins. Used with GROUND_NET and SUPPLY_NAME_PATTERN to
+  // give railed nets a semantic role (below), so a busy SIGNAL net promoted to a
+  // rail keeps role 'signal' and legitimately trips checkRailPolicy.
+  const supplyNets = new Set();
   const jumpers = [];
   const parts = [];
   const batteries = [];
@@ -251,6 +256,7 @@ export function circuitToBreadboard(circuit, overrides = {}) {
     const [plusKey, minusKey] = index === 0
       ? ['railTopPlus', 'railTopMinus']
       : ['railBottomPlus', 'railBottomMinus'];
+    if (plusNet != null) supplyNets.add(plusNet);
     if (plusNet != null && !isRailNet(plusNet)) assignRail(plusKey, plusNet);
     if (minusNet != null && !isRailNet(minusNet)) assignRail(minusKey, minusNet);
     batteries.push({
@@ -277,7 +283,9 @@ export function circuitToBreadboard(circuit, overrides = {}) {
       if (name !== '5V' && name !== '3V3') return;
       const net = component.nodes?.[pinIndex];
       if (net == null || isUnconnectedTerminal(net, component.ref, pinIndex + 1)) return;
-      if (net === GROUND_NET || isRailNet(net)) return;
+      if (net === GROUND_NET) return;
+      supplyNets.add(net);
+      if (isRailNet(net)) return;
       const freeKey = ['railTopPlus', 'railBottomPlus'].find((key) => rails[key] == null);
       if (freeKey) assignRail(freeKey, net);
     });
@@ -710,10 +718,20 @@ export function circuitToBreadboard(circuit, overrides = {}) {
     listed.add(net);
     nets.push({ net, role, color: wireColor(net) });
   };
-  listNet(rails.railTopPlus, 'supply');
-  listNet(rails.railTopMinus, rails.railTopMinus === GROUND_NET ? 'ground' : 'supply');
-  listNet(rails.railBottomPlus, 'supply');
-  listNet(rails.railBottomMinus, rails.railBottomMinus === GROUND_NET ? 'ground' : 'supply');
+  // Derive a railed net's role semantically: ground, then any genuine supply
+  // net (battery/source positive terminal or MCU supply pin, collected in
+  // supplyNets, plus the conventional supply names), else 'signal'. A busy
+  // signal net promoted to a rail by the >=5-tap pass therefore stays 'signal',
+  // so checkRailPolicy legitimately flags it instead of being structurally inert.
+  const roleForRail = (net) => {
+    if (net === GROUND_NET) return 'ground';
+    if (supplyNets.has(net) || SUPPLY_NAME_PATTERN.test(String(net))) return 'supply';
+    return 'signal';
+  };
+  listNet(rails.railTopPlus, roleForRail(rails.railTopPlus));
+  listNet(rails.railTopMinus, roleForRail(rails.railTopMinus));
+  listNet(rails.railBottomPlus, roleForRail(rails.railBottomPlus));
+  listNet(rails.railBottomMinus, roleForRail(rails.railBottomMinus));
   netGroupKeys.forEach((_, net) => listNet(net, 'signal'));
 
   const size = boardSize(columns, slotHeights);

@@ -420,6 +420,29 @@ describe('circuitToBreadboard', () => {
     expect(model.nets.every((entry) => typeof entry.color === 'string')).toBe(true);
   });
 
+  it('flags a busy signal net that gets rail-promoted with a RAIL-POLICY warning', () => {
+    // SIG is tapped by five resistors, so the >=5-tap promotion pass gives it a
+    // whole rail. It is not a supply or ground net, so it keeps role 'signal'
+    // and checkRailPolicy must flag the signal-on-a-power-rail (TC1 behavior).
+    const busySignalCircuit = {
+      components: ['A', 'B', 'C', 'D', 'E'].map((tag, index) => ({
+        ref: `R${index + 1}`,
+        kind: 'resistor',
+        value: '1k',
+        nodes: ['SIG', tag],
+      })),
+    };
+    const model = circuitToBreadboard(busySignalCircuit);
+    expect(Object.values(model.rails)).toContain('SIG');
+    expect(model.nets.find((entry) => entry.net === 'SIG').role).toBe('signal');
+    expect(model.warnings.some((warning) => warning.startsWith('RAIL-POLICY:') && warning.includes('SIG'))).toBe(true);
+  });
+
+  it('stays RAIL-POLICY-silent when only genuine supply/ground nets are railed', () => {
+    const model = circuitToBreadboard(dividerCircuit);
+    expect(model.warnings.some((warning) => warning.startsWith('RAIL-POLICY:'))).toBe(false);
+  });
+
   it('is deterministic', () => {
     const first = circuitToBreadboard(transistorCircuit);
     const second = circuitToBreadboard(transistorCircuit);

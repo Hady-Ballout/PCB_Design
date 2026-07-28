@@ -41,7 +41,7 @@ was planned.
 | 15 | TC2 | Shredded header order | physicalChecks GEOMETRY (contiguity) | closed |
 | 16 | TC2 | Shredded header order (strict pin-position order) | none | follow-up (needs per-package pin maps) |
 | 17 | TC2 | Degree-1 net VCC5 railed | single_pin_net | closed |
-| 18 | TC2 | Degree-1 net VCC5 railed | physicalChecks RAIL-POLICY | closed |
+| 18 | TC2 | Degree-1 net VCC5 railed | single_pin_net (RAIL-POLICY stays silent — VCC5 is a genuine MCU 5V supply, not a signal net) | closed |
 | 19 | TC2 | No level shifting into RC522 | voltage_domain_overdrive | closed |
 | 20 | TC2 | No local decoupling | missing_supply_decoupling | closed |
 | 21 | TC1 | No local decoupling | missing_supply_decoupling | closed |
