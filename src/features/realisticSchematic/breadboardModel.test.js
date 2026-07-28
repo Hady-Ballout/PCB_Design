@@ -237,19 +237,27 @@ describe('circuitToBreadboard', () => {
     });
   });
 
-  it('places an opamp as a DIP-8 straddling the trench', () => {
+  it('places an opamp as a DIP-8 straddling the trench with the real LM358 pinout', () => {
     const model = circuitToBreadboard(opampCircuit);
     const dip = model.parts.find((part) => part.ref === 'XU1');
     expect(dip.body).toBe('dip');
-    // Canonical pins [IN+, IN-, OUT, V+, V-] -> DIP 3, 2, 6, 7, 4.
-    expect(dip.holes.map((hole) => hole.strip)).toEqual(['bottom', 'bottom', 'top', 'top', 'bottom']);
+    // Real LM358 DIP-8 pinout, section A: canonical [IN+, IN-, OUT, V+, V-] ->
+    // physical pins 3, 2, 1, 8, 4. Pin 4 is GND (bottom offset 3), pin 8 is
+    // V+ (top offset 0) — never the reverse.
+    expect(dip.holes.map((hole) => hole.strip)).toEqual(['bottom', 'bottom', 'bottom', 'top', 'bottom']);
     const { columnStart, columnEnd } = dip.meta;
     expect(columnEnd - columnStart).toBe(3);
     dip.holes.forEach((hole) => {
       expect(hole.column).toBeGreaterThanOrEqual(columnStart);
       expect(hole.column).toBeLessThanOrEqual(columnEnd);
     });
-    expect(dip.holes.map((hole) => hole.column - columnStart)).toEqual([2, 1, 2, 1, 3]);
+    expect(dip.holes.map((hole) => hole.column - columnStart)).toEqual([2, 1, 0, 0, 3]);
+    // OUT (index 2) sits at DIP pin 1 (bottom offset 0), V- (index 4) at DIP
+    // pin 4 = GND (bottom offset 3), V+ (index 3) at DIP pin 8 (top offset 0).
+    expect(dip.holes[2]).toMatchObject({ strip: 'bottom', column: columnStart });
+    expect(dip.holes[4]).toMatchObject({ strip: 'bottom', column: columnStart + 3 });
+    expect(dip.holes[3]).toMatchObject({ strip: 'top', column: columnStart });
+    expect(model.warnings.some((warning) => warning.includes('XU1') && warning.includes('spare section'))).toBe(true);
   });
 
   it('places a 555 timer as a DIP-8 straddling the trench', () => {
@@ -270,9 +278,10 @@ describe('circuitToBreadboard', () => {
     const model = circuitToBreadboard(comparatorCircuit);
     const dip = model.parts.find((part) => part.ref === 'XU1');
     expect(dip.body).toBe('dip');
-    expect(dip.holes.map((hole) => hole.strip)).toEqual(['bottom', 'bottom', 'top', 'top', 'bottom']);
+    expect(dip.holes.map((hole) => hole.strip)).toEqual(['bottom', 'bottom', 'bottom', 'top', 'bottom']);
     expect(dip.meta.columnEnd - dip.meta.columnStart).toBe(3);
     assertBoardMatchesNetlist(comparatorCircuit, model);
+    expect(model.warnings.some((warning) => warning.includes('XU1') && warning.includes('spare section'))).toBe(true);
   });
 
   it('places a temperature sensor in a TO-92 can across three columns', () => {

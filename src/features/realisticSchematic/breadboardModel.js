@@ -21,12 +21,13 @@ const SIGNAL_WIRE_COLORS = ['#e6b422', '#3a9e4c', '#e07020', '#4a7fe0', '#9a5fd0
 
 // Trench-straddling packages are described by a leg layout: for each strip,
 // the canonical pin index carried by the leg at each column offset (null legs
-// exist physically but carry no canonical pin). The DIP-8 layout realizes the
-// virtual 741-style pinout for the canonical 5-pin opamp [IN+, IN-, OUT, V+,
-// V-]: DIP pins 1-4 on the bottom strip at row f, pins 5-8 on the top strip at
-// row e.
+// exist physically but carry no canonical pin). The DIP-8 layout with the
+// REAL LM358/LM393 pinout for the canonical 5-pin [IN+, IN-, OUT, V+, V-]
+// contract, using section A: DIP pins 1-4 (OUT1, IN1-, IN1+, GND) left-to-
+// right on the bottom strip, pin 8 (V+) at top offset 0. Pins 5-7 are the
+// unused second section (see the spare-section warning in placeStraddle).
 const DIP_WIDTH_COLUMNS = 4;
-const OPAMP_LEG_LAYOUT = { bottom: [null, 1, 0, 4], top: [null, 3, 2, null] };
+const OPAMP_LEG_LAYOUT = { bottom: [2, 1, 0, 4], top: [3, null, null, null] };
 
 // The 555's canonical pin order [GND, TRIG, OUT, RESET, CTRL, THRES, DISCH,
 // VCC] is exactly NE555 DIP pins 1-8, so the legs map straight onto the
@@ -558,6 +559,9 @@ export function circuitToBreadboard(circuit, overrides = {}) {
       pinNets: [...nets],
       meta: { columnStart: column, columnEnd: column + widthColumns - 1 },
     });
+    if (component.kind === 'opamp' || component.kind === 'comparator') {
+      warnings.push(`${component.ref} uses section A of a dual package — tie the spare section (jumper DIP pin 6 to pin 7, pin 5 to ground) so it cannot oscillate.`);
+    }
   };
 
   // Off-board parts (MCU boards, servos, motors, relay breakouts) sit in slots
