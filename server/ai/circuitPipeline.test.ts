@@ -382,6 +382,52 @@ describe('circuit generation pipeline', () => {
     expect(replyBody.messages.at(-1).content).toContain('gps_module');
   });
 
+  it('re-appends the dropped-part confession after the reviewer returns a corrected circuit with no notes', async () => {
+    // Fix round 1 regression coverage: the confession used to be appended
+    // BEFORE the reviewer stage ran. When the reviewer returned ok: false with
+    // a freshly generated circuit (no instruction to preserve notes), that
+    // corrected circuit silently discarded the confession. The confession
+    // must now survive because it's appended after finalCircuit settles.
+    const gpsCircuit = {
+      ...validCircuit,
+      title: 'Communication Hub',
+      components: [
+        ...validCircuit.components,
+        {
+          ref: 'U2',
+          kind: 'gps_module',
+          value: 'NEO-6M',
+          nodes: ['VCC', '0', 'TX', 'RX'],
+          footprint: 'Module:GPS',
+        },
+      ],
+    };
+    // Mirrors the shape of "applies the reviewer correction..." above: the
+    // reviewer's corrected circuit is a fresh model output with its own
+    // (empty) notes array, not a copy of finalCircuit's notes.
+    const reviewerCorrectedCircuit = {
+      ...validCircuit,
+      components: [{ ...validCircuit.components[0], value: '2.2k' }],
+      notes: [],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(JSON.stringify({ circuit: gpsCircuit })))
+      .mockResolvedValueOnce(streamResponse(JSON.stringify({ circuit: validCircuit })))
+      .mockResolvedValueOnce(ollamaResponse(JSON.stringify({
+        ok: false,
+        issues: ['R1 value was implausibly low for the stated filter corner'],
+        circuit: reviewerCorrectedCircuit,
+      })))
+      .mockResolvedValueOnce(okReply());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runCircuitPipeline('Make a communication hub with GPS', []);
+
+    expect(result.circuit.notes).toEqual(
+      expect.arrayContaining([expect.stringMatching(/gps_module.*not supported.*omitted/i)]),
+    );
+  });
+
   it('reports a classified error after stage 1 fails schema validation twice', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(streamResponse(JSON.stringify({ title: 'Incomplete' })))

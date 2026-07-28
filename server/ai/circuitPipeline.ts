@@ -932,15 +932,6 @@ export async function runCircuitPipeline(
     ?? { circuit, violations: [] as TopologyViolation[], errorCount: 0 };
   const repaired = applySafeAutoFixes(best.circuit, best.violations);
   let finalCircuit: Circuit = repaired.applied ? (repaired.circuit as Circuit) : best.circuit;
-  if (droppedKinds.size) {
-    finalCircuit = {
-      ...finalCircuit,
-      notes: [
-        ...(finalCircuit.notes ?? []),
-        ...[...droppedKinds].map((kind) => `Requested part "${kind}" is not supported by the component library and was omitted from this design.`),
-      ],
-    };
-  }
   let reviewIssues: string[] = [];
   let code = '';
   if (reviewerEnabled()) {
@@ -951,6 +942,21 @@ export async function runCircuitPipeline(
       reviewIssues = reviewed.issues;
       code = reviewed.code;
     }
+  }
+
+  // Task 20 (fix round 1): append dropped-part confessions after the reviewer
+  // has settled finalCircuit. The reviewer's corrected circuit is a fresh
+  // model output with no instruction to preserve notes, so appending the
+  // confession before the reviewer stage let it be silently discarded
+  // whenever the reviewer returned ok: false.
+  if (droppedKinds.size) {
+    finalCircuit = {
+      ...finalCircuit,
+      notes: [
+        ...(finalCircuit.notes ?? []),
+        ...[...droppedKinds].map((kind) => `Requested part "${kind}" is not supported by the component library and was omitted from this design.`),
+      ],
+    };
   }
 
   onEvent({ type: 'stage', stage: 'reply' });
