@@ -3,7 +3,7 @@
 // positions up onto a photo-style body.
 import { useMemo } from 'react';
 import { FIXED_PIN_NAMES } from '../../core/componentKinds.js';
-import { HOLE_PITCH, MCU_PIN_SPACING, TRENCH_CENTER_Y, holeCenter } from './breadboardGeometry.js';
+import { HOLE_PITCH, MCU_PIN_SPACING, MCU_SLOT_HEIGHT, TRENCH_CENTER_Y, holeCenter } from './breadboardGeometry.js';
 import { MCU_PINS } from './breadboardModel.js';
 import { BAND_COLOR_HEX, capStyle, ledColor, resistorColorBands } from './partVisuals.js';
 import { pinLabelsFor } from './selectionModel.js';
@@ -974,61 +974,6 @@ function SevenSegmentBody({ part, sim }) {
       {segments}
       <circle cx={cx + 12} cy={cy + 15.5} r={1.8} fill={segFill('DP')} />
       <Silk x={x0 + 4} y={faceTop + 6.5} text={part.ref} size={4} fill="#8a9096" anchor="start" />
-    </g>
-  );
-}
-
-function Esp32Body({ part }) {
-  const left = holeCenter({ strip: 'top', column: part.meta.columnStart, row: 4 });
-  const right = holeCenter({ strip: 'top', column: part.meta.columnEnd, row: 4 });
-  const x0 = left.x - 10;
-  const x1 = right.x + 10;
-  const bodyTop = TRENCH_CENTER_Y - 24;
-  const bodyBottom = TRENCH_CENTER_Y + 24;
-  const mw = x1 - x0;
-  const mh = bodyBottom - bodyTop;
-  const ex = (f) => x0 + mw * f;
-  const ey = (f) => bodyTop + mh * f;
-  const shieldX0 = ex(0.13);
-  const shieldX1 = ex(0.52);
-  // gold castellated header pads where each pin column meets the long edges
-  const pads = [];
-  for (let column = part.meta.columnStart; column <= part.meta.columnEnd; column += 1) {
-    const cx = holeCenter({ strip: 'top', column, row: 4 }).x;
-    pads.push(
-      <GoldPad key={`pt${column}`} x={cx} y={bodyTop + 2.6} s={3} />,
-      <GoldPad key={`pb${column}`} x={cx} y={bodyBottom - 2.6} s={3} />,
-    );
-  }
-  return (
-    <g>
-      {/* matte-black ESP32 DevKit PCB with a flat inset bevel */}
-      <rect x={x0} y={bodyTop} width={mw} height={mh} rx={3} fill="url(#rsPartDip)" stroke="#000" strokeWidth="0.6" />
-      <rect x={x0 + 1.4} y={bodyTop + 1.4} width={mw - 2.8} height={mh - 2.8} rx={2.4} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="0.6" />
-      {pads}
-      {/* gold PCB antenna meander at the far-left end */}
-      <path
-        d={`M ${ex(0.03)} ${ey(0.28)} v ${mh * 0.44} h ${mw * 0.028} v ${-mh * 0.44} h ${mw * 0.028} v ${mh * 0.44} h ${mw * 0.028} v ${-mh * 0.44}`}
-        stroke="#c8a23a" strokeWidth="1.1" fill="none"
-      />
-      {/* ESP-WROOM-32 RF shield can (brushed metal) with a seam + silk */}
-      <rect x={shieldX0} y={ey(0.14)} width={shieldX1 - shieldX0} height={mh * 0.72} rx={1.5} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.5" />
-      <line x1={shieldX0 + 1.5} y1={ey(0.23)} x2={shieldX1 - 1.5} y2={ey(0.23)} stroke="rgba(255,255,255,0.5)" strokeWidth="0.4" />
-      <Silk x={(shieldX0 + shieldX1) / 2} y={ey(0.54)} text="ESP32" size={5} weight={700} fill="#3c4640" />
-      <Silk x={(shieldX0 + shieldX1) / 2} y={ey(0.72)} text="WROOM-32" size={2.8} fill="#5a636b" />
-      {/* carrier: CP2102 USB-UART + AMS1117 regulator (tab up) */}
-      <Chip x={ex(0.58)} y={ey(0.4)} w={mw * 0.1} h={mh * 0.26} />
-      <rect x={ex(0.72)} y={ey(0.22)} width={mw * 0.07} height={mh * 0.16} rx={0.6} fill="url(#rsPartDip)" stroke="#000" strokeWidth="0.4" />
-      <rect x={ex(0.72)} y={ey(0.22) - 2} width={mw * 0.07} height={2} fill="url(#rsPartTab)" />
-      {/* EN + BOOT tactile buttons */}
-      <TactButton x={ex(0.56)} y={ey(0.12)} s={4.4} />
-      <TactButton x={ex(0.56)} y={ey(0.74)} s={4.4} />
-      {/* power (red) + user (blue) LEDs */}
-      <SmdLed cx={ex(0.85)} cy={ey(0.3)} color="#e0453a" w={3.4} h={2.2} />
-      <SmdLed cx={ex(0.85)} cy={ey(0.68)} color="#3f8fe8" w={3.4} h={2.2} />
-      {/* micro-USB at the right end */}
-      <MetalConnector x={x1 - 15} y={ey(0.36)} w={17} h={mh * 0.28} notch />
-      <Silk x={ex(0.85)} y={ey(0.52)} text={part.ref} size={3.4} fill="#cfe4e6" />
     </g>
   );
 }
@@ -2249,10 +2194,9 @@ export function RealisticPart({ part, sim }) {
   if (part.body === 'led_strip') return <LedStripBody part={part} sim={sim} />;
   if (part.body === 'rfid_reader') return <RfidReaderBody part={part} sim={sim} />;
   if (part.body === 'mouse_sensor') return <MouseSensorBody part={part} sim={sim} />;
-  if (part.body === 'stepper_driver' || part.body === 'current_sensor') return <OffboardModuleBody part={part} />;
+  if (part.body === 'stepper_driver' || part.body === 'current_sensor' || part.body === 'esp32') return <OffboardModuleBody part={part} />;
   const points = part.holes.map((hole) => (hole ? holeCenter(hole) : null)).filter(Boolean);
   if (points.length === 0) return null;
-  if (part.body === 'esp32') return <Esp32Body part={part} />;
   if (part.body === 'dip') return <DipBody part={part} />;
   if (part.body === 'pushbutton') return <PushbuttonBody part={part} sim={sim} />;
   if (part.body === 'seven_segment') return <SevenSegmentBody part={part} sim={sim} />;
@@ -2334,10 +2278,7 @@ const THUMBNAIL_SPECS = {
     part: { kind: 'seven_segment', body: 'seven_segment', strip: 'top', ref: '', value: '', holes: DUMMY_THUMB_HOLES, pinNets: [], meta: { columnStart: 3, columnEnd: 7 } },
     viewBox: '167 130 80 62',
   },
-  esp32: {
-    part: { kind: 'esp32', body: 'esp32', strip: 'top', ref: '', value: '', holes: DUMMY_THUMB_HOLES, pinNets: [], meta: { columnStart: 2, columnEnd: 7 } },
-    viewBox: '150 130 100 62',
-  },
+  esp32: slotThumb('esp32', MCU_SLOT_HEIGHT, '0 8 300 106'),
   potentiometer: { part: thumbPart('potentiometer', 'module', [3, 4, 5], '10k'), viewBox: MODULE3_VIEWBOX },
   switch_spdt: { part: thumbPart('switch_spdt', 'module', [3, 4, 5]), viewBox: MODULE3_VIEWBOX },
   rgb_led: { part: thumbPart('rgb_led', 'module', [3, 4, 5, 6]), viewBox: MODULE4_VIEWBOX },

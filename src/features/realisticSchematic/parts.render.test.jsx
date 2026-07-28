@@ -78,7 +78,10 @@ describe('realistic part rendering', () => {
     expect(markup.indexOf('rsPartPi)')).toBeLessThan(markup.indexOf('rs-mcu-wires'));
   });
 
-  it('renders an ESP32 module straddling the trench', () => {
+  it('renders an off-board ESP32 DevKit as a generic slot module, not a trench straddle', () => {
+    // Task 19: a real DevKit is ~0.9-1.0" wide and 15+ columns long, so it now
+    // places off-board (like the Uno/Pi) and renders through the shared
+    // OffboardModuleBody instead of the deleted straddle-only Esp32Body.
     const { markup } = renderModel({
       title: 'ESP32 LED',
       components: [
@@ -93,7 +96,9 @@ describe('realistic part rendering', () => {
         { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['VCC3', '0'] },
       ],
     });
-    expect(markup).toContain('ESP32');
+    expect(markup).toContain('DevKit V1');
+    expect(markup).toContain('rsPcbBlue');
+    expect(markup).toContain('GPIO2');
     expect(markup).toContain('U1');
   });
 

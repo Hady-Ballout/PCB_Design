@@ -510,22 +510,38 @@ describe('circuitToBreadboard', () => {
     expect(model.rails.railBottomPlus).toBe('VCC3');
   });
 
-  it('places an ESP32 module straddling the trench like a wide DIP', () => {
+  it('places the ESP32 DevKit off-board in an MCU slot, not straddling the trench', () => {
+    // A real ESP32 DevKit is ~0.9-1.0" wide and 15+ columns long — the old
+    // 6-column e/f straddle was unbuildable (TC3/TC7). It now goes through
+    // placeOffboard like the Uno/Pi.
     const model = circuitToBreadboard(esp32Circuit);
     const esp = model.parts.find((part) => part.ref === 'U1');
+    expect(esp.meta.slot).toBeDefined();
     expect(esp.body).toBe('esp32');
-    const { columnStart, columnEnd } = esp.meta;
-    expect(columnEnd - columnStart).toBe(5);
-    // Legs split 6/6 across the trench per the DevKit layout.
-    const strips = esp.holes.map((hole) => hole?.strip);
-    [0, 1, 4, 5, 6, 7].forEach((pin) => expect(strips[pin]).toBe('bottom'));
-    [2, 3, 8, 9, 10, 11].forEach((pin) => expect(strips[pin]).toBe('top'));
-    esp.holes.forEach((hole) => {
-      expect(hole.column).toBeGreaterThanOrEqual(columnStart);
-      expect(hole.column).toBeLessThanOrEqual(columnEnd);
-    });
-    // The module supply rides the + rail like any other supply net.
+    expect(esp.strip).toBe('bottom');
+    // The module supply still rides the + rail like any other supply net.
     expect(model.rails.railTopPlus).toBe('VCC3');
+
+    // MCU boards claim slot 0 ahead of peripherals regardless of circuit
+    // order (the deferredOffboard MCU-first stable sort) — verify the ESP32
+    // gets that same priority even when a peripheral is declared first.
+    const mixed = circuitToBreadboard({
+      title: 'ESP32 + servo',
+      nodes: ['VCC3', 'SIG', '0'],
+      components: [
+        { ref: 'U2', kind: 'servo', value: 'SG90', nodes: ['VCC3', '0', 'SIG'] },
+        {
+          ref: 'U1',
+          kind: 'esp32',
+          value: 'DevKit V1',
+          nodes: ['VCC3', '0', 'NC_U1_3', 'NC_U1_4', 'SIG', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12'],
+        },
+      ],
+    });
+    const espMixed = mixed.parts.find((part) => part.ref === 'U1');
+    const servo = mixed.parts.find((part) => part.ref === 'U2');
+    expect([espMixed.meta.slotIndex, servo.meta.slotIndex]).toEqual([0, 1]);
+    expect(servo.meta.slot.y - espMixed.meta.slot.y).toBe(MCU_SLOT_HEIGHT + MCU_SLOT_GAP);
   });
 
   it('places a servo in a compact off-board slot', () => {
@@ -589,6 +605,64 @@ describe('circuitToBreadboard', () => {
     expect(MCU_PINS.arduino_uno[17]).toBe('D13');
     // GPIO8-11 (SPI0) were appended in the tier-2 pin extension.
     expect(MCU_PINS.raspberry_pi.slice(10)).toEqual(['GPIO8', 'GPIO9', 'GPIO10', 'GPIO11']);
+  });
+});
+
+// Task 19 regression: TC2/TC3 stress-test reports showed an RC522 seated in
+// strip holes and an L298N straddling with rail pins. Off-board parts
+// legitimately land flying-lead holes on rails AND the bottom strip
+// (placeOffboard) — the correct regression assertion is that the part has a
+// slot, keeps its own kind as its body, and reports 'bottom' as its strip,
+// not that it avoids strips/rails outright.
+describe('Task 19: off-board module placement regression', () => {
+  it('places the RC522 RFID reader off-board next to an MCU', () => {
+    const circuit = {
+      title: 'RFID + MCU',
+      nodes: ['VCC5', 'SDA', '0'],
+      components: [
+        {
+          ref: 'U1',
+          kind: 'arduino_uno',
+          value: 'Uno R3',
+          nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'SDA', 'NC_U1_12', 'NC_U1_13', 'NC_U1_14', 'NC_U1_15', 'NC_U1_16', 'NC_U1_17', 'NC_U1_18', 'NC_U1_19', 'NC_U1_20', 'NC_U1_21', 'NC_U1_22', 'NC_U1_23', 'NC_U1_24'],
+        },
+        { ref: 'U2', kind: 'rfid_reader', value: 'RC522', nodes: ['VCC5', 'NC_U2_2', '0', 'NC_U2_4', 'NC_U2_5', 'NC_U2_6', 'NC_U2_7', 'SDA'] },
+      ],
+    };
+    const model = circuitToBreadboard(circuit);
+    const rfid = model.parts.find((part) => part.ref === 'U2');
+    expect(rfid.meta.slot).toBeDefined();
+    expect(rfid.body).toBe('rfid_reader');
+    expect(rfid.strip).toBe('bottom');
+  });
+
+  it('places the L298N motor driver off-board next to an MCU', () => {
+    const circuit = {
+      title: 'Motor driver + MCU',
+      nodes: ['VCC5', 'MIN1', 'MIN2', '0'],
+      components: [
+        {
+          ref: 'U1',
+          kind: 'arduino_uno',
+          value: 'Uno R3',
+          nodes: ['VCC5', 'NC_U1_2', '0', 'NC_U1_4', 'NC_U1_5', 'NC_U1_6', 'NC_U1_7', 'NC_U1_8', 'NC_U1_9', 'NC_U1_10', 'NC_U1_11', 'NC_U1_12', 'MIN1', 'MIN2', 'NC_U1_15', 'NC_U1_16', 'NC_U1_17', 'NC_U1_18', 'NC_U1_19', 'NC_U1_20', 'NC_U1_21', 'NC_U1_22', 'NC_U1_23', 'NC_U1_24'],
+        },
+        { ref: 'U2', kind: 'motor_driver', value: 'L298N', nodes: ['VCC5', '0', 'NC_U2_3', 'MIN1', 'MIN2', 'NC_U2_6', 'NC_U2_7', 'NC_U2_8', 'NC_U2_9', 'NC_U2_10', 'NC_U2_11', 'NC_U2_12'] },
+      ],
+    };
+    const model = circuitToBreadboard(circuit);
+    const driver = model.parts.find((part) => part.ref === 'U2');
+    expect(driver.meta.slot).toBeDefined();
+    expect(driver.body).toBe('motor_driver');
+    expect(driver.strip).toBe('bottom');
+  });
+
+  it('places an Arduino Uno off-board (a minimal MCU-only circuit)', () => {
+    const model = circuitToBreadboard(unoCircuit);
+    const uno = model.parts.find((part) => part.ref === 'U1');
+    expect(uno.meta.slot).toBeDefined();
+    expect(uno.body).toBe('arduino_uno');
+    expect(uno.strip).toBe('bottom');
   });
 });
 

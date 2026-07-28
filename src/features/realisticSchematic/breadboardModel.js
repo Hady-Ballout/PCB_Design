@@ -45,14 +45,17 @@ export const MCU_PINS = {
 };
 
 // Parts that cannot plug into a breadboard — MCU boards (Arduino Uno,
-// Raspberry Pi) and wired peripherals (servo, DC motor, relay breakout) — sit
-// in off-board slots below it with jumper wires up to the bottom strip/rails.
-// The map value is each part's slot height; MCU boards get the tall slot,
-// peripherals a compact one. The ESP32 DevKit module instead straddles the
-// trench like a wide DIP.
+// Raspberry Pi, ESP32 DevKit) and wired peripherals (servo, DC motor, relay
+// breakout) — sit in off-board slots below it with jumper wires up to the
+// bottom strip/rails. The map value is each part's slot height; MCU boards
+// get the tall slot, peripherals a compact one. A real ESP32 DevKit is
+// ~0.9-1.0" wide and 15+ columns long, so it cannot straddle the trench like
+// a DIP the way the smaller packages below do — it gets the MCU-height slot
+// instead.
 const OFFBOARD_SLOT_HEIGHTS = {
   arduino_uno: MCU_SLOT_HEIGHT,
   raspberry_pi: MCU_SLOT_HEIGHT,
+  esp32: MCU_SLOT_HEIGHT,
   servo: PERIPHERAL_SLOT_HEIGHT,
   dc_motor: PERIPHERAL_SLOT_HEIGHT,
   relay_module: PERIPHERAL_SLOT_HEIGHT,
@@ -67,9 +70,7 @@ const OFFBOARD_SLOT_HEIGHTS = {
   mouse_sensor: PERIPHERAL_SLOT_HEIGHT,
   current_sensor: PERIPHERAL_SLOT_HEIGHT,
 };
-const OFFBOARD_MCU_KINDS = new Set(['arduino_uno', 'raspberry_pi']);
-const ESP32_WIDTH_COLUMNS = 6;
-const ESP32_LEG_LAYOUT = { bottom: [0, 1, 4, 5, 6, 7], top: [2, 3, 11, 10, 9, 8] };
+const OFFBOARD_MCU_KINDS = new Set(['arduino_uno', 'raspberry_pi', 'esp32']);
 
 // Kind-keyed placement tables shared by the greedy pass and placeAnchored so
 // the two dispatch sites can never drift apart. `requirePins` guards kinds
@@ -80,7 +81,6 @@ const STRADDLE_PACKAGES = {
   opamp: { width: DIP_WIDTH_COLUMNS, legs: OPAMP_LEG_LAYOUT, body: 'dip', requirePins: 5 },
   comparator: { width: DIP_WIDTH_COLUMNS, legs: OPAMP_LEG_LAYOUT, body: 'dip', requirePins: 5 },
   timer_555: { width: DIP_WIDTH_COLUMNS, legs: TIMER_555_LEG_LAYOUT, body: 'dip', requirePins: 8 },
-  esp32: { width: ESP32_WIDTH_COLUMNS, legs: ESP32_LEG_LAYOUT, body: 'esp32' },
   // Tactile pushbutton: both electrical pins land on the bottom strip (row f)
   // like a real 4-leg tact switch bridging the trench; the top-strip legs are
   // purely mechanical, so they reserve their columns but claim no holes.
@@ -533,7 +533,7 @@ export function circuitToBreadboard(circuit, overrides = {}) {
     finalizePart(component, spot.strip, columnsByPin, body);
   };
 
-  // Trench-straddling packages (DIP-8 opamps, the ESP32 DevKit module): legs
+  // Trench-straddling packages (DIP-8 opamps, DIP-16 shift registers): legs
   // on rows e/f across a reserved column span, per the package's leg layout.
   // columnStart pins the left column (Phase-1 override); null auto-allocates.
   const placeStraddle = (component, widthColumns, legLayout, body, columnStart = null) => {
