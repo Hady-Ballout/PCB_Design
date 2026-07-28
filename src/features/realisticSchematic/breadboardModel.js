@@ -4,6 +4,7 @@
 // `circuit.components` in array order.
 
 import { DEFAULT_COLUMNS, FULL_SIZE_COLUMNS, MCU_SLOT_GAP, MCU_SLOT_HEIGHT, PERIPHERAL_SLOT_HEIGHT, STRIP_ROWS, boardSize, isRailStrip, slotRect, tieGroupKey } from './breadboardGeometry.js';
+import { checkPhysicalModel } from './physicalChecks.js';
 
 // A pin is unconnected when its net is a placeholder (NC_… or `${ref}_${pin}`).
 // Duplicated here to keep this chunk from importing another feature chunk — the
@@ -722,6 +723,11 @@ export function circuitToBreadboard(circuit, overrides = {}) {
     nets,
     warnings,
   };
+  // Physical-realizability checks (occupancy, rigid geometry, lead spans, rail
+  // policy, board seams) — surfaced as warnings alongside the growth notice
+  // above, so every built model carries them without the debug report having
+  // to run the check separately.
+  model.warnings.push(...checkPhysicalModel(model));
   // Runtime invariant: rebuild connectivity from the physical board and merge
   // any SPLIT/SHORT with the placement-time integrity problems, so an
   // electrically broken board is always visibly flagged, never silent.

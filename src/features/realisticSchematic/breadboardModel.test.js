@@ -384,6 +384,23 @@ describe('circuitToBreadboard', () => {
     expect(model.warnings.some((warning) => warning.includes('full size'))).toBe(true);
   });
 
+  it('carries a SEAM warning from checkPhysicalModel when growth pushes the board past 63 columns', () => {
+    // Many two-lead parts on distinct nets (no series reuse) so the greedy
+    // allocator keeps consuming fresh columns and grows the board past one
+    // full-size (63-column) breadboard, which physicalChecks flags.
+    const huge = {
+      components: Array.from({ length: 40 }, (_, index) => ({
+        ref: `R${index + 1}`,
+        kind: 'resistor',
+        value: '1k',
+        nodes: [`A${index + 1}`, `B${index + 1}`],
+      })),
+    };
+    const model = circuitToBreadboard(huge);
+    expect(model.board.columns).toBeGreaterThan(63);
+    expect(model.warnings.some((warning) => warning.startsWith('SEAM:'))).toBe(true);
+  });
+
   it('exposes net groups, a net legend, and battery nets for the view', () => {
     const model = circuitToBreadboard(dividerCircuit);
     expect(model.batteries[0].nets).toEqual(['VCC', GROUND_NET]);
