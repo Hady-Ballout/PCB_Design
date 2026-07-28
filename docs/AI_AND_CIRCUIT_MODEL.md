@@ -225,8 +225,8 @@ retry only on structural JSON/schema failures.
    downstream (breadboard leg layouts, SPICE expansion). A schema failure retries once with the
    validation error as corrective feedback. If that feedback named an unsupported component kind
    (`components[i].kind "<x>" is not supported`, e.g. a requested `gps_module`/`sim800l`/`nrf24`
-   the library doesn't have), `runCircuitPipeline` harvests the kind into a `droppedKinds` set; once
-   a circuit finally validates, it appends `Requested part "<kind>" is not supported by the
+   the library doesn't have), `runCircuitPipeline` harvests the kind into a `droppedKinds` set; after
+   the reviewer stage settles the final circuit, it appends `Requested part "<kind>" is not supported by the
    component library and was omitted from this design.` to `circuit.notes` and tells the reply
    stage to mention the omission — so a smaller-than-requested design confesses what it dropped
    instead of silently shipping short of the prompt.

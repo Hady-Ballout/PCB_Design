@@ -908,31 +908,40 @@ export async function runCircuitPipeline(
   // the final circuit/reply can confess the omission instead of silently
   // shrinking the design.
   const droppedKinds = new Set<string>();
-  const circuit = await parseWithCorrectionRetry(
-    'Circuit generation',
-    async (correction, attempt) => {
-      if (correction) {
-        for (const match of correction.error.matchAll(/\.kind "([^"]+)" is not supported/g)) droppedKinds.add(match[1]);
-      }
-      const messages = buildStage1Messages(prompt, history, currentDesign, memory, correction);
-      if (useOllamaStream) {
-        return streamOllamaChat(stage1Config, messages, STAGE1_RESPONSE_SCHEMA, (content) => {
-          onEvent({ type: 'content', stage: 'circuit', content, attempt, correcting: Boolean(correction) });
-        });
-      }
-      const content = await sendChatCompletion(stage1Config, messages, STAGE1_RESPONSE_SCHEMA);
-      onEvent({ type: 'content', stage: 'circuit', content, attempt, correcting: Boolean(correction) });
-      return content;
-    },
-    parseStage1Circuit,
-    topologyGate,
-  );
+  try {
+    await parseWithCorrectionRetry(
+      'Circuit generation',
+      async (correction, attempt) => {
+        if (correction) {
+          for (const match of correction.error.matchAll(/\.kind "([^"]+)" is not supported/g)) droppedKinds.add(match[1]);
+        }
+        const messages = buildStage1Messages(prompt, history, currentDesign, memory, correction);
+        if (useOllamaStream) {
+          return streamOllamaChat(stage1Config, messages, STAGE1_RESPONSE_SCHEMA, (content) => {
+            onEvent({ type: 'content', stage: 'circuit', content, attempt, correcting: Boolean(correction) });
+          });
+        }
+        const content = await sendChatCompletion(stage1Config, messages, STAGE1_RESPONSE_SCHEMA);
+        onEvent({ type: 'content', stage: 'circuit', content, attempt, correcting: Boolean(correction) });
+        return content;
+      },
+      parseStage1Circuit,
+      topologyGate,
+    );
+  } catch (error) {
+    // A structural failure on the retry (truncated/invalid JSON → the helper
+    // throws) must not discard a usable candidate: if attempt 0 already parsed
+    // (it sits in `attempts`, gated on topology errors), fall through to the
+    // best-attempt selection below. Only rethrow when nothing ever parsed.
+    if (attempts.length === 0) throw error;
+  }
 
   // Never fail the turn once a candidate parsed: accept the best attempt (fewest
   // error violations, later attempt wins ties) and apply additive-only repairs
   // (flyback diode, gate pull-down) before the reviewer stage sees the circuit.
-  const best = attempts.reduce((a, b) => (b.errorCount <= a.errorCount ? b : a), attempts[0])
-    ?? { circuit, violations: [] as TopologyViolation[], errorCount: 0 };
+  // `attempts` is guaranteed non-empty here — the topology gate pushes every
+  // parsed candidate, and the empty case rethrew above.
+  const best = attempts.reduce((a, b) => (b.errorCount <= a.errorCount ? b : a), attempts[0]);
   const repaired = applySafeAutoFixes(best.circuit, best.violations);
   let finalCircuit: Circuit = repaired.applied ? (repaired.circuit as Circuit) : best.circuit;
   let reviewIssues: string[] = [];

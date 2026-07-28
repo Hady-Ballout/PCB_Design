@@ -347,6 +347,27 @@ describe('circuit generation pipeline', () => {
     expect(reviewerBody.messages.at(-1).content).toContain('DFB1');
   });
 
+  it('keeps the best parsed attempt when the correction retry fails structurally', async () => {
+    // Attempt 0 parses but trips a topology error (divider_powered_load), so the
+    // gate provokes a retry. Attempt 1 comes back as truncated JSON — the helper
+    // throws structurally. The turn must still resolve on the attempt-0
+    // candidate instead of failing the whole request.
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(JSON.stringify({ circuit: esp32BuzzerBugCircuit })))
+      .mockResolvedValueOnce(streamResponse('{"circuit": broken'))
+      .mockResolvedValueOnce(okReviewer())
+      .mockResolvedValueOnce(okReply());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runCircuitPipeline('Drive a buzzer from an ESP32', []);
+
+    // The attempt-0 candidate ships (its 'BUZZER' node is unique to the bug
+    // circuit; the fixed topology uses CTRL/BASE/BZ_LOW instead).
+    expect(result.circuit.nodes).toContain('BUZZER');
+    expect(result.circuit.components.map((part) => part.ref)).toContain('RBZ1');
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
   it('confesses an unsupported part dropped during a correction retry instead of shrinking silently', async () => {
     const gpsCircuit = {
       ...validCircuit,
