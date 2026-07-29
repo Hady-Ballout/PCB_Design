@@ -6,9 +6,15 @@ export async function sendVerificationEmail(to: string, token: string): Promise<
 
   const senderEmail = process.env.BREVO_SENDER_EMAIL || 'noreply@pcbpilot.com';
   const senderName = process.env.BREVO_SENDER_NAME || 'PCB Pilot';
-  // CORS_ORIGIN may be a comma-separated allowlist; the first entry is the
-  // canonical frontend URL for links in emails.
-  const frontendUrl = parseAllowedOrigins(process.env.CORS_ORIGIN)[0];
+  // Canonical frontend URL for the verify link. Prefer APP_URL — the same
+  // canonical origin billing uses for Stripe return URLs (e.g. https://impedo.ai)
+  // — then fall back to the first CORS_ORIGIN entry, then local dev. Getting
+  // this wrong points users at a dead domain and the verify link 404s.
+  const frontendUrl = (
+    process.env.APP_URL
+    || parseAllowedOrigins(process.env.CORS_ORIGIN)[0]
+    || 'http://127.0.0.1:5174'
+  ).replace(/\/$/, '');
   const verifyLink = `${frontendUrl}/#verify?token=${token}`;
 
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {

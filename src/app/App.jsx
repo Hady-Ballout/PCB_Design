@@ -26,7 +26,7 @@ import { changedLineIndexes } from '../core/lineDiff.js';
 import { layoutCircuitDiagram } from '../core/schematicLayout.js';
 import { API_BASE } from '../core/config.js';
 import { downloadText } from '../core/download.js';
-import { pageFromHash } from './routing.js';
+import { AUTH_PAGES, PUBLIC_PAGES, pageFromHash } from './routing.js';
 import { markSpiceAsProvisional, readGenerationStream } from './generationStream.js';
 import { messageId } from '../features/chat/chatFormat.js';
 import { ChatPanel } from '../features/chat/ChatPanel.jsx';
@@ -51,13 +51,17 @@ import {
   slotGridFor,
   wireId,
 } from '../features/schematic/geometry.js';
-import { LandingPage } from '../features/landing/LandingPage.jsx';
+import { AuthProvider, useAuth, HomePage, LoginPage, SignupPage, VerifyPage } from '../features/auth/auth.jsx';
 import { applyTheme, loadTheme, saveTheme } from './theme.js';
 import { ThemeToggle } from './ThemeToggle.jsx';
-import '../features/landing/landing.css';
+import '../features/auth/auth.css';
 
 function App() {
-  const jsonHeaders = () => ({ 'Content-Type': 'application/json' });
+  const { user, loading, logout } = useAuth();
+  const authHeaders = () => ({
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${localStorage.getItem('pcb_token')}`,
+  });
   const [chatStore, setChatStore] = useState(loadChatStore);
   const [diagramTool, setDiagramTool] = useState('select');
   const [canvasMode, setCanvasMode] = useState('kicad');
@@ -255,6 +259,29 @@ function App() {
     window.addEventListener('hashchange', syncPageFromHash);
     return () => window.removeEventListener('hashchange', syncPageFromHash);
   }, []);
+
+  // Gate the workspace behind login: logged-out visitors are pushed to the
+  // landing/login pages, and logged-in users never linger on login/signup.
+  useEffect(() => {
+    if (loading) return;
+
+    if (!user && !PUBLIC_PAGES.has(page)) {
+      if (window.location.hash !== '#home') {
+        window.location.hash = 'home';
+      } else {
+        setPage('home');
+      }
+      return;
+    }
+
+    if (user && AUTH_PAGES.has(page)) {
+      if (window.location.hash) {
+        window.location.hash = '';
+      } else {
+        setPage('workspace');
+      }
+    }
+  }, [loading, user, page]);
 
 
   useEffect(() => {
@@ -602,7 +629,7 @@ function App() {
       try {
         const response = await fetch(`${API_BASE}/api/clarify-circuit`, {
           method: 'POST',
-          headers: jsonHeaders(),
+          headers: authHeaders(),
           body: JSON.stringify({
             prompt: submittedPrompt,
             messages: buildConversationContext(priorMessages),
@@ -670,7 +697,7 @@ function App() {
       try {
         const response = await fetch(`${API_BASE}/api/assist-circuit`, {
           method: 'POST',
-          headers: jsonHeaders(),
+          headers: authHeaders(),
           body: JSON.stringify({
             mode,
             prompt: submittedPrompt,
@@ -878,7 +905,7 @@ function App() {
     try {
       const response = await fetch(`${API_BASE}/api/generate-circuit`, {
         method: 'POST',
-        headers: jsonHeaders(),
+        headers: authHeaders(),
         body: JSON.stringify({
           prompt: generationPrompt,
           messages: buildConversationContext(priorMessages),
@@ -992,7 +1019,7 @@ function App() {
     try {
       const response = await fetch(`${API_BASE}/api/simulate-circuit`, {
         method: 'POST',
-        headers: jsonHeaders(),
+        headers: authHeaders(),
         body: JSON.stringify({ circuit: result.circuit, spice: editableSpice }),
       });
       const data = await response.json().catch(() => ({ ok: false, errors: [`Simulation failed with HTTP ${response.status}.`] }));
@@ -1022,7 +1049,7 @@ function App() {
     }
     const response = await fetch(`${API_BASE}/api/compile-sketch`, {
       method: 'POST',
-      headers: jsonHeaders(),
+      headers: authHeaders(),
       body: JSON.stringify({ code }),
     });
     const data = await response.json().catch(() => ({ ok: false, errors: [`Compilation failed with HTTP ${response.status}.`] }));
@@ -1732,9 +1759,15 @@ function App() {
     </>
   );
 
-  const visiblePage = page;
+  if (loading) return <div className="loading-screen">Loading...</div>;
 
-  if (visiblePage === 'home') return withFloatingThemeToggle(<LandingPage />);
+  const visiblePage = user && AUTH_PAGES.has(page) ? 'workspace' : page;
+
+  if (!user && !PUBLIC_PAGES.has(visiblePage)) return withFloatingThemeToggle(<HomePage />);
+  if (visiblePage === 'home') return withFloatingThemeToggle(<HomePage />);
+  if (visiblePage === 'login') return withFloatingThemeToggle(<LoginPage />);
+  if (visiblePage === 'signup') return withFloatingThemeToggle(<SignupPage />);
+  if (visiblePage === 'verify') return withFloatingThemeToggle(<VerifyPage />);
 
   if (visiblePage === 'waveform') {
     return withFloatingThemeToggle(
@@ -1782,6 +1815,8 @@ function App() {
     <main className="app-shell">
       <div className="user-bar app-user-bar">
         <ThemeToggle theme={theme} onToggle={toggleTheme} />
+        <span>{user.email}</span>
+        <button type="button" onClick={logout}>Log out</button>
       </div>
       <section className="workspace">
         <ChatPanel
@@ -1846,4 +1881,10 @@ function App() {
   );
 }
 
-export default App;
+export default function WrappedApp() {
+  return (
+    <AuthProvider>
+      <App />
+    </AuthProvider>
+  );
+}
