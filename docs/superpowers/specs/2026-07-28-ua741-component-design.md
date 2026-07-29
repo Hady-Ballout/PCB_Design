@@ -101,6 +101,18 @@ Per-file, following existing patterns:
 - Simulation deck test through `buildSimulationDeck`: clamp B-source survives
   deck assembly.
 
+### 7b. In-browser live simulation (added during implementation)
+
+The spec originally missed the second simulation surface: the in-browser engine
+(`src/core/sim/simNetlist.js` + `simEngine.js`) that powers breadboard Run
+mode. `ua741` reuses the engine's existing rail-clamped `opamp` device with
+DIP-8 pins remapped (inp = index 2, inn = 1, out = 5 behind the 100 Ω
+`__ro` internal node, vcp = 6, vcm = 3) plus 10 MΩ ties on OFS1/OFS2/NC so
+`NC_*` placeholder nets solve cleanly. Observables come free via the shared
+device type. Also added while integrating: `circuitSync.js` `kindByModel`
+entry (`UA741` X-lines parse back to `ua741`) and a `pcbLayout.js` DIP-8
+footprint entry.
+
 ### 8. Docs
 
 Update `docs/AI_AND_CIRCUIT_MODEL.md` (kind tables) and any kind enumerations

@@ -64,8 +64,10 @@ containing the reconciled circuit, SPICE, reply, firmware `code` (`''` when the 
 has no MCU board), updated chat memory, plus:
 
 - `issues: RuleViolation[]` — topology-rule findings (`{id, severity, refs, nets, message,
-  fix, autoFixed}`) checked on the reconciled circuit (the pipeline's reviewer stage has
-  already corrected what it could; survivors are surfaced in the UI, never fatal).
+  fix, autoFixed}`) checked on the reconciled circuit (the pipeline's reviewer stage —
+  which sees the user's original request and checks the circuit against it as well as the
+  electrical heuristics — has already corrected what it could in its single pass; survivors
+  are surfaced in the UI, never fatal).
 
 Generation emits no `thinking` events (the pipeline streams stage-1 content as provisional
 SPICE instead); the thinking window is fed by `/api/clarify-circuit` and
@@ -121,14 +123,20 @@ spec: `docs/superpowers/specs/2026-07-21-stripe-billing-design.md`.
   `/api/generate-circuit`: stage 1 generates the circuit JSON (streamed as provisional
   SPICE), stage 2 is a reviewer model that checks/corrects it and writes MCU firmware
   (skippable via `AI_PIPELINE_REVIEWER=0`; reviewer and reply failures are non-fatal),
-  stage 3 writes the conversational reply. Each stage picks its model from
+  stage 3 writes the conversational reply, grounded in the chat memory summary, the
+  recent conversation text (`sanitizeReplyHistory`), and a deterministic change summary
+  against the previous design (`circuitDiff.ts`). Each stage picks its model from
   `AI_MODEL_CIRCUIT` / `AI_MODEL_REVIEWER` / `AI_MODEL_REPLY`, falling back to `AI_MODEL`
   (or `OLLAMA_MODEL`), so one free-tier rate limit isn't shared across the whole request.
   Its prompts and `CIRCUIT_SCHEMA` derive the allowed kinds and MCU pin contracts from
   `src/core/componentKinds.js`, so registry additions reach the model automatically.
+- **`circuitDiff.ts`** — pure component-level diff between the previous and final
+  circuit (`diffCircuits`, keyed by upper-cased ref; footprint deltas ignored) and its
+  prompt-ready narration (`describeCircuitDiff`) fed to the reply stage.
 - **`ollamaProvider.ts`** (~730 ln, largest backend file) — owns the system prompt that
   defines the circuit JSON contract (SPICE-safe ref prefixes per component kind, ground
-  node `"0"`, `LM358` as the only opamp model, voltage_source vs signal_source rules),
+  node `"0"`, `LM358` as the generic opamp model (`ua741`/`UA741` when the user names a
+  741), voltage_source vs signal_source rules),
   `CIRCUIT_SCHEMA`/`AI_RESPONSE_SCHEMA` (used as Ollama structured-output format),
   `validateCircuitResponse` (schema plus exact node counts for every positional kind —
   `POSITIONAL_NODE_KINDS`: fixed-pin kinds, compound kinds, opamp/comparator/pushbutton/
@@ -191,8 +199,8 @@ spec: `docs/superpowers/specs/2026-07-21-stripe-billing-design.md`.
 
 ## `server/simulation`
 
-- **`simulator.ts`** — `buildSimulationDeck` (injects `LM358` model if referenced but
-  undefined), `chooseWaveformNodes`, `runNgspiceSimulation` (writes a temp `.cir`, shells out
+- **`simulator.ts`** — `buildSimulationDeck` (injects the built-in subcircuits —
+  `LM358`, `UA741`, `LM393`, `TIMER555`, `PC817` — if referenced but undefined), `chooseWaveformNodes`, `runNgspiceSimulation` (writes a temp `.cir`, shells out
   to `ngspice`/`ngspice_con -b`, on Windows prefers `ngspice_con` to avoid launching a GUI),
   `parseWaveformData`.
 

@@ -26,7 +26,7 @@ import { buckVolts, parseVolts } from './sim/simValues.js';
 
 // ICs that need local supply decoupling: expected to have a bypass cap from
 // their supply net to ground somewhere on the board.
-const DECOUPLED_IC_KINDS = new Set(['opamp', 'comparator', 'timer_555', 'shift_register', 'adc_module']);
+const DECOUPLED_IC_KINDS = new Set(['opamp', 'ua741', 'comparator', 'timer_555', 'shift_register', 'adc_module']);
 const RESISTIVE_KINDS = new Set(['resistor', 'load', 'photoresistor', 'thermistor', 'ir_phototransistor', 'potentiometer']);
 const DRIVER_KINDS = new Set(['bjt_npn', 'bjt_pnp', 'mosfet_n', 'mosfet_p']);
 const HEAVY_LOAD_KINDS = new Set(['buzzer', 'dc_motor', 'vibration_motor']);
@@ -716,9 +716,14 @@ const TOPOLOGY_RULES = [
         for (const node of part.nodes || []) nodeUse.set(String(node), (nodeUse.get(String(node)) || 0) + 1);
       }
       const found = [];
+      // Input node indices per kind: opamp is [IN+, IN-, ...]; ua741 follows
+      // the physical DIP-8 order [OFS1, IN-, IN+, ...].
+      const inputIndices = { opamp: [0, 1], ua741: [2, 1] };
       for (const part of circuit.components) {
-        if (part.kind !== 'opamp') continue;
-        const [plus, minus] = (part.nodes || []).map(String);
+        const indices = inputIndices[part.kind];
+        if (!indices) continue;
+        const nodes = (part.nodes || []).map(String);
+        const [plus, minus] = indices.map((index) => nodes[index]);
         for (const [label, node] of [['non-inverting (+)', plus], ['inverting (-)', minus]]) {
           if (!node || node === '0') continue;
           if ((nodeUse.get(node) || 0) < 2) {

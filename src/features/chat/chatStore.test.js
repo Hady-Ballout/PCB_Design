@@ -83,16 +83,18 @@ describe('chat store', () => {
     expect(loaded.chats[1].editableCode).toBe('// my edit');
   });
 
-  it('builds compact AI context from prior user prompts and generated circuits', () => {
+  it('builds AI context from prior prompts, circuits, and assistant replies', () => {
     const messages = [
       { role: 'user', content: 'Make a filter' },
       { role: 'assistant', content: 'Ready', circuit: { title: 'Filter' } },
       { role: 'assistant', content: 'Temporary error' },
+      { role: 'assistant', content: '   ' },
     ];
 
     expect(buildConversationContext(messages)).toEqual([
       { role: 'user', content: 'Make a filter' },
       { role: 'assistant', content: 'Ready', circuit: { title: 'Filter' } },
+      { role: 'assistant', content: 'Temporary error' },
     ]);
   });
 
@@ -239,22 +241,20 @@ describe('chat store', () => {
     ].join('\n'));
   });
 
-  it('keeps assistant text-only turns in assist context but not generation context', () => {
+  it('keeps assistant text-only turns in both assist and generation contexts', () => {
     const messages = [
       { role: 'user', content: 'Make a filter' },
       { role: 'assistant', content: 'Here is a plan.', mode: 'plan' },
       { role: 'assistant', content: 'Ready', circuit: { title: 'Filter' } },
     ];
-
-    expect(buildAssistContext(messages)).toEqual([
+    const expected = [
       { role: 'user', content: 'Make a filter' },
       { role: 'assistant', content: 'Here is a plan.' },
       { role: 'assistant', content: 'Ready', circuit: { title: 'Filter' } },
-    ]);
-    expect(buildConversationContext(messages)).toEqual([
-      { role: 'user', content: 'Make a filter' },
-      { role: 'assistant', content: 'Ready', circuit: { title: 'Filter' } },
-    ]);
+    ];
+
+    expect(buildAssistContext(messages)).toEqual(expected);
+    expect(buildConversationContext(messages)).toEqual(expected);
   });
 
   it('migrates and repairs saved diagrams without changing the circuit model', () => {

@@ -660,6 +660,26 @@ export const buildSimNetlist = (circuit, options = {}) => {
         branchCount += 1;
         break;
       }
+      case 'ua741': {
+        // Physical DIP-8 order [OFS1, IN-, IN+, V-, OFS2, OUT, V+, NC]: the
+        // same rail-clamped opamp device as the LM358 with remapped pins.
+        // 10 MΩ ties keep the unused offset-null/NC pins solvable when left
+        // on NC_* placeholder nets (the timer_555 tie pattern).
+        const [ofs1Net, innNet, inpNet, veeNet, ofs2Net, outNet, vccNet, ncNet] = nodes;
+        const outInt = internalNode(`${ref}_out`);
+        addResistor(`${ref}__ro`, ref, 'opamp_ro', outInt, indexOf(outNet), 100);
+        addResistor(`${ref}__t1`, ref, 'ua741_tie', indexOf(ofs1Net), indexOf(veeNet), 10e6);
+        addResistor(`${ref}__t2`, ref, 'ua741_tie', indexOf(ofs2Net), indexOf(veeNet), 10e6);
+        addResistor(`${ref}__tn`, ref, 'ua741_tie', indexOf(ncNet), indexOf(veeNet), 10e6);
+        devices.push({
+          type: 'opamp', id: ref, owner: ref, kind,
+          inp: indexOf(inpNet), inn: indexOf(innNet), out: outInt,
+          vcp: indexOf(vccNet), vcm: indexOf(veeNet),
+          branch: branchCount,
+        });
+        branchCount += 1;
+        break;
+      }
       case 'comparator':
         // Open-collector output: 30 Ω to the V- pin when low, 10 MΩ released.
         // (The LM393 SPICE subcircuit is push-pull; open-collector is the

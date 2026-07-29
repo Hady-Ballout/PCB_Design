@@ -40,6 +40,23 @@ describe('ngspice simulator helpers', () => {
     expect(deck).toContain('.ends LM358');
   });
 
+  it('injects the built-in UA741 model with its output clamp intact', () => {
+    const ua741Circuit: Partial<Circuit> = {
+      components: [
+        { ref: 'XU1', kind: 'ua741', value: 'uA741', nodes: ['N1', 'VOUT', 'VIN', '0', 'N5', 'VOUT', 'VCC', 'N8'], footprint: '' },
+      ],
+    };
+    const deck = buildSimulationDeck(
+      '* ua741\nXU1 N1 VOUT VIN 0 N5 VOUT VCC N8 UA741\n.end',
+      ['VOUT'],
+      ua741Circuit as Circuit,
+    );
+
+    expect(deck).toContain('.subckt UA741 OFS1 INN INP VEE OFS2 OUT VCC NC');
+    expect(deck).toContain('BOUT NCLAMP 0 V = max(min(V(NINT), V(VCC)-1.5), V(VEE)+1.5)');
+    expect(deck).toContain('.ends UA741');
+  });
+
   it('parses ngspice waveform data into series points', () => {
     const raw = 'time v(VIN) v(VOUT)\n0 5 0\n0.001 5 3.2\n';
     const series = parseWaveformData(raw, ['VIN', 'VOUT']);

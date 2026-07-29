@@ -265,6 +265,22 @@ describe('createSimulation — active devices (M3)', () => {
     expect(volts(engine, 'VOUT')).toBeLessThan(4.5 + 0.01);
   });
 
+  it('follows the input in a uA741 voltage follower with unused DIP pins floating', () => {
+    const engine = createSimulation(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '9V', nodes: ['VCC', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VCC', 'VIN'] },
+      { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['VIN', '0'] },
+      // [OFS1, IN-, IN+, V-, OFS2, OUT, V+, NC]; OUT fed back to IN-.
+      { ref: 'XU1', kind: 'ua741', value: 'uA741', nodes: ['NC_XU1_1', 'VOUT', 'VIN', '0', 'NC_XU1_5', 'VOUT', 'VCC', 'NC_XU1_8'] },
+      { ref: 'RL', kind: 'resistor', value: '10k', nodes: ['VOUT', '0'] },
+    ]));
+    expect(engine.ok).toBe(true);
+    expect(engine.warnings.some((w) => w.code === 'kind_not_simulated')).toBe(false);
+    expect(engine.solveDC()).toBe(true);
+    expect(volts(engine, 'VOUT')).toBeGreaterThan(4.5 - 0.01);
+    expect(volts(engine, 'VOUT')).toBeLessThan(4.5 + 0.01);
+  });
+
   it('sets the inverting-amp gain from the feedback network', () => {
     // Non-inverting input biased at 2.5 V; source 1.5 V through R1 10k, R2
     // 20k feedback: VOUT = 2.5 − 2·(1.5 − 2.5) = 4.5 V.

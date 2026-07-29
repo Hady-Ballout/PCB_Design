@@ -20,11 +20,13 @@ default **Implement**).
   stays answerable afterwards.
 - **Implement** — the two-phase clarify → generate flow below, unchanged.
 
-Plan/Ask replies are assistant messages without a `circuit`, so the strict generation
-context (`buildConversationContext` client-side, `sanitizeConversationHistory`
-server-side) still excludes them — an approved plan reaches generation only through
-`composePlanBuildPrompt`. The assist endpoint instead uses `buildAssistContext` /
-`sanitizeAssistHistory`, which keep assistant text turns for conversational continuity.
+Assistant text-only turns (including Plan/Ask replies) now ride along in the generation
+context too: `buildConversationContext` (client) keeps them, and the server filters per
+stage — stage 1 and clarify still drop them via the strict `sanitizeConversationHistory`,
+while the reply stage reads them through `sanitizeReplyHistory` for conversational
+continuity. An approved plan still reaches generation only through
+`composePlanBuildPrompt`. The assist endpoint uses `buildAssistContext` /
+`sanitizeAssistHistory` as before.
 
 ## Two-phase prompt flow: clarify, then generate
 
@@ -47,9 +49,10 @@ Failure semantics: **any** clarify failure (network, non-OK, zero usable questio
 the client silently fall back to direct generation with the original prompt — the round can
 never block a prompt. There is no correction retry on the clarify call.
 
-Clarification assistant messages carry no `circuit`, so `buildConversationContext`
-(client) and `sanitizeConversationHistory` (server) exclude them from model history; the
-user's answers reach future turns via the compact `Clarifications: …` user message instead.
+Clarification assistant messages are excluded from model history explicitly by
+`buildConversationContext` (client, via their `clarification` marker) and by
+`sanitizeConversationHistory` (server, no `circuit`); the user's answers reach future
+turns via the compact `Clarifications: …` user message instead.
 
 ## Live thinking display
 
@@ -96,10 +99,13 @@ code can go stale until the next AI generation (known limitation). The
 Allowed `kind` values are the single source of truth in `src/core/componentKinds.js`
 (`ALLOWED_KINDS`). The AI schema `enum` and the "Allowed component kinds" / fixed-pin
 guidance in the system prompt (`server/ai/ollamaProvider.ts`) are **generated from it**, so
-adding a kind to the registry automatically offers it to the model. The current 68 kinds:
+adding a kind to the registry automatically offers it to the model. The current 69 kinds:
 
-- **Core (14):** `resistor`, `capacitor`, `inductor`, `diode`, `led`, `bjt_npn`, `bjt_pnp`,
-  `mosfet_n`, `mosfet_p`, `opamp`, `regulator`, `voltage_source`, `signal_source`, `load`.
+- **Core (15):** `resistor`, `capacitor`, `inductor`, `diode`, `led`, `bjt_npn`, `bjt_pnp`,
+  `mosfet_n`, `mosfet_p`, `opamp`, `ua741`, `regulator`, `voltage_source`, `signal_source`,
+  `load`. (`ua741` is the single uA741 op amp with the full 8-pin DIP contract
+  `[OFS1, IN-, IN+, V-, OFS2, OUT, V+, NC]` — physical pin order, so leg layouts and KiCad
+  pin numbers are identity mappings; the AI keeps OFS/NC pins on `NC_*` placeholders.)
 - **Extended (51):** `zener`, `photoresistor`, `thermistor`, `ir_led`, `ir_phototransistor`,
   `buzzer`, `crystal`,
   `temp_sensor`, `comparator`, `pushbutton`, `potentiometer`, `switch_spdt`, `rgb_led`,
@@ -167,7 +173,8 @@ On the realistic-schematic breadboard, per-kind placement is table-driven
 (`STRADDLE_PACKAGES` / `INLINE_BODY_BY_KIND` / `OFFBOARD_SLOT_HEIGHTS` in
 `src/features/realisticSchematic/breadboardModel.js`): `comparator` (5-pin opamp contract)
 and `timer_555` (canonical pins = NE555 DIP 1-8) straddle the trench as DIP-8s like the
-opamp, `pushbutton` straddles with both pins on the bottom strip (top legs decorative),
+opamp, `ua741` straddles as a DIP-8 with the identity leg layout (canonical pins = uA741
+DIP 1-8, the true single-741 pinout), `pushbutton` straddles with both pins on the bottom strip (top legs decorative),
 `seven_segment` straddles as a 5161AS DIP-10 (second COM leg decorative),
 `shift_register` and `adc_module` straddle as DIP-16s and `optocoupler` as a DIP-4
 (canonical pins = DIP order, identity leg layouts), `temp_sensor` and `ir_receiver` get
@@ -195,6 +202,10 @@ Rules baked into the system prompt (`server/ai/ollamaProvider.ts`) and
 - Opamps must use `LM358` as both the JSON value and the SPICE subcircuit name — the app
   ships a built-in 5-pin `LM358` model (`LM358_SUBCIRCUIT` in `src/core/pcbGenerator.js`)
   that `addMissingSpiceModels` injects into any deck that references it without defining it.
+  When the user names a 741 (uA741/UA741/LM741) the prompt steers to the `ua741` kind
+  instead: value `uA741`, one 8-node X line against the built-in `UA741_SUBCIRCUIT`
+  (enhanced behavioral: Avol 200k, GBW ~1 MHz, B-source output clamp ~1.5 V inside each
+  rail, 10 MΩ leaks keeping the unused OFS/NC pins solvable).
 - `voltage_source` = DC/fixed bias; `signal_source` = waveform (`SINE`, `PULSE`, `PWL`,
   `EXP`, `AC`).
 - Never omit an LED current-limiting resistor or required biasing/feedback components.
@@ -249,18 +260,33 @@ retry only on structural JSON/schema failures.
    applies additive-only repairs (MOSFET gate pull-down, flyback diode — marked `autoFixed`) to
    that best attempt **before the reviewer stage runs**, so stages 2 and 3 see the repaired
    circuit. A hard throw only happens when stage 1 fails structurally on both attempts.
-5. The reviewer stage (`runReviewerStage`) may independently revise the circuit
-   (`ok: false` + a corrected `circuit`); its issues are folded into the reply-stage prompt.
-   Neither the reviewer nor the reply stage re-runs the topology gate.
-6. `reconcileCircuitRevision` (`server/circuit/circuitResponse.ts`) merges the pipeline's final
+5. The reviewer stage (`runReviewerStage`) receives the user's original plain-text request
+   (quoted verbatim inside a `<<<USER_REQUEST … USER_REQUEST>>>` fence and marked as data,
+   never instructions) and the chat-memory summary alongside the circuit JSON. It checks both
+   the electrical heuristics and request-vs-circuit fidelity — components the user asked for
+   that are missing, values that contradict explicitly requested ones, topology that doesn't
+   match what was asked — without inventing requirements the request never stated. It may
+   independently revise the circuit (`ok: false` + a corrected `circuit`); its issues are
+   folded into the reply-stage prompt. The review runs exactly once per turn: the corrected
+   circuit is never sent back for a second review, and neither the reviewer nor the reply
+   stage re-runs the topology gate.
+6. The reply stage (`runReplyStage`) is conversationally grounded: its prompt carries the
+   chat memory summary, the recent conversation as text (`sanitizeReplyHistory` — 8 turns,
+   including the assistant's own past replies), and, on a revision, the previous design's
+   component inventory plus a deterministic change summary
+   (`diffCircuits`/`describeCircuitDiff`, `server/ai/circuitDiff.ts`: components
+   added/removed/changed by ref, footprint deltas ignored since reconcile backfills them).
+   The system prompt instructs it to answer the user's actual message, narrate only what
+   the change summary says changed, and confirm the rest is untouched.
+7. `reconcileCircuitRevision` (`server/circuit/circuitResponse.ts`) merges the pipeline's final
    circuit against the previous confirmed design (a revision, not a fresh generation, when
    `currentDesign` is present); `server/index.ts` then re-runs `checkCircuitTopology` on the
    reconciled circuit and ships any surviving violations in the response `issues` for the UI to
    surface — never fatal at this point.
-7. SPICE is always derived deterministically from the JSON circuit (`toSpice`), never requested
+8. SPICE is always derived deterministically from the JSON circuit (`toSpice`), never requested
    from the model on this path, so there is no SPICE-vs-JSON consistency retry here. Streamed
    SPICE is marked `provisional`/`correcting` until the full circuit validates.
-8. On structural failure, the previous confirmed SPICE/circuit is restored — the UI never
+9. On structural failure, the previous confirmed SPICE/circuit is restored — the UI never
    silently replaces a working design with a broken one.
 
 A structurally similar but independent single-shot generator, `generateCircuitWithOllama`
@@ -389,6 +415,12 @@ Requests to Ollama combine: that memory summary + the canonical current circuit 
 turns (`sanitizeConversationHistory`) + the newest prompt, inside a server-controlled
 context window (`OLLAMA_NUM_CTX` / `OLLAMA_NUM_PREDICT`).
 
+Two sanitizers serve different stages: `sanitizeConversationHistory` (12 turns, user turns
++ circuit-bearing assistant turns, replayed as circuit JSON) feeds stage 1 and clarify;
+`sanitizeReplyHistory` (8 turns, 1200 chars/message, text-only — circuit-bearing turns
+with no text collapse to a one-line `Delivered circuit …` marker) feeds the reply stage so
+it can speak in continuity with the AI's own past replies.
+
 ## Synchronization: SPICE <-> canvas <-> KiCad <-> JSON
 
 `src/core/circuitSync.js` is the single synchronization layer all editable views go
@@ -445,6 +477,7 @@ page agree numerically. Where they intentionally differ:
 | BJT | Q2N2222/Q2N3906 with VAF=100 | Ebers-Moll, same IS/BF, **no Early effect** (simpler Jacobian, negligible at breadboard scale) |
 | MOSFET | LEVEL=1, no λ | same level 1 plus **λ=0.01** (keeps the saturation Jacobian nonsingular). Both are the deck's weak KP=20µ device — a 5 V gate saturates at ~90 µA, so LEDs won't visibly light through it; this matches ngspice exactly and is not a sim bug |
 | opamp | LM358 subcircuit (VCVS ladder, **no rail clamp**) | behavioral tanh VCVS (gain 1e5, Ro=100Ω) **clamped to the supply rails** with LM358-ish headroom — a deliberate improvement |
+| ua741 | UA741 subcircuit (Avol 200k, GBW ~1 MHz pole, **B-source output clamp** ~1.5 V inside each rail, 10 MΩ OFS/NC leaks) | same rail-clamped opamp device with the DIP-8 pins remapped (IN+ = pin 3, IN- = pin 2, V- = pin 4, OUT = pin 6, V+ = pin 7) plus 10 MΩ ties on OFS1/OFS2/NC |
 | comparator | LM393 subcircuit (push-pull VCVS) | **open-collector** switch with ±5 mV hysteresis — physically correct LM393 behavior, matches the topology rules' pull-up expectations |
 | 555 | TIMER555 subcircuit (hysteretic switches, fixed 5 V trip points) | behavioral SR latch reading real thresholds off the internal 5k/10k CTRL ladder (external CTRL parts shift the trip points); OUT drives VCC−1.7/0.1 V behind 10 Ω, DISCH 25 Ω/open |
 | optocoupler | PC817 subcircuit (on/off switch, no CTR) | same on/off semantics (SW VT=1.1 VH=0.15 on the LED junction); CTR-proportional output remains a possible future refinement |

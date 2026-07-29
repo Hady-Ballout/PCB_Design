@@ -147,6 +147,28 @@ describe('toKiCadSchematic', () => {
   });
 });
 
+describe('uA741 export', () => {
+  const circuit = {
+    title: 'uA741 follower',
+    type: 'ai_generated',
+    supplyVoltage: 12,
+    components: [
+      { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VCC', '0'] },
+      { ref: 'XU1', kind: 'ua741', value: 'uA741', nodes: ['NC_XU1_1', 'VOUT', 'VIN', '0', 'NC_XU1_5', 'VOUT', 'VCC', 'NC_XU1_8'] },
+      { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VIN', '0'] },
+    ],
+    notes: [],
+  };
+  const diagram = buildCircuitDiagram(circuit);
+  const schematic = toKiCadSchematic(circuit, diagram);
+
+  it('uses the vendored LM741 symbol instead of a synthesized box', () => {
+    expect(schematic).toContain('(lib_id "Amplifier_Operational:LM741")');
+    expect(schematic).toContain('(property "Reference" "XU1"');
+    expect(balancedParens(schematic)).toBe(true);
+  });
+});
+
 describe('toKiCadSchematic with microcontroller boards', () => {
   const diagram = buildCircuitDiagram(mcuCircuit);
   const schematic = toKiCadSchematic(mcuCircuit, diagram);

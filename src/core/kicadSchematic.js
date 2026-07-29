@@ -70,6 +70,8 @@ const KIND_TO_SYMBOL = {
   mosfet_p: { libId: 'Device:Q_PMOS_GDS', pinNumbers: ['2', '1', '3'] },
   // Circuit opamp order is (in+, in-, out, V+, V-).
   opamp: { libId: 'Amplifier_Operational:LM741', pinNumbers: ['3', '2', '6', '7', '4'] },
+  // ua741 canonical order is the physical DIP-8 order, so the mapping is the identity.
+  ua741: { libId: 'Amplifier_Operational:LM741', pinNumbers: ['1', '2', '3', '4', '5', '6', '7', '8'] },
   voltage_source: { libId: 'pspice:VSOURCE', pinNumbers: ['1', '2'] },
   signal_source: { libId: 'pspice:VSOURCE', pinNumbers: ['1', '2'] },
   // Circuit regulator order is (input, ground, output) — matches L7805.

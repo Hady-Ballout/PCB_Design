@@ -198,6 +198,9 @@ describe('circuit generation pipeline', () => {
     const stage2Body = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(stage2Body.format).toEqual(REVIEWER_RESPONSE_SCHEMA);
     expect(stage2Body.messages.at(-1).content).toContain('R1');
+    expect(stage2Body.messages.at(-1).content).toContain('<<<USER_REQUEST');
+    expect(stage2Body.messages.at(-1).content).toContain('Make an RC filter');
+    expect(JSON.stringify(stage2Body.messages)).not.toContain('Active chat memory');
 
     const stage3Body = JSON.parse(fetchMock.mock.calls[2][1].body);
     expect(stage3Body.format).toEqual(REPLY_RESPONSE_SCHEMA);
@@ -206,6 +209,22 @@ describe('circuit generation pipeline', () => {
     const stageEvents = onEvent.mock.calls.map((call) => call[0]).filter((event) => event.type === 'stage');
     expect(stageEvents.map((event) => event.stage)).toEqual(['circuit', 'reviewing', 'reply']);
     expect(onEvent.mock.calls.some((call) => call[0].type === 'content' && call[0].stage === 'circuit')).toBe(true);
+  });
+
+  it('teaches the ua741 kind and 741-request steering in the stage-1 prompt', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(JSON.stringify({ circuit: validCircuit })))
+      .mockResolvedValueOnce(okReviewer())
+      .mockResolvedValueOnce(okReply());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await runCircuitPipeline('Build a uA741 amplifier', [], null, null, vi.fn());
+
+    const prompt = JSON.parse(fetchMock.mock.calls[0][1].body).messages[0].content;
+    // Fixed-pin contract auto-derives from the registry.
+    expect(prompt).toContain('ua741 (8 nodes): OFS1, IN-, IN+, V-, OFS2, OUT, V+, NC');
+    // Manual steering prose.
+    expect(prompt).toContain('use kind ua741');
   });
 
   it('applies the reviewer correction and passes its issues to the reply stage', async () => {
@@ -228,6 +247,82 @@ describe('circuit generation pipeline', () => {
     expect(result.circuit).toEqual(correctedCircuit);
     const stage3Body = JSON.parse(fetchMock.mock.calls[2][1].body);
     expect(stage3Body.messages.at(-1).content).toContain('R1 value was implausibly low');
+  });
+
+  it('accepts a reviewer correction driven by a request mismatch without re-reviewing the corrected circuit', async () => {
+    const correctedCircuit = {
+      ...validCircuit,
+      components: [{ ...validCircuit.components[0], value: '2.2k' }],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(JSON.stringify({ circuit: validCircuit })))
+      .mockResolvedValueOnce(ollamaResponse(JSON.stringify({
+        ok: false,
+        issues: ['User asked for a 2.2k R1 but the circuit uses 1k'],
+        circuit: correctedCircuit,
+      })))
+      .mockResolvedValueOnce(okReply());
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await runCircuitPipeline('RC filter with R1 = 2.2k', [], null, null);
+
+    expect(result.circuit).toEqual(correctedCircuit);
+    const stage3Body = JSON.parse(fetchMock.mock.calls[2][1].body);
+    expect(stage3Body.messages.at(-1).content).toContain('User asked for a 2.2k R1');
+    // Single pass: the corrected circuit is never sent back for a second review.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('grounds the reply stage in the conversation, memory, and the change against the previous design', async () => {
+    const revisedCircuit = {
+      ...validCircuit,
+      components: [{ ...validCircuit.components[0], value: '2.2k' }],
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(JSON.stringify({ circuit: revisedCircuit })))
+      .mockResolvedValueOnce(okReviewer())
+      .mockResolvedValueOnce(okReply('Swapped R1 to 2.2k.'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const history = [
+      { role: 'user' as const, content: 'Make an RC filter' },
+      { role: 'assistant' as const, content: 'I built an RC filter with R1 at 1k.' },
+    ];
+    const memory = { summary: 'User is building an RC filter for an audio project.', updatedAt: 1 };
+    await runCircuitPipeline('change R1 to 2.2k', history, { circuit: validCircuit as never }, memory);
+
+    // Stage 1 keeps its strict history: the text-only assistant turn stays out.
+    const stage1Body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(JSON.stringify(stage1Body.messages)).not.toContain('I built an RC filter with R1 at 1k.');
+
+    // The reviewer sees the turn prompt and the accumulated design intent.
+    const stage2Body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    const stage2Text = JSON.stringify(stage2Body.messages);
+    expect(stage2Text).toContain('Active chat memory');
+    expect(stage2Text).toContain('audio project');
+    expect(stage2Body.messages.at(-1).content).toContain('change R1 to 2.2k');
+
+    const stage3Body = JSON.parse(fetchMock.mock.calls[2][1].body);
+    const stage3Text = JSON.stringify(stage3Body.messages);
+    expect(stage3Text).toContain('I built an RC filter with R1 at 1k.');
+    expect(stage3Text).toContain('Active chat memory');
+    expect(stage3Text).toContain('audio project');
+    const finalMessage = stage3Body.messages.at(-1).content;
+    expect(finalMessage).toContain('Previous design before this turn');
+    expect(finalMessage).toContain('Changed: R1 value 1k -> 2.2k');
+  });
+
+  it('tells the reply stage when the design is brand-new', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(streamResponse(JSON.stringify({ circuit: validCircuit })))
+      .mockResolvedValueOnce(okReviewer())
+      .mockResolvedValueOnce(okReply());
+    vi.stubGlobal('fetch', fetchMock);
+
+    await runCircuitPipeline('Make an RC filter', [], null, null);
+
+    const stage3Body = JSON.parse(fetchMock.mock.calls[2][1].body);
+    expect(stage3Body.messages.at(-1).content).toContain('brand-new design');
   });
 
   it('skips the reviewer stage entirely when AI_PIPELINE_REVIEWER=0', async () => {

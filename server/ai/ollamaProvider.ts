@@ -53,6 +53,9 @@ const POSITIONAL_NODE_KINDS = new Set([
   'opamp', 'comparator', 'pushbutton', 'bjt_npn', 'bjt_pnp', 'mosfet_n', 'mosfet_p',
 ]);
 
+// Dormant single-shot path (server/index.ts only uses runCircuitPipeline). If
+// revived, its inline "reply" instruction needs the same conversational
+// grounding the pipeline's stage 3 now has (history, memory, change summary).
 const SYSTEM_PROMPT = `You are a JSON API for beginner-safe electronics circuit generation.
 Return exactly one valid JSON object and no other text.
 The top-level object must contain "reply", "circuit", and "spice". When the circuit includes a microcontroller board it must also contain "code".
@@ -73,6 +76,7 @@ Component refs must be SPICE-compatible because the program will simulate them w
 - mosfet refs start with M, e.g. M1
 - opamp/optocoupler/subcircuit refs start with X, e.g. XU1
 - opamp components must use value LM358 in JSON and LM358 as the SPICE subcircuit name; do not use GENERIC or OPAMP.
+- When the user names a 741 (uA741, UA741, LM741), use kind ua741 with value uA741 and UA741 as the SPICE subcircuit name — one line "X<REF> <8 nodes in the fixed order> UA741". For any other op amp request use kind opamp. Leave OFS1, OFS2, and NC on "NC_<REF>_<pinNumber>" placeholders unless the user explicitly asks for offset-null trimming.
 - optocoupler components must use value PC817 in JSON and PC817 as the SPICE subcircuit name, with nodes in the fixed order [A, K, E, C] and one SPICE line "X<REF> A K E C PC817".
 - load refs should be modeled as resistors and start with R, e.g. RLOAD
 - regulator refs may use U in the JSON, but include enough surrounding passives/load nodes for simulation.

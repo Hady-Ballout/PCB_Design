@@ -303,6 +303,34 @@ describe('prompt-to-pcb generator', () => {
     expect(spice).toContain('.ends LM358');
   });
 
+  it('emits the uA741 as an 8-pin subcircuit call with the clamped-output model', () => {
+    const circuit = {
+      title: 'uA741 follower',
+      type: 'opamp',
+      supplyVoltage: 12,
+      components: [
+        { ref: 'XU1', kind: 'ua741', value: 'uA741', nodes: ['NC_XU1_1', 'VOUT', 'VINP', '0', 'NC_XU1_5', 'VOUT', 'VCC', 'NC_XU1_8'] },
+        { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VCC', '0'] },
+      ],
+      notes: [],
+    };
+    const spice = toSpice(circuit);
+
+    expect(spice).toContain('XU1 NC_XU1_1 VOUT VINP 0 NC_XU1_5 VOUT VCC NC_XU1_8 UA741');
+    expect(spice).toContain('.subckt UA741 OFS1 INN INP VEE OFS2 OUT VCC NC');
+    expect(spice).toContain('BOUT NCLAMP 0 V = max(min(V(NINT), V(VCC)-1.5), V(VEE)+1.5)');
+    expect(spice).toContain('.ends UA741');
+  });
+
+  it('injects the UA741 model into hand-edited decks that reference it', () => {
+    const circuit = { components: [{ ref: 'XU1', kind: 'ua741', value: 'uA741', nodes: [] }] };
+    const handDeck = '* hand deck\nXU1 N1 INN INP VEE N5 OUT VCC N8 UA741\n.end';
+    const patched = addMissingSpiceModels(handDeck, circuit);
+
+    expect(patched).toContain('.subckt UA741');
+    expect(addMissingSpiceModels(patched, circuit)).toBe(patched);
+  });
+
   it('routes automatic wires around unrelated component bodies', () => {
     const diagram = {
       components: [

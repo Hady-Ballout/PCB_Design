@@ -37,3 +37,7 @@ Task 20: complete (bff4c70..0e23513 + fix 5877f84, one Important found+fixed+re-
 Task 21: complete (5877f84..6b3cc9e, review Approved; Minor cosmetic: OPERATIONS.md dense table row)
 Task 22: complete (6b3cc9e..89e7250, review Approved; 39-row ledger verified faithful; ALL 22 TASKS DONE)
 Full suite at 89e7250: 812/813 pass; only red = pre-existing pcbGenerator.test.js:479 (documented). Final whole-branch review dispatched.
+Final review: round 1 = With fixes (2 Important: inert RAIL-POLICY, structural-retry throw); fix wave 169708d+b6b4a6f; round 2 = READY TO HAND BACK: YES
+  Deferred (new): supplyNets omits battery minus net + regulator/buck outputs (warning-severity FP, no current trigger); catch also swallows HTTP retry errors when candidate exists (consistent with never-fail, comment someday)
+  Deferred (carried): pullup divider FP watch, SEAM+grown-past dup, silent auto-fix confession asymmetry, 12 triage-DEFER rows
+Live smoke (TC2 RC522 re-run, direct-wire+D10): PASS — report shows DESIGN RULE FINDINGS with [error] voltage_domain_overdrive (D12->MISO) + i2c_missing_pullups warning; both modules labeled [off-board module — flying leads]; gate retry demonstrably improved output (1k/2k dividers generated on RST/SS/MOSI/SCK). Residuals observed live: MISO flag is the known direction-blind FP (deferred watch-item); RC522 3V3 SUPPLY pin wired to VCC5 goes unflagged (SUPPLY_PIN_NAMES exemption — candidate future supply-domain rule). CAMPAIGN FIX PHASE COMPLETE.

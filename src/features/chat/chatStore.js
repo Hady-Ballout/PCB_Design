@@ -308,19 +308,23 @@ export const formatClarificationSummary = (questions, answers) =>
     .map((question) => `${question.question} -> ${resolvedAnswer(answers, question.id)}`)
     .join('; ')}`;
 
+// Generation/clarify context: assistant text-only turns ride along so the
+// server's reply stage can see the AI's own past words. Clarification-question
+// bubbles and empty turns stay out; the server re-filters per stage (stage 1
+// keeps only circuit-bearing assistant turns).
 export const buildConversationContext = (messages) =>
   (Array.isArray(messages) ? messages : [])
-    .filter((message) => message.role === 'user' || (message.role === 'assistant' && message.circuit))
+    .filter((message) => message.role === 'user'
+      || (message.role === 'assistant'
+        && (message.circuit || (String(message.content || '').trim() && !message.clarification))))
     .map((message) => ({
       role: message.role,
       content: message.content,
       ...(message.circuit ? { circuit: message.circuit } : {}),
     }));
 
-// Context for /api/assist-circuit (Plan/Ask): unlike the strict generation
-// context above, assistant text-only turns are kept for conversational
-// continuity. Generation history stays clean because runGeneration keeps
-// using buildConversationContext.
+// Context for /api/assist-circuit (Plan/Ask): keeps assistant text-only turns
+// for conversational continuity.
 export const buildAssistContext = (messages) =>
   (Array.isArray(messages) ? messages : [])
     .filter((message) => message.role === 'user' || message.role === 'assistant')

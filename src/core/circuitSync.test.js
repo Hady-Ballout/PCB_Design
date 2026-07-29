@@ -127,6 +127,16 @@ V2 IN 0 DC 5
     expect(parsed.circuit.components.some((part) => part.ref === 'EGAIN' || part.ref === 'EOUT')).toBe(false);
   });
 
+  it('parses a UA741 subcircuit line into an 8-node ua741 component', () => {
+    const deck = '* deck\nV1 VCC 0 DC 12\nXU1 N1 VOUT VIN 0 N5 VOUT VCC N8 UA741\nRL1 VOUT 0 10k\n.end';
+    const parsed = parseSpiceNetlist(deck, { title: 'deck', components: [] });
+
+    expect(parsed.ok).toBe(true);
+    const part = parsed.circuit.components.find((component) => component.ref === 'XU1');
+    expect(part).toMatchObject({ kind: 'ua741', value: 'UA741' });
+    expect(part.nodes).toEqual(['N1', 'VOUT', 'VIN', '0', 'N5', 'VOUT', 'VCC', 'N8']);
+  });
+
   it('pauses SPICE synchronization for incomplete component lines', () => {
     const parsed = parseSpiceNetlist('R1 IN', circuit);
 

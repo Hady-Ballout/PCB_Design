@@ -98,4 +98,10 @@ describe('buildPcbLayout', () => {
     const stretched = footprintFor({ kind: 'resistor', ref: 'RX', nodes: ['A', 'B', 'C', 'D'] });
     expect(stretched.pads).toHaveLength(4);
   });
+
+  it('gives the uA741 a clean DIP-8 footprint', () => {
+    const footprint = footprintFor({ kind: 'ua741', ref: 'XU1', nodes: ['N1', 'O', 'I', '0', 'N5', 'O', 'V', 'N8'] });
+    expect(footprint.body).toBe('dip');
+    expect(footprint.pads).toHaveLength(8);
+  });
 });

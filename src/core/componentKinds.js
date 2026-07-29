@@ -26,6 +26,14 @@ export const COMPONENT_KINDS = {
   mosfet_n: { spicePrefix: 'M', pins: 3, symbolType: 'generic', label: 'N-channel MOSFET' },
   mosfet_p: { spicePrefix: 'M', pins: 3, symbolType: 'generic', label: 'P-channel MOSFET' },
   opamp: { spicePrefix: 'X', pins: 5, symbolType: 'opamp', label: 'Op amp' },
+  // uA741 single op amp in DIP-8: canonical order = physical pins 1-8 (the
+  // timer_555 pattern), so leg layouts and KiCad pin numbers are the identity.
+  // OFS1/OFS2 (offset null) and NC exist physically but ride NC_* nets unless
+  // the user explicitly wires an offset-trim circuit.
+  ua741: {
+    spicePrefix: 'X', pins: 8, symbolType: 'generic', label: 'Op amp (uA741)',
+    fixedPins: ['OFS1', 'IN-', 'IN+', 'V-', 'OFS2', 'OUT', 'V+', 'NC'],
+  },
   // Physically a three-pin IN/GND/OUT device. The SPICE exporter currently
   // approximates it as an ideal DC source on its output node, hence the V.
   regulator: {

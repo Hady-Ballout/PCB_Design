@@ -172,6 +172,23 @@ CPOLE NINT 0 15.9n
 EOUT OUT 0 NINT 0 1
 .ends LM358`;
 
+// Enhanced behavioral uA741: datasheet Avol (200k) with the dominant pole at
+// ~5 Hz (GBW ~1 MHz), and the output clamped ~1.5V inside each supply rail so
+// open-loop circuits clip like a real 741 instead of swinging to ±kV. Ports
+// follow the physical DIP-8 order; 10Meg leaks keep the unused offset-null/NC
+// pins DC-connected so NC_* placeholder nets never go singular.
+export const UA741_SUBCIRCUIT = `.subckt UA741 OFS1 INN INP VEE OFS2 OUT VCC NC
+RIN INP INN 2Meg
+EGAIN NRAW 0 INP INN 200k
+RPOLE NRAW NINT 1k
+CPOLE NINT 0 31.8u
+BOUT NCLAMP 0 V = max(min(V(NINT), V(VCC)-1.5), V(VEE)+1.5)
+ROUT NCLAMP OUT 75
+ROFS1 OFS1 VEE 10Meg
+ROFS2 OFS2 VEE 10Meg
+RNC NC 0 10Meg
+.ends UA741`;
+
 export const LM393_SUBCIRCUIT = `.subckt LM393 INP INN OUT VCC VEE
 EGAIN NRAW 0 INP INN 1e5
 RPOLE NRAW NINT 1k
@@ -209,6 +226,7 @@ RCE C E 10Meg
 // without defining them (hand-edited SPICE included).
 const SPICE_SUBCIRCUITS = [
   { name: 'LM358', kind: 'opamp', text: LM358_SUBCIRCUIT },
+  { name: 'UA741', kind: 'ua741', text: UA741_SUBCIRCUIT },
   { name: 'LM393', kind: 'comparator', text: LM393_SUBCIRCUIT },
   { name: 'TIMER555', kind: 'timer_555', text: TIMER555_SUBCIRCUIT },
   { name: 'PC817', kind: 'optocoupler', text: PC817_SUBCIRCUIT },
@@ -718,6 +736,7 @@ export const toSpice = (circuit) => {
     if (part.kind === 'mosfet_n') lines.push(`${ref} ${a} ${b} ${c} ${c} MNMOS`);
     if (part.kind === 'mosfet_p') lines.push(`${ref} ${a} ${b} ${c} ${c} MPMOS`);
     if (part.kind === 'opamp') lines.push(`${ref} ${a} ${b} ${c} ${d} ${e} LM358`);
+    if (part.kind === 'ua741') lines.push(`${ref} ${part.nodes.join(' ')} UA741`);
     if (part.kind === 'comparator') lines.push(`${ref} ${a} ${b} ${c} ${d} ${e} LM393`);
     if (part.kind === 'timer_555') lines.push(`${ref} ${part.nodes.join(' ')} TIMER555`);
     if (part.kind === 'optocoupler') lines.push(`${ref} ${part.nodes.join(' ')} PC817`);

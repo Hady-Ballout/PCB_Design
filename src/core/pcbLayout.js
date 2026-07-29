@@ -38,6 +38,7 @@ const FOOTPRINTS = {
   mosfet_p: { width: 6, height: 5.5, pads: inlineRow(3, 2.54), body: 'to92' },
   regulator: { width: 10.2, height: 6.5, pads: inlineRow(3, 2.54), body: 'to220' },
   opamp: { width: 10.2, height: 8, pads: dualRow(8, 2.54, 7.62), body: 'dip' },
+  ua741: { width: 10.2, height: 8, pads: dualRow(8, 2.54, 7.62), body: 'dip' },
   arduino_uno: { width: 46, height: 34, pads: dualRow(12, 2.54, 30), body: 'module' },
   raspberry_pi: { width: 50, height: 36, pads: dualRow(10, 2.54, 32), body: 'module' },
   esp32: { width: 44, height: 26, pads: dualRow(12, 2.54, 22), body: 'module' },

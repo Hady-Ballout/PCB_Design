@@ -3,6 +3,7 @@ import {
   chatMemoryLimits,
   normalizeChatMemory,
   sanitizeConversationHistory,
+  sanitizeReplyHistory,
   updateChatMemory,
 } from './chatMemory.js';
 
@@ -46,6 +47,45 @@ describe('chat memory', () => {
     expect(sanitizeConversationHistory(history)).toEqual([
       { role: 'user', content: 'blink an LED' },
       { role: 'assistant', content: 'Done', circuit },
+    ]);
+  });
+
+  it('keeps assistant text-only turns in the reply history', () => {
+    const history = [
+      { role: 'user' as const, content: 'blink an LED' },
+      { role: 'assistant' as const, content: 'I built a blinker with R1 and DLED1.' },
+      { role: 'user' as const, content: 'make it faster' },
+    ];
+
+    expect(sanitizeReplyHistory(history)).toEqual([
+      { role: 'user', content: 'blink an LED' },
+      { role: 'assistant', content: 'I built a blinker with R1 and DLED1.' },
+      { role: 'user', content: 'make it faster' },
+    ]);
+  });
+
+  it('keeps only the recent reply-history window and truncates long messages', () => {
+    const history = Array.from({ length: 12 }, (_, index) => ({
+      role: 'user' as const,
+      content: `Turn ${index + 1} ${'x'.repeat(2000)}`,
+    }));
+    const sanitized = sanitizeReplyHistory(history);
+
+    expect(sanitized).toHaveLength(chatMemoryLimits.replyHistory);
+    expect(sanitized[0].content).toContain('Turn 5');
+    expect(sanitized[0].content).toHaveLength(chatMemoryLimits.replyMessage);
+  });
+
+  it('summarizes circuit-bearing turns with empty text and drops content-less turns', () => {
+    const history = [
+      { role: 'assistant' as const, content: '', circuit: circuit as never },
+      { role: 'assistant' as const, content: '   ' },
+      { role: 'user' as const, content: 'change R2' },
+    ];
+
+    expect(sanitizeReplyHistory(history)).toEqual([
+      { role: 'assistant', content: 'Delivered circuit "Divider" (2 components).' },
+      { role: 'user', content: 'change R2' },
     ]);
   });
 

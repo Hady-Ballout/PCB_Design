@@ -343,6 +343,18 @@ describe('Ollama circuit output', () => {
     expect(prompt).toContain('Adafruit_NeoPixel');
   });
 
+  it('teaches the ua741 kind and 741-request steering in the schema and prompt', () => {
+    const kinds = CIRCUIT_SCHEMA.properties.components.items.properties.kind.enum as readonly string[];
+    expect(kinds).toContain('ua741');
+    const body = buildOllamaRequestBody('Build a uA741 amplifier', [], true);
+    const prompt = body.messages[0].content;
+    // Fixed-pin contract auto-derives from the registry.
+    expect(prompt).toContain('ua741 (8 nodes): OFS1, IN-, IN+, V-, OFS2, OUT, V+, NC');
+    // Manual steering prose.
+    expect(prompt).toContain('use kind ua741');
+    expect(prompt).toContain('UA741 as the SPICE subcircuit name');
+  });
+
   it('teaches the IR discrete parts in the schema and prompt', () => {
     const kinds = CIRCUIT_SCHEMA.properties.components.items.properties.kind.enum as readonly string[];
     ['ir_led', 'ir_phototransistor'].forEach((kind) => expect(kinds).toContain(kind));

@@ -274,6 +274,30 @@ describe('circuitToBreadboard', () => {
     assertBoardMatchesNetlist(timerCircuit, model);
   });
 
+  it('places a uA741 as a DIP-8 with the true single-741 pinout', () => {
+    // Canonical pins [OFS1, IN-, IN+, V-, OFS2, OUT, V+, NC] = DIP pins 1-8.
+    const circuit = {
+      title: 'uA741 follower',
+      nodes: ['VIN', 'VOUT', 'VCC', '0'],
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '9V', nodes: ['VCC', '0'] },
+        { ref: 'XU1', kind: 'ua741', value: 'uA741', nodes: ['NC_XU1_1', 'VOUT', 'VIN', '0', 'NC_XU1_5', 'VOUT', 'VCC', 'NC_XU1_8'] },
+        { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VIN', '0'] },
+        { ref: 'RL1', kind: 'resistor', value: '10k', nodes: ['VOUT', '0'] },
+      ],
+    };
+    const model = circuitToBreadboard(circuit);
+    const dip = model.parts.find((part) => part.ref === 'XU1');
+    expect(dip.body).toBe('dip');
+    expect(dip.holes.map((hole) => hole.strip)).toEqual([
+      'bottom', 'bottom', 'bottom', 'bottom', 'top', 'top', 'top', 'top',
+    ]);
+    const { columnStart, columnEnd } = dip.meta;
+    expect(columnEnd - columnStart).toBe(3);
+    expect(dip.holes.map((hole) => hole.column - columnStart)).toEqual([0, 1, 2, 3, 3, 2, 1, 0]);
+    assertBoardMatchesNetlist(circuit, model);
+  });
+
   it('places a comparator as an LM393-style DIP-8 like the opamp', () => {
     const model = circuitToBreadboard(comparatorCircuit);
     const dip = model.parts.find((part) => part.ref === 'XU1');

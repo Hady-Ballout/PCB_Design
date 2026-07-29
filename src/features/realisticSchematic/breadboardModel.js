@@ -29,11 +29,11 @@ const SIGNAL_WIRE_COLORS = ['#e6b422', '#3a9e4c', '#e07020', '#4a7fe0', '#9a5fd0
 const DIP_WIDTH_COLUMNS = 4;
 const OPAMP_LEG_LAYOUT = { bottom: [2, 1, 0, 4], top: [3, null, null, null] };
 
-// The 555's canonical pin order [GND, TRIG, OUT, RESET, CTRL, THRES, DISCH,
-// VCC] is exactly NE555 DIP pins 1-8, so the legs map straight onto the
-// counter-clockwise DIP numbering: pins 1-4 left-to-right on the bottom strip,
-// pins 8-5 left-to-right on the top strip.
-const TIMER_555_LEG_LAYOUT = { bottom: [0, 1, 2, 3], top: [7, 6, 5, 4] };
+// Identity DIP-8 layout for kinds whose canonical pin order is exactly the
+// physical DIP pins 1-8 (555: [GND, TRIG, OUT, RESET, CTRL, THRES, DISCH,
+// VCC]; uA741: [OFS1, IN-, IN+, V-, OFS2, OUT, V+, NC]): pins 1-4
+// left-to-right on the bottom strip, pins 8-5 left-to-right on the top strip.
+const DIP8_IDENTITY_LEG_LAYOUT = { bottom: [0, 1, 2, 3], top: [7, 6, 5, 4] };
 
 // Canonical positional pin lists for the microcontroller boards. Order is the
 // contract the AI is taught (server/ai/ollamaProvider.ts) and what the
@@ -80,7 +80,9 @@ const OFFBOARD_MCU_KINDS = new Set(['arduino_uno', 'raspberry_pi', 'esp32']);
 const STRADDLE_PACKAGES = {
   opamp: { width: DIP_WIDTH_COLUMNS, legs: OPAMP_LEG_LAYOUT, body: 'dip', requirePins: 5 },
   comparator: { width: DIP_WIDTH_COLUMNS, legs: OPAMP_LEG_LAYOUT, body: 'dip', requirePins: 5 },
-  timer_555: { width: DIP_WIDTH_COLUMNS, legs: TIMER_555_LEG_LAYOUT, body: 'dip', requirePins: 8 },
+  timer_555: { width: DIP_WIDTH_COLUMNS, legs: DIP8_IDENTITY_LEG_LAYOUT, body: 'dip', requirePins: 8 },
+  // Single uA741 in DIP-8: canonical order = physical order, identity legs.
+  ua741: { width: DIP_WIDTH_COLUMNS, legs: DIP8_IDENTITY_LEG_LAYOUT, body: 'dip', requirePins: 8 },
   // Tactile pushbutton: both electrical pins land on the bottom strip (row f)
   // like a real 4-leg tact switch bridging the trench; the top-strip legs are
   // purely mechanical, so they reserve their columns but claim no holes.

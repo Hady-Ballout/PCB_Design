@@ -750,6 +750,43 @@ describe('opamp_input_floating', () => {
   });
 });
 
+describe('ua741 wiring rules', () => {
+  // Unity follower: IN- (index 1) rides the output net, OFS/NC pins on NC_*.
+  const follower = (ref, input, output) => (
+    { ref, kind: 'ua741', value: 'uA741', nodes: [`NC_${ref}_1`, output, input, '0', `NC_${ref}_5`, output, 'VCC', `NC_${ref}_8`] }
+  );
+
+  it('flags a floating uA741 input', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '9V', nodes: ['VCC', '0'] },
+      follower('XU1', 'VINP', 'VOUT'),
+    ]));
+    expect(idsOf(result)).toContain('opamp_input_floating');
+  });
+
+  it('accepts uA741 inputs joined to the rest of the circuit', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '9V', nodes: ['VCC', '0'] },
+      follower('XU1', 'VIN', 'VOUT'),
+      { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VIN', '0'] },
+    ]));
+    expect(idsOf(result)).not.toContain('opamp_input_floating');
+  });
+
+  it('counts uA741s toward the supply decoupling warning', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '9V', nodes: ['VCC', '0'] },
+      follower('XU1', 'VIN1', 'VOUT1'),
+      { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['VIN1', '0'] },
+      follower('XU2', 'VIN2', 'VOUT2'),
+      { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['VIN2', '0'] },
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'missing_supply_decoupling');
+    expect(hit).toBeDefined();
+    expect(hit.refs).toEqual(expect.arrayContaining(['XU1', 'XU2']));
+  });
+});
+
 describe('electrolytic_cap_polarity', () => {
   it('warns for a reversed electrolytic capacitor', () => {
     // No resistive path between the rails: the orientation is unambiguous.

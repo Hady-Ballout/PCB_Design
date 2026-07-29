@@ -300,7 +300,7 @@ export const parseSpiceNetlist = (source, baseCircuit) => {
       // Subcircuit instance: nodes then the model name. The model decides the
       // kind (LM358 op amp, LM393 comparator, TIMER555 8-pin timer).
       const model = tokens.at(-1);
-      const kindByModel = { LM358: 'opamp', LM393: 'comparator', TIMER555: 'timer_555', PC817: 'optocoupler' };
+      const kindByModel = { LM358: 'opamp', UA741: 'ua741', LM393: 'comparator', TIMER555: 'timer_555', PC817: 'optocoupler' };
       const kind = kindByModel[String(model || '').toUpperCase()] || base?.kind || 'opamp';
       const expectedNodes = DEFAULT_PIN_COUNT_BY_KIND[kind] ?? 5;
       if (tokens.length < expectedNodes + 2) {
