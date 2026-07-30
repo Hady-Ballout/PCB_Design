@@ -7,7 +7,7 @@ import { buildLabelSprites, buildPcbScene, disposeObject } from './pcbScene.js';
 import './Pcb3DViewer.css';
 
 // Interactive 3D view of the procedurally routed PCB, with GLB export.
-export function Pcb3DViewer({ circuit }) {
+export function Pcb3DViewer({ circuit, windowControls }) {
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
   const pcbGroupRef = useRef(null);
@@ -119,10 +119,13 @@ export function Pcb3DViewer({ circuit }) {
 
   if (!layout) {
     return (
-      <div className="editor-window-empty">
-        <strong>No PCB layout</strong>
-        <p>This circuit has no placeable components yet.</p>
-      </div>
+      <>
+        {windowControls && <div className="editor-window-floating-controls">{windowControls}</div>}
+        <div className="editor-window-empty">
+          <strong>No PCB layout</strong>
+          <p>This circuit has no placeable components yet.</p>
+        </div>
+      </>
     );
   }
 
@@ -139,6 +142,7 @@ export function Pcb3DViewer({ circuit }) {
             {showLabels ? 'Hide labels' : 'Show labels'}
           </button>
           <button onClick={downloadGlb} type="button">Download GLB</button>
+          {windowControls}
         </div>
       </div>
       {exportError && <p className="inline-error simulation-message">{exportError}</p>}

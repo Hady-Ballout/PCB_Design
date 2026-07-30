@@ -125,7 +125,13 @@ renderer sizes the grid from `diagram.slotLayout` (falling back to
     (`renderWindowControls(view, …)`) now live at the **right end of each view's own toolbar/action
     row** — appended after the Download button (the realistic view receives them via a
     `windowControls` prop rendered at the tail of `.realistic-toolbar`; the Code view gets them
-    inside `.spice-editor-actions`). Both rows are `flex-wrap: wrap`, so on a narrow/split window
+    inside `.spice-editor-actions`; the Schematic/canvas view gets them in the `.button-row` of
+    both its KiCad and Edit toolbars; `Pcb3DViewer` receives them via the same `windowControls`
+    prop into its toolbar's `.button-row`). States with **no toolbar** — the generate-first
+    empty states and the 3D viewer's "no layout" return — pin the controls to the window's
+    top-right corner instead via `.editor-window-floating-controls` (absolute, anchored on
+    `.canvas-window-body { position: relative }`), so a window is always closable even before
+    a circuit exists. Both rows are `flex-wrap: wrap`, so on a narrow/split window
     the trailing controls drop to a second line instead of being clipped by the window's
     `overflow: hidden`. **Flat framing**: the `.main-panel` is the *single* bordered
     box on the workspace side. The `.editor-window` itself is **frameless** (no border/shadow/titlebar;
