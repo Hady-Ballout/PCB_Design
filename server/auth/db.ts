@@ -52,7 +52,7 @@ function seedLocalAdmin(): void {
   }];
 }
 
-function billingDefaults(): Pick<LocalUser, 'stripe_customer_id' | 'plan' | 'plan_status' | 'plan_period_end' | 'usage_generations' | 'usage_assists' | 'usage_month'> {
+function billingDefaults(): Pick<LocalUser, 'stripe_customer_id' | 'plan' | 'plan_status' | 'plan_period_end' | 'usage_generations' | 'usage_assists' | 'usage_month' | 'usage_tokens' | 'usage_day'> {
   return {
     stripe_customer_id: null,
     plan: 'free',
@@ -61,6 +61,8 @@ function billingDefaults(): Pick<LocalUser, 'stripe_customer_id' | 'plan' | 'pla
     usage_generations: 0,
     usage_assists: 0,
     usage_month: null,
+    usage_tokens: 0,
+    usage_day: null,
   };
 }
 
@@ -90,7 +92,9 @@ export async function initDb(): Promise<void> {
       ADD COLUMN IF NOT EXISTS plan_period_end    TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS usage_generations  INTEGER DEFAULT 0,
       ADD COLUMN IF NOT EXISTS usage_assists      INTEGER DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS usage_month        TEXT;
+      ADD COLUMN IF NOT EXISTS usage_month        TEXT,
+      ADD COLUMN IF NOT EXISTS usage_tokens       INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS usage_day          TEXT;
   `);
   console.log('Database initialized.');
 }
@@ -155,12 +159,12 @@ export function query(text: string, params: unknown[]): Promise<QueryResult> | Q
 
   // ── Billing queries (mirrored by server/billing/store.ts) ──
 
-  if (normalized === 'SELECT id, plan, plan_status, plan_period_end, stripe_customer_id, usage_generations, usage_assists, usage_month FROM users WHERE id = $1') {
+  if (normalized === 'SELECT id, plan, plan_status, plan_period_end, stripe_customer_id, usage_generations, usage_assists, usage_month, usage_tokens, usage_day FROM users WHERE id = $1') {
     const id = Number(params[0]);
     return localResult(localUsers
       .filter((user) => user.id === id)
-      .map(({ id: userId, plan, plan_status, plan_period_end, stripe_customer_id, usage_generations, usage_assists, usage_month }) => ({
-        id: userId, plan, plan_status, plan_period_end, stripe_customer_id, usage_generations, usage_assists, usage_month,
+      .map(({ id: userId, plan, plan_status, plan_period_end, stripe_customer_id, usage_generations, usage_assists, usage_month, usage_tokens, usage_day }) => ({
+        id: userId, plan, plan_status, plan_period_end, stripe_customer_id, usage_generations, usage_assists, usage_month, usage_tokens, usage_day,
       })));
   }
 
@@ -218,6 +222,20 @@ export function query(text: string, params: unknown[]): Promise<QueryResult> | Q
             usage_generations: Number(params[1]),
             usage_assists: Number(params[2]),
             usage_month: params[3] as string,
+          }
+        : user
+    ));
+    return localResult([]);
+  }
+
+  if (normalized === 'UPDATE users SET usage_tokens = $2, usage_day = $3 WHERE id = $1') {
+    const id = Number(params[0]);
+    localUsers = localUsers.map((user) => (
+      user.id === id
+        ? {
+            ...user,
+            usage_tokens: Number(params[1]),
+            usage_day: params[2] as string,
           }
         : user
     ));

@@ -1,4 +1,5 @@
 import { normalizeChatMemory, sanitizeConversationHistory, sanitizeReplyHistory } from './chatMemory.js';
+import { recordProviderUsage } from './tokenUsage.js';
 import { describeCircuitDiff, diffCircuits } from './circuitDiff.js';
 import { circuitKnowledgePrompt } from './circuitKnowledge.js';
 import {
@@ -815,6 +816,7 @@ async function sendChatCompletion(
   });
   if (!response.ok) throw new Error(`${config.provider} returned ${response.status}: ${await response.text()}`);
   const data = await response.json() as Record<string, unknown>;
+  recordProviderUsage(data);
   const content = readOpenAiCompatibleContent(data);
   if (!content) throw providerContentError(config, data);
   return content;

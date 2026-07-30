@@ -27,6 +27,8 @@ describe('getBillingUser', () => {
       usageGenerations: 0,
       usageAssists: 0,
       usageMonth: null,
+      usageTokens: 0,
+      usageDay: null,
     });
   });
 
