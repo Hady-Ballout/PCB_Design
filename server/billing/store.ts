@@ -13,6 +13,8 @@ export interface BillingUser {
   usageGenerations: number;
   usageAssists: number;
   usageMonth: string | null;
+  usageTokens: number;
+  usageDay: string | null;
 }
 
 interface BillingRow {
@@ -24,11 +26,13 @@ interface BillingRow {
   usage_generations: number | null;
   usage_assists: number | null;
   usage_month: string | null;
+  usage_tokens: number | null;
+  usage_day: string | null;
 }
 
 export async function getBillingUser(id: number): Promise<BillingUser | null> {
   const result = await query(
-    'SELECT id, plan, plan_status, plan_period_end, stripe_customer_id, usage_generations, usage_assists, usage_month FROM users WHERE id = $1',
+    'SELECT id, plan, plan_status, plan_period_end, stripe_customer_id, usage_generations, usage_assists, usage_month, usage_tokens, usage_day FROM users WHERE id = $1',
     [id]
   );
   const row = result.rows[0] as unknown as BillingRow | undefined;
@@ -45,6 +49,8 @@ export async function getBillingUser(id: number): Promise<BillingUser | null> {
     usageGenerations: Number(row.usage_generations ?? 0),
     usageAssists: Number(row.usage_assists ?? 0),
     usageMonth: row.usage_month ?? null,
+    usageTokens: Number(row.usage_tokens ?? 0),
+    usageDay: row.usage_day ?? null,
   };
 }
 
@@ -82,5 +88,15 @@ export async function setUsage(
   await query(
     'UPDATE users SET usage_generations = $2, usage_assists = $3, usage_month = $4 WHERE id = $1',
     [id, usage.generations, usage.assists, usage.month]
+  );
+}
+
+export async function setDailyTokens(
+  id: number,
+  usage: { tokens: number; day: string }
+): Promise<void> {
+  await query(
+    'UPDATE users SET usage_tokens = $2, usage_day = $3 WHERE id = $1',
+    [id, usage.tokens, usage.day]
   );
 }

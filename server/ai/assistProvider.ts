@@ -14,6 +14,7 @@ import {
   readOpenAiCompatibleContent,
   streamOpenAiCompatibleContent,
 } from './ollamaProvider.js';
+import { recordProviderUsage } from './tokenUsage.js';
 import type {
   AssistMode,
   AssistResult,
@@ -142,6 +143,7 @@ export async function generateAssistReply(
     });
     if (!response.ok) throw new Error(`${config.provider} returned ${response.status}: ${await response.text()}`);
     const data = await response.json() as Record<string, unknown>;
+    recordProviderUsage(data);
     content = readOpenAiCompatibleContent(data);
   }
 

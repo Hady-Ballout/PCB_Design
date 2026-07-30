@@ -291,6 +291,8 @@ export interface LocalUser {
   usage_generations: number;
   usage_assists: number;
   usage_month: string | null;
+  usage_tokens: number;
+  usage_day: string | null;
 }
 
 export interface QueryResult<T = Record<string, unknown>> {

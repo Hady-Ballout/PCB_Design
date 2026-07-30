@@ -1,4 +1,5 @@
 import { normalizeChatMemory, sanitizeConversationHistory } from './chatMemory.js';
+import { recordProviderUsage } from './tokenUsage.js';
 import { circuitKnowledgePrompt } from './circuitKnowledge.js';
 import { parseSpiceNetlist } from '../../src/core/circuitSync.js';
 import { toSpice } from '../../src/core/pcbGenerator.js';
@@ -839,15 +840,20 @@ export async function streamOpenAiCompatibleContent(
   ollamaBody: OllamaRequestBody,
   handlers: OpenAiStreamHandlers = {},
 ): Promise<string> {
+  const streamBody = buildOpenAiCompatibleBody(config, { ...ollamaBody, stream: true });
+  // Ask OpenAI-compatible gateways to emit a final usage-only chunk so token
+  // spend can be metered even while streaming. Gateways that ignore it still work.
+  if (isZaiProvider(config.provider)) streamBody.stream_options = { include_usage: true };
   const response = await fetch(openAiCompatibleUrl(config), {
     method: 'POST',
     headers: openAiCompatibleHeaders(config),
-    body: JSON.stringify(buildOpenAiCompatibleBody(config, { ...ollamaBody, stream: true })),
+    body: JSON.stringify(streamBody),
   });
   if (!response.ok) throw new Error(`${config.provider} returned ${response.status}: ${await response.text()}`);
 
   if ((response.headers.get('content-type') || '').includes('application/json')) {
     const data = await response.json() as Record<string, unknown>;
+    recordProviderUsage(data);
     const content = readOpenAiCompatibleContent(data);
     if (!content) throw providerContentError(config, data);
     handlers.onContent?.(content);
@@ -876,6 +882,7 @@ export async function streamOpenAiCompatibleContent(
       throw new Error(typeof event.error === 'string' ? event.error : JSON.stringify(event.error));
     }
     lastEvent = event;
+    recordProviderUsage(event); // the final include_usage chunk carries token counts
     const choice = (event.choices as Record<string, unknown>[])?.[0];
     const delta = (choice?.delta ?? {}) as Record<string, unknown>;
     if (typeof delta.reasoning_content === 'string' && delta.reasoning_content) {
@@ -926,6 +933,7 @@ async function callOpenAiCompatible(
 
   if (!response.ok) throw new Error(`${config.provider} returned ${response.status}: ${await response.text()}`);
   const data = await response.json() as Record<string, unknown>;
+  recordProviderUsage(data);
   const content = readOpenAiCompatibleContent(data);
   if (!content) {
     throw providerContentError(config, data);

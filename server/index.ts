@@ -14,6 +14,8 @@ import { initDb } from './auth/db.js';
 import { handleSignup, handleLogin, handleVerifyEmail, handleMe, verifyJwt } from './auth/auth.js';
 import { handleBillingStatus, handleCreateCheckout, handleCreatePortal, handleStripeWebhook } from './billing/billing.js';
 import { QuotaError, checkAndConsumeQuota } from './billing/quota.js';
+import { DailyTokenLimitError, dailyLimitMessage, enforceDailyTokenLimit, recordDailyTokens } from './billing/dailyTokens.js';
+import { trackTokenUsage } from './ai/tokenUsage.js';
 import type { ChatMemory, ChatMessage, Circuit, CurrentDesign, JwtPayload, PipelineEvent, StreamState } from './types.js';
 
 loadEnv();
@@ -97,6 +99,17 @@ const sendQuotaExceeded = (response: ServerResponse, error: QuotaError): void =>
     error: error.message,
     plan: error.plan,
     meter: error.meter,
+    limit: error.limit,
+    usage: error.usage,
+  });
+};
+
+// The per-user daily token cap is hit: 429 with a user-facing message. Runs for
+// every logged-in user, independent of Stripe.
+const sendDailyLimitReached = (response: ServerResponse, error: DailyTokenLimitError): void => {
+  sendJson(response, 429, {
+    code: 'daily_token_limit',
+    error: dailyLimitMessage(error.limit),
     limit: error.limit,
     usage: error.usage,
   });
@@ -285,12 +298,25 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         throw quotaError;
       }
 
+      try {
+        await enforceDailyTokenLimit(user.id);
+      } catch (limitError) {
+        if (limitError instanceof DailyTokenLimitError) {
+          sendDailyLimitReached(response, limitError);
+          return;
+        }
+        throw limitError;
+      }
+
       const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
       const currentDesign = (body.currentDesign as CurrentDesign)?.circuit ? body.currentDesign as CurrentDesign : null;
       const memory = normalizeChatMemory(body.memory as Partial<ChatMemory> | null);
       startJsonStream(response);
       const thinking = createThinkingBatcher((delta) => writeStreamEvent(response, { type: 'thinking', delta }));
-      const result = await generateClarifyingQuestions(prompt, messages, currentDesign, memory, thinking.push);
+      const { result, tokens } = await trackTokenUsage(
+        () => generateClarifyingQuestions(prompt, messages, currentDesign, memory, thinking.push)
+      );
+      await recordDailyTokens(user.id, tokens);
       writeStreamEvent(response, { type: 'complete', data: result });
       response.end();
     } catch (error) {
@@ -329,13 +355,26 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         throw quotaError;
       }
 
+      try {
+        await enforceDailyTokenLimit(user.id);
+      } catch (limitError) {
+        if (limitError instanceof DailyTokenLimitError) {
+          sendDailyLimitReached(response, limitError);
+          return;
+        }
+        throw limitError;
+      }
+
       const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
       const currentDesign = (body.currentDesign as CurrentDesign)?.circuit ? body.currentDesign as CurrentDesign : null;
       const memory = normalizeChatMemory(body.memory as Partial<ChatMemory> | null);
       startJsonStream(response);
       const thinking = createThinkingBatcher((delta) => writeStreamEvent(response, { type: 'thinking', delta }));
       // Assist replies confirm no design, so chat memory is deliberately not updated.
-      const result = await generateAssistReply(mode, prompt, messages, currentDesign, memory, thinking.push);
+      const { result, tokens } = await trackTokenUsage(
+        () => generateAssistReply(mode, prompt, messages, currentDesign, memory, thinking.push)
+      );
+      await recordDailyTokens(user.id, tokens);
       writeStreamEvent(response, { type: 'complete', data: result });
       response.end();
     } catch (error) {
@@ -369,6 +408,16 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
         throw quotaError;
       }
 
+      try {
+        await enforceDailyTokenLimit(user.id);
+      } catch (limitError) {
+        if (limitError instanceof DailyTokenLimitError) {
+          sendDailyLimitReached(response, limitError);
+          return;
+        }
+        throw limitError;
+      }
+
       const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
       const currentDesign = (body.currentDesign as CurrentDesign)?.circuit ? body.currentDesign as CurrentDesign : null;
       const memory = normalizeChatMemory(body.memory as Partial<ChatMemory> | null);
@@ -388,22 +437,25 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       });
 
       let lastSpiceEvent = '';
-      const aiResponse = await runCircuitPipeline(prompt, messages, currentDesign, memory, (event: PipelineEvent) => {
-        if (event.type === 'stage') {
-          writeStreamEvent(response, { type: 'stage', stage: event.stage });
-          return;
-        }
-        const partial = buildStreamingSpice(event.content, prompt, currentDesign?.circuit ?? null);
-        const eventKey = `${event.attempt}:${partial.spice}`;
-        if (eventKey === lastSpiceEvent) return;
-        lastSpiceEvent = eventKey;
-        writeStreamEvent(response, {
-          type: 'spice',
-          provisional: true,
-          correcting: event.correcting,
-          ...partial,
-        });
-      });
+      const { result: aiResponse, tokens: tokensUsed } = await trackTokenUsage(
+        () => runCircuitPipeline(prompt, messages, currentDesign, memory, (event: PipelineEvent) => {
+          if (event.type === 'stage') {
+            writeStreamEvent(response, { type: 'stage', stage: event.stage });
+            return;
+          }
+          const partial = buildStreamingSpice(event.content, prompt, currentDesign?.circuit ?? null);
+          const eventKey = `${event.attempt}:${partial.spice}`;
+          if (eventKey === lastSpiceEvent) return;
+          lastSpiceEvent = eventKey;
+          writeStreamEvent(response, {
+            type: 'spice',
+            provisional: true,
+            correcting: event.correcting,
+            ...partial,
+          });
+        })
+      );
+      await recordDailyTokens(user.id, tokensUsed);
       const circuit = reconcileCircuitRevision(aiResponse.circuit as unknown as Record<string, unknown>, prompt, currentDesign?.circuit ?? null);
       // Reconciliation can merge the candidate with the prior confirmed
       // design, so run the topology check on what actually ships; the
