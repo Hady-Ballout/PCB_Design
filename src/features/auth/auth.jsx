@@ -224,7 +224,7 @@ export function HomePage() {
       <PageBackdrop />
       <div className="home-hero">
         <p className="home-eyebrow">Prompt → Schematic → Simulation → Board</p>
-        <h1 className="home-title">PCB Pilot</h1>
+        <h1 className="home-title">Impedo</h1>
         <p className="home-subtitle">
           Describe a circuit in plain English. Get a validated schematic,
           SPICE simulation, and KiCad-ready netlist — in seconds.
@@ -325,7 +325,7 @@ export function LoginPage() {
     <main className="auth-page">
       <PageBackdrop />
       <form className="auth-card" onSubmit={handleSubmit} noValidate>
-        <h2>Log in to PCB Pilot</h2>
+        <h2>Log in to Impedo</h2>
         {error && <div className="auth-error">{error}</div>}
         <label className="auth-label">
           Email
