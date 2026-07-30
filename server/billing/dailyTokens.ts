@@ -21,6 +21,36 @@ export function currentDay(now = new Date()): string {
   return now.toISOString().slice(0, 10);
 }
 
+// ISO timestamp of the next 00:00 UTC — when today's allowance resets.
+export function nextDailyResetAt(now = new Date()): string {
+  return new Date(Date.UTC(
+    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0, 0
+  )).toISOString();
+}
+
+export interface DailyTokenStatus {
+  used: number;
+  limit: number;
+  remaining: number;
+  percentUsed: number; // 0–100, clamped
+  resetsAt: string;    // ISO 00:00 UTC
+}
+
+// Read-only snapshot of the caller's daily allowance for the usage meter. Never
+// throws for a missing user — reports a fresh (zero-used) window instead.
+export async function getDailyTokenStatus(userId: number, now = new Date()): Promise<DailyTokenStatus> {
+  const limit = dailyTokenLimit();
+  const user = await getBillingUser(userId);
+  const used = user && user.usageDay === currentDay(now) ? Math.max(0, user.usageTokens) : 0;
+  return {
+    used,
+    limit,
+    remaining: Math.max(0, limit - used),
+    percentUsed: limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0,
+    resetsAt: nextDailyResetAt(now),
+  };
+}
+
 export class DailyTokenLimitError extends Error {
   constructor(public limit: number, public usage: number) {
     super(`Daily token limit reached (${usage}/${limit}).`);
