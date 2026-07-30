@@ -1371,10 +1371,13 @@ function App() {
   const renderCanvasView = () => (
     <div className="editor-window-body canvas-window-body">
       {!result ? (
-        <div className="editor-window-empty">
-          <strong>No canvas available</strong>
-          <p>Generate a circuit to open its editable schematic canvas.</p>
-        </div>
+        <>
+          <div className="editor-window-floating-controls">{renderWindowControls('canvas')}</div>
+          <div className="editor-window-empty">
+            <strong>No canvas available</strong>
+            <p>Generate a circuit to open its editable schematic canvas.</p>
+          </div>
+        </>
       ) : canvasMode === 'kicad' ? (
         <>
           <div className="canvas-window-toolbar">
@@ -1389,6 +1392,7 @@ function App() {
               >
                 Download .kicad_sch
               </button>
+              {renderWindowControls('canvas')}
             </div>
           </div>
           {kicadSchematicSource ? (
@@ -1449,6 +1453,7 @@ function App() {
               <button onClick={() => applyDiagramChange(() => layoutCircuitDiagram(result.circuit, { slots: true }))}>Auto-layout</button>
               <button onClick={() => setEditedDiagram(cloneDiagram(result.diagram))}>Reset</button>
               <button onClick={() => downloadText('generated.svg', toDiagramSvg(editedDiagram || result.diagram), 'image/svg+xml')}>Download SVG</button>
+              {renderWindowControls('canvas')}
             </div>
           </div>
           <CircuitDiagram
@@ -1587,13 +1592,16 @@ function App() {
   const renderPcb3dView = () => (
     <div className="editor-window-body canvas-window-body">
       {!result ? (
-        <div className="editor-window-empty">
-          <strong>No PCB available</strong>
-          <p>Generate a circuit to view its 3D printed circuit board.</p>
-        </div>
+        <>
+          <div className="editor-window-floating-controls">{renderWindowControls('pcb3d')}</div>
+          <div className="editor-window-empty">
+            <strong>No PCB available</strong>
+            <p>Generate a circuit to view its 3D printed circuit board.</p>
+          </div>
+        </>
       ) : (
         <React.Suspense fallback={<div className="editor-window-empty"><p>Loading 3D viewer...</p></div>}>
-          <Pcb3DViewer circuit={result.circuit} />
+          <Pcb3DViewer circuit={result.circuit} windowControls={renderWindowControls('pcb3d')} />
         </React.Suspense>
       )}
     </div>
@@ -1602,10 +1610,13 @@ function App() {
   const renderRealisticSchematicView = () => (
     <div className="editor-window-body canvas-window-body">
       {!result ? (
-        <div className="editor-window-empty">
-          <strong>No breadboard available</strong>
-          <p>Generate a circuit to view its breadboard build.</p>
-        </div>
+        <>
+          <div className="editor-window-floating-controls">{renderWindowControls('realisticSchematic')}</div>
+          <div className="editor-window-empty">
+            <strong>No breadboard available</strong>
+            <p>Generate a circuit to view its breadboard build.</p>
+          </div>
+        </>
       ) : (
         <RealisticSchematic
           circuit={result.circuit}

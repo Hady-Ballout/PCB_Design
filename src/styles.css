@@ -1458,6 +1458,18 @@ h3 {
    reintroduce a visible gap/box between frames. */
 .canvas-window-body {
   padding: 0;
+  /* Anchor for .editor-window-floating-controls in toolbar-less states. */
+  position: relative;
+}
+
+/* Views with no toolbar in their current state (3D PCB "no layout", the
+   generate-first empty states) pin the maximize/close controls to the
+   window's top-right corner so the window always stays closable. */
+.editor-window-floating-controls {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  z-index: 5;
 }
 
 .editor-window-code {
