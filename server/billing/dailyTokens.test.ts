@@ -7,6 +7,8 @@ import {
   currentDay,
   dailyTokenLimit,
   enforceDailyTokenLimit,
+  getDailyTokenStatus,
+  nextDailyResetAt,
   recordDailyTokens,
 } from './dailyTokens.js';
 
@@ -99,5 +101,48 @@ describe('recordDailyTokens + enforceDailyTokenLimit', () => {
   it('ignores unknown users (auth already gated them)', async () => {
     await expect(enforceDailyTokenLimit(424242)).resolves.toBeUndefined();
     await expect(recordDailyTokens(424242, 100)).resolves.toBeUndefined();
+  });
+});
+
+describe('nextDailyResetAt', () => {
+  it('is the next 00:00 UTC', () => {
+    expect(nextDailyResetAt(new Date('2026-07-30T14:22:00Z'))).toBe('2026-07-31T00:00:00.000Z');
+    expect(nextDailyResetAt(new Date('2026-12-31T23:59:59Z'))).toBe('2027-01-01T00:00:00.000Z');
+  });
+});
+
+describe('getDailyTokenStatus', () => {
+  it('reports zero usage for a fresh user', async () => {
+    const status = await getDailyTokenStatus(1, new Date('2026-07-30T10:00:00Z'));
+    expect(status).toEqual({
+      used: 0,
+      limit: 50000,
+      remaining: 50000,
+      percentUsed: 0,
+      resetsAt: '2026-07-31T00:00:00.000Z',
+    });
+  });
+
+  it('reflects today\'s spend as a rounded percentage', async () => {
+    await setDailyTokens(1, { tokens: 12500, day: currentDay() });
+    const status = await getDailyTokenStatus(1);
+    expect(status.used).toBe(12500);
+    expect(status.remaining).toBe(37500);
+    expect(status.percentUsed).toBe(25);
+  });
+
+  it('treats a stale day as zero used', async () => {
+    await setDailyTokens(1, { tokens: 50000, day: '2000-01-01' });
+    const status = await getDailyTokenStatus(1);
+    expect(status.used).toBe(0);
+    expect(status.percentUsed).toBe(0);
+  });
+
+  it('clamps the percentage to 100 on overshoot', async () => {
+    await setDailyTokens(1, { tokens: 60000, day: currentDay() });
+    const status = await getDailyTokenStatus(1);
+    expect(status.used).toBe(60000);
+    expect(status.remaining).toBe(0);
+    expect(status.percentUsed).toBe(100);
   });
 });

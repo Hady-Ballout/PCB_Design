@@ -1,0 +1,84 @@
+.usage-meter {
+  position: relative;
+  display: inline-flex;
+  --usage-tone: var(--color-success);
+}
+.usage-meter .tone-ok { --usage-tone: var(--color-success); }
+.usage-meter .tone-warn { --usage-tone: #f08c00; }
+.usage-meter .tone-danger { --usage-tone: var(--color-error-text); }
+
+/* The ring button */
+.usage-ring {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 2px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-panel);
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  transition: transform 0.05s ease, box-shadow 0.05s ease;
+}
+.usage-ring:hover { transform: translate(-1px, -1px); box-shadow: var(--shadow-sm); }
+.usage-ring:active { transform: translate(1px, 1px); box-shadow: none; }
+.usage-ring:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+.usage-ring-track {
+  fill: none;
+  stroke: var(--color-border-soft);
+  stroke-width: 4;
+}
+.usage-ring-fill {
+  fill: none;
+  stroke: var(--usage-tone);
+  stroke-width: 4;
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.4s ease, stroke 0.3s ease;
+}
+
+/* The popover */
+.usage-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  min-width: 210px;
+  padding: 12px 14px;
+  border: 2px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-panel);
+  box-shadow: var(--shadow-md);
+  color: var(--color-text);
+  text-align: left;
+}
+.usage-popover-head {
+  font-weight: 700;
+  font-size: 0.82rem;
+  margin-bottom: 8px;
+}
+.usage-popover-track {
+  height: 8px;
+  border: 1.5px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  overflow: hidden;
+}
+.usage-popover-bar {
+  display: block;
+  height: 100%;
+  background: var(--usage-tone);
+  transition: width 0.4s ease, background 0.3s ease;
+}
+.usage-popover-percent {
+  margin-top: 8px;
+  font-size: 0.9rem;
+}
+.usage-popover-percent strong { font-size: 1.05rem; }
+.usage-popover-sub {
+  margin-top: 3px;
+  font-size: 0.76rem;
+  color: var(--color-text-muted);
+}

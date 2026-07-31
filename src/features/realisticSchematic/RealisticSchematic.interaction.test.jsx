@@ -12,7 +12,7 @@ import { createRoot } from 'react-dom/client';
 import { RealisticSchematic } from './RealisticSchematic.jsx';
 import { circuitToBreadboard } from './breadboardModel.js';
 import { holeCenter } from './breadboardGeometry.js';
-import { ALLOWED_KINDS } from '../../core/componentKinds.js';
+import { ALLOWED_KINDS, COMPONENT_CATEGORIES, KINDS_BY_CATEGORY } from '../../core/componentKinds.js';
 import { SIM_AUDIO_MUTED_STORAGE_KEY } from './useSimulation.js';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -224,9 +224,10 @@ describe('component library', () => {
 
     const popover = container.querySelector('.realistic-library');
     expect(popover).not.toBeNull();
-    // Every registry kind is listed, grouped into the three browse sections.
+    // Every registry kind is listed, grouped into one section per populated category.
     expect(container.querySelectorAll('.realistic-library-item')).toHaveLength(ALLOWED_KINDS.length);
-    expect(container.querySelectorAll('.realistic-library-group-title')).toHaveLength(3);
+    const populatedCategories = COMPONENT_CATEGORIES.filter((c) => KINDS_BY_CATEGORY[c.id].length > 0);
+    expect(container.querySelectorAll('.realistic-library-group-title')).toHaveLength(populatedCategories.length);
     const labels = [...container.querySelectorAll('.realistic-library-item-label')].map((el) => el.textContent);
     expect(labels).toContain('Potentiometer');
     expect(labels).toContain('Arduino Uno');
@@ -292,6 +293,21 @@ describe('component library', () => {
     });
     const labels = [...container.querySelectorAll('.realistic-library-item-label')].map((el) => el.textContent);
     expect(labels).toEqual(['Servo motor']);
+  });
+
+  it('matches components by alias, not just the visible label', () => {
+    const svg = mount({});
+    fireDouble(svg);
+    const search = container.querySelector('.realistic-library-search');
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      // "op-amp" appears in neither the "Op amp" label nor the "opamp" slug — it
+      // only resolves through the opamp alias list.
+      setter.call(search, 'op-amp');
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const labels = [...container.querySelectorAll('.realistic-library-item-label')].map((el) => el.textContent);
+    expect(labels).toEqual(['Op amp']);
   });
 
   it('closes on Escape and on backdrop click', () => {

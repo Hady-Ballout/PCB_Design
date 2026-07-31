@@ -52,6 +52,7 @@ import {
   wireId,
 } from '../features/schematic/geometry.js';
 import { AuthProvider, useAuth, HomePage, LoginPage, SignupPage, VerifyPage } from '../features/auth/auth.jsx';
+import { UsageMeter } from '../features/usage/UsageMeter.jsx';
 import { applyTheme, loadTheme, saveTheme } from './theme.js';
 import { ThemeToggle } from './ThemeToggle.jsx';
 import '../features/auth/auth.css';
@@ -85,6 +86,9 @@ function App() {
   const [thinkingState, setThinkingState] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [theme, setTheme] = useState(loadTheme);
+  // Bumped after each AI call so the daily-usage ring re-fetches its status.
+  const [usageRefreshKey, setUsageRefreshKey] = useState(0);
+  const refreshUsage = () => setUsageRefreshKey((key) => key + 1);
   const messagesEndRef = useRef(null);
   const spiceEditorRef = useRef(null);
   const resizeDragRef = useRef(null);
@@ -758,6 +762,7 @@ function App() {
     } finally {
       setAssistingChatId(null);
       clearThinking();
+      refreshUsage();
     }
   };
 
@@ -1007,6 +1012,7 @@ function App() {
       setGeneratingChatId(null);
       setGenerationStage(null);
       clearThinking();
+      refreshUsage();
     }
   };
 
@@ -1826,6 +1832,7 @@ function App() {
     <main className="app-shell">
       <div className="user-bar app-user-bar">
         <ThemeToggle theme={theme} onToggle={toggleTheme} />
+        <UsageMeter refreshKey={usageRefreshKey} />
         <span>{user.email}</span>
         <button type="button" onClick={logout}>Log out</button>
       </div>
