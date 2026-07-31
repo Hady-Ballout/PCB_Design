@@ -4,8 +4,12 @@ import { describeCircuitDiff, diffCircuits } from './circuitDiff.js';
 import { circuitKnowledgePrompt } from './circuitKnowledge.js';
 import {
   ALLOWED_KINDS,
+  COMPONENT_CATEGORIES,
   FIXED_PIN_NAMES,
+  KIND_ALIASES,
+  KINDS_BY_CATEGORY,
   MCU_KINDS,
+  PREFERRED_VALUES,
   WIRING_ONLY_KINDS,
 } from '../../src/core/componentKinds.js';
 import {
@@ -50,6 +54,31 @@ const WIRING_ONLY_PARTS = ALLOWED_KINDS
   .filter((kind) => WIRING_ONLY_KINDS.has(kind) && !MCU_KINDS.has(kind))
   .join(', ');
 
+// Categorized kind picker: each line is "Category: slug (synonyms); ...". The
+// parenthesised aliases (from KIND_ALIASES) let the model map colloquial names
+// and part numbers the user types ("op-amp", "555", "ldr") onto the right slug.
+const KIND_PICKER_GUIDE = COMPONENT_CATEGORIES
+  .map(({ id, title }) => {
+    const kinds = KINDS_BY_CATEGORY[id] ?? [];
+    if (kinds.length === 0) return null;
+    const items = kinds
+      .map((kind) => {
+        const aliases = KIND_ALIASES[kind] ?? [];
+        return aliases.length > 0 ? `${kind} (${aliases.join(', ')})` : kind;
+      })
+      .join('; ');
+    return `${title}: ${items}`;
+  })
+  .filter(Boolean)
+  .join('\n');
+
+// Standard-value defaults per kind (E24 passives, common supply rails). Steers
+// the model toward realistic values when the request doesn't name one; these are
+// backend hints only — never surfaced to the user.
+const PREFERRED_VALUE_GUIDE = Object.entries(PREFERRED_VALUES)
+  .map(([kind, values]) => `${kind}: ${values.join(', ')}`)
+  .join('\n');
+
 const MCU_PIN_COUNT_SUMMARY = [...MCU_KINDS]
   .map((kind) => `${kind} ${FIXED_PIN_NAMES[kind].length}`)
   .join(', ');
@@ -62,6 +91,8 @@ Use node "0" for ground.
 Every component needs ref, kind, value, nodes, and footprint.
 The circuit may include optional compact "schematic" metadata for layout intent. Omit schematic unless it is needed to mark external terminals or an op amp primaryRef. Schematic metadata is visual only and must not add SPICE components.
 Allowed component kinds: ${ALLOWED_KINDS.join(', ')}.
+Pick the kind slug whose role matches the request. Names in parentheses are synonyms/part numbers the user may use for that kind; map them to the slug shown:
+${KIND_PICKER_GUIDE}
 Sensor and module parts (${WIRING_ONLY_PARTS}) are wiring-only: they are never simulated. Wire their fixed pins to the MCU/supply nets exactly as named.
 The following parts use fixed positional node lists; the nodes array length and order must match exactly, using "NC_<REF>_<pinNumber>" for any unused pin:
 ${MODULE_PIN_CONTRACT}
@@ -80,6 +111,8 @@ Component refs must be SPICE-compatible because the program will simulate them w
 - regulator refs may use U in the JSON, but include enough surrounding passives/load nodes for simulation.
 - microcontroller board refs start with U, e.g. U1
 Use simple Ngspice-friendly values such as 1k, 100nF, 10uF, 5V, and SINE(0 1 1k).
+When the request doesn't specify a value, prefer these standard defaults (pick the closest that fits the design; they are defaults, not limits):
+${PREFERRED_VALUE_GUIDE}
 Use voltage_source for DC supplies and fixed DC input biases. Use signal_source only for waveform or time-varying sources such as SINE(...), PULSE(...), PWL(...), EXP(...), or AC.
 Every node except ground "0" must connect to at least two component pins and have a DC path to ground; never leave a node floating.
 Microcontroller boards (${[...MCU_KINDS].join(', ')}) are wiring-only: they are never simulated and must never appear in the SPICE deck. Each kind has a fixed, positional pin/node list that must always be present in full, in this exact order:
