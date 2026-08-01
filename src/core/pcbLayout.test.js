@@ -104,6 +104,23 @@ describe('buildPcbLayout', () => {
     expect(padOrder).toHaveLength(4);
   });
 
+  it("records the placer's rotation on every component", () => {
+    for (const component of layout.components) {
+      expect([0, 90, 180, 270]).toContain(component.rotation);
+      // Pads sit inside the component's (rotated) courtyard extent.
+      for (const pad of component.pads) {
+        expect(Math.abs(pad.x - component.x)).toBeLessThanOrEqual(component.width / 2 + 0.01);
+        expect(Math.abs(pad.y - component.y)).toBeLessThanOrEqual(component.height / 2 + 0.01);
+      }
+    }
+  });
+
+  it('spreads the board out when asked to expand', () => {
+    const expanded = buildPcbLayout(sampleCircuit, { expandFactor: 1.35 });
+    expect(expanded.board.width * expanded.board.height)
+      .toBeGreaterThan(layout.board.width * layout.board.height);
+  });
+
   it('gives the uA741 a clean DIP-8 footprint', () => {
     const part = { kind: 'ua741', ref: 'XU1', nodes: ['N1', 'O', 'I', '0', 'N5', 'O', 'V', 'N8'] };
     const { libId, record } = footprintRecordFor(part);

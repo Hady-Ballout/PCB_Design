@@ -4,71 +4,24 @@
 // copper layer, vertical segments on the bottom layer, with a via at every
 // bend — through-hole pads join both layers, so nets stay connected.
 // Footprint geometry (pad positions/shapes/drills, body size) comes from
-// real vendored KiCad footprints via pcbFootprints.js; this module only
-// places whole footprints and routes between their pads.
-import { bodyKindFor, footprintRecordFor } from './pcbFootprints.js';
+// real vendored KiCad footprints via pcbFootprints.js, and placement from the
+// netlist-aware placer in pcbPlace.js; this module turns those placements into
+// the layout object and routes between their pads.
+import { bodyKindFor } from './pcbFootprints.js';
+import {
+  isUnconnectedTerminal,
+  placeComponents,
+  placementBounds,
+  placementPads,
+} from './pcbPlace.js';
 
 export const BOARD_THICKNESS = 1.6;
 export const TRACE_WIDTH = 0.8;
 export const VIA_DIAMETER = 1.4;
 // Fallback pad diameter for callers that don't read a pad's own `diameter`.
 export const PAD_DIAMETER = 1.8;
-const PLACEMENT_GAP = 5;
-const EDGE_MARGIN = 4;
 
 const round = (value) => Math.round(value * 100) / 100;
-
-const isUnconnectedTerminal = (node, ref, pin) =>
-  /^NC_/i.test(String(node)) || String(node) === `${ref}_${pin}`;
-
-const placeComponents = (parts) => {
-  const items = parts.map((part) => {
-    const { libId, record, padOrder } = footprintRecordFor(part);
-    const body = bodyKindFor(libId, part);
-    // The courtyard already encloses the pads plus clearance, so it alone
-    // sizes the placement cell.
-    const width = record.courtyard.maxX - record.courtyard.minX;
-    const height = record.courtyard.maxY - record.courtyard.minY;
-    return {
-      part,
-      libId,
-      record,
-      padOrder,
-      body,
-      width,
-      height,
-      cellWidth: width + PLACEMENT_GAP,
-      cellHeight: height + PLACEMENT_GAP,
-    };
-  });
-
-  // Row packing toward a roughly 4:3 board.
-  const totalArea = items.reduce((sum, item) => sum + item.cellWidth * item.cellHeight, 0);
-  const targetWidth = Math.max(Math.sqrt(totalArea * (4 / 3)), Math.max(...items.map((item) => item.cellWidth)));
-
-  const placed = [];
-  let cursorX = EDGE_MARGIN;
-  let cursorY = EDGE_MARGIN;
-  let rowHeight = 0;
-  for (const item of items) {
-    if (cursorX > EDGE_MARGIN && cursorX + item.cellWidth > targetWidth + EDGE_MARGIN) {
-      cursorX = EDGE_MARGIN;
-      cursorY += rowHeight;
-      rowHeight = 0;
-    }
-    placed.push({
-      ...item,
-      x: round(cursorX + item.cellWidth / 2),
-      y: round(cursorY + item.cellHeight / 2),
-    });
-    cursorX += item.cellWidth;
-    rowHeight = Math.max(rowHeight, item.cellHeight);
-  }
-
-  const width = Math.max(...placed.map((item) => item.x + item.cellWidth / 2)) + EDGE_MARGIN;
-  const height = Math.max(...placed.map((item) => item.y + item.cellHeight / 2)) + EDGE_MARGIN;
-  return { placed, width: round(width), height: round(height) };
-};
 
 // Minimum spanning tree over a net's pads (Prim, Manhattan distance) so every
 // pad is reached with short, non-redundant traces.
@@ -92,42 +45,47 @@ const spanningEdges = (pads) => {
   return edges;
 };
 
-export const buildPcbLayout = (circuit) => {
+/**
+ * @param {object} circuit
+ * @param {{ expandFactor?: number }} [options] forwarded to the placer; > 1
+ *   spreads the parts apart to give routing more room.
+ */
+export const buildPcbLayout = (circuit, options = {}) => {
   const parts = (circuit?.components || []).filter((part) => part.kind !== 'ground');
   if (!parts.length) return null;
 
-  const { placed, width, height } = placeComponents(parts);
+  const { placements, board } = placeComponents(parts, options);
 
-  const components = placed.map((item) => {
-    const padsByNumber = new Map(item.record.pads.map((pad) => [pad.number, pad]));
+  const components = placements.map((placement) => {
+    const { part } = placement;
+    // Extents of the placed (rotated) courtyard, so width/height stay the
+    // on-board footprint size. `courtyard` itself remains footprint-local and
+    // unrotated — pair it with `rotation` to rebuild the placed outline.
+    const bounds = placementBounds(placement);
     return {
-      ref: item.part.ref,
-      kind: item.part.kind,
-      value: item.part.value,
-      body: item.body,
-      rotation: 0,
-      libId: item.libId,
-      courtyard: item.record.courtyard,
-      x: item.x,
-      y: item.y,
-      width: item.width,
-      height: item.height,
-      pads: (item.part.nodes || []).map((node, index) => {
-        const padNumber = item.padOrder[index];
-        const recordPad = padsByNumber.get(padNumber) || { x: 0, y: 0, shape: 'circle', size: { w: PAD_DIAMETER, h: PAD_DIAMETER }, drill: 0 };
-        return {
-          x: round(item.x + recordPad.x),
-          y: round(item.y + recordPad.y),
-          net: node,
-          pinIndex: index + 1,
-          connected: !isUnconnectedTerminal(node, item.part.ref, index + 1),
-          padNumber,
-          drill: recordPad.drill,
-          diameter: Math.max(recordPad.size.w, recordPad.size.h),
-          shape: recordPad.shape,
-          size: recordPad.size,
-        };
-      }),
+      ref: part.ref,
+      kind: part.kind,
+      value: part.value,
+      body: bodyKindFor(placement.libId, part),
+      rotation: placement.rotation,
+      libId: placement.libId,
+      courtyard: placement.footprint.courtyard,
+      x: placement.x,
+      y: placement.y,
+      width: round(bounds.maxX - bounds.minX),
+      height: round(bounds.maxY - bounds.minY),
+      pads: placementPads(placement).map((placedPad) => ({
+        x: round(placedPad.x),
+        y: round(placedPad.y),
+        net: placedPad.net,
+        pinIndex: placedPad.index + 1,
+        connected: !isUnconnectedTerminal(placedPad.net, part.ref, placedPad.index + 1),
+        padNumber: placedPad.padNumber,
+        drill: placedPad.pad.drill,
+        diameter: Math.max(placedPad.pad.size.w, placedPad.pad.size.h),
+        shape: placedPad.pad.shape,
+        size: placedPad.pad.size,
+      })),
     };
   });
 
@@ -173,7 +131,7 @@ export const buildPcbLayout = (circuit) => {
   }
 
   return {
-    board: { width, height, thickness: BOARD_THICKNESS },
+    board: { width: board.width, height: board.height, thickness: BOARD_THICKNESS },
     components,
     traces,
     vias,
