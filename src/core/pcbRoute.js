@@ -55,8 +55,21 @@
 // never be reached. To keep that exception safe, every foreign pad is stamped
 // twice: once around its copper, and once as a `traceWidth + clearance` disk
 // around *its* terminal cell, because a trace may leave that cell in any
-// direction. A pad whose terminal cell cannot clear foreign pad copper at full
-// trace width is reported as `no_escape` rather than routed into a short.
+// direction and at any width up to the full one.
+//
+// Neck-down
+// ---------
+// A pad's terminal cell records `limit`, the widest trace half-width that can
+// both sit on it and leave it (the sag bound above, inverted against every
+// foreign pad). A job is tried at `RULES.traceWidth` and steps down
+// `RULES.traceWidthLadder` only when a rung's escape or search fails; the mask
+// is rebuilt for the width actually being laid, which is where the benefit
+// comes from — a narrower trace inflates every obstacle less. Other nets' laid
+// copper always contributes its OWN real width to that mask, so a neck is never
+// bought at a neighbour's expense. Width is picked per job, so one two-terminal
+// connection is one uniform width, and every emitted trace carries it. A pad
+// that cannot escape at the narrowest rung is reported `no_escape` rather than
+// routed into a short.
 //
 // Pad copper is shape-exact everywhere it matters — as KEEP-OUT through
 // `padCoreDistance` + the sag bound above, and as CONTAINMENT ("is this cell on
@@ -169,7 +182,12 @@ const distanceToSegment = (px, py, ax, ay, bx, by) => {
  */
 export const routeBoard = ({ components = [], board }, rules = RULES) => {
   const pitch = rules.gridPitch;
-  const traceHalf = rules.traceWidth / 2;
+  // The widest any trace on this board may be. It is what a job is tried at
+  // first, and — because a foreign pad's escape trace has not been laid yet and
+  // could still come out at full width — what foreign escape cells are
+  // protected against regardless of how narrow the current job is.
+  const fullHalf = rules.traceWidth / 2;
+  const widthLadder = (rules.traceWidthLadder?.length ? rules.traceWidthLadder : [rules.traceWidth]);
   const viaRadius = rules.viaDiameter / 2;
   const halfCell = pitch / 2;
 
@@ -334,19 +352,34 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
 
   /* --- masks ------------------------------------------------------- */
 
-  const edgeTemplateTrace = new Int32Array(nodeCount).fill(FREE);
+  // Board-edge keep-out. Along a grid edge the distance to the outline is
+  // linear in the one coordinate that varies, so it is minimised at an endpoint
+  // and cell-centre testing is exact — no sag term. The trace template depends
+  // on the width being laid, so there is one per ladder rung.
+  const edgeTemplates = new Map();
+  const edgeTemplateTraceFor = (half) => {
+    let template = edgeTemplates.get(half);
+    if (template) return template;
+    template = new Int32Array(nodeCount).fill(FREE);
+    for (let row = 0; row < rows; row += 1) {
+      for (let col = 0; col < cols; col += 1) {
+        const margin = Math.min(cellX(col), cellY(row),
+          board.width - cellX(col), board.height - cellY(row));
+        if (margin >= rules.edgeClearance + half - EPSILON) continue;
+        const cell = cellIndex(col, row);
+        template[cell] = EDGE_OWNER;
+        template[cell + cellCount] = EDGE_OWNER;
+      }
+    }
+    edgeTemplates.set(half, template);
+    return template;
+  };
   const edgeTemplateVia = new Int32Array(cellCount).fill(FREE);
   for (let row = 0; row < rows; row += 1) {
     for (let col = 0; col < cols; col += 1) {
-      const x = cellX(col);
-      const y = cellY(row);
-      const margin = Math.min(x, y, board.width - x, board.height - y);
-      const cell = cellIndex(col, row);
-      if (margin < rules.edgeClearance + traceHalf - EPSILON) {
-        edgeTemplateTrace[cell] = EDGE_OWNER;
-        edgeTemplateTrace[cell + cellCount] = EDGE_OWNER;
-      }
-      if (margin < rules.edgeClearance + viaRadius - EPSILON) edgeTemplateVia[cell] = EDGE_OWNER;
+      const margin = Math.min(cellX(col), cellY(row),
+        board.width - cellX(col), board.height - cellY(row));
+      if (margin < rules.edgeClearance + viaRadius - EPSILON) edgeTemplateVia[cellIndex(col, row)] = EDGE_OWNER;
     }
   }
 
@@ -359,8 +392,8 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
    * the grid; `viaNeed` does not, because a via is a disc centred on a grid
    * node and the nearest point of a grid edge to a grid node is a grid node.
    */
-  const stampPad = (shape, owner) => {
-    const traceNeed = Math.hypot(shape.r + rules.clearance + traceHalf, halfCell);
+  const stampPad = (shape, owner, half) => {
+    const traceNeed = Math.hypot(shape.r + rules.clearance + half, halfCell);
     const viaNeed = shape.r + rules.clearance + viaRadius;
     const reach = Math.max(traceNeed, viaNeed);
     const minCol = Math.max(0, Math.ceil((shape.x - shape.hw - shape.hh - reach) / pitch));
@@ -403,9 +436,12 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
     }
   };
 
-  const stampSegment = (segment, owner) => {
-    const traceRadius = traceHalf + rules.clearance + traceHalf;
-    const viaRadiusLimit = viaRadius + rules.clearance + traceHalf;
+  // `segment.half` is the laid trace's OWN half-width; `half` is the width the
+  // current job is being laid at. A neck buys the current job a smaller mask,
+  // never a discount on copper that is already on the board.
+  const stampSegment = (segment, owner, half) => {
+    const traceRadius = segment.half + rules.clearance + half;
+    const viaRadiusLimit = viaRadius + rules.clearance + segment.half;
     const radius = Math.max(traceRadius, viaRadiusLimit);
     const minCol = Math.max(0, Math.ceil((Math.min(segment.ax, segment.bx) - radius) / pitch));
     const maxCol = Math.min(cols - 1, Math.floor((Math.max(segment.ax, segment.bx) + radius) / pitch));
@@ -426,21 +462,26 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
 
   const BOTH_LAYERS = [0, 1];
 
-  /** Rebuilds both obstacle masks from the copper of every net but `netKey`. */
-  const buildMasks = (netKey) => {
-    blockTrace.set(edgeTemplateTrace);
+  /**
+   * Rebuilds both obstacle masks from the copper of every net but `netKey`, for
+   * a job about to be laid at half-width `half`.
+   */
+  const buildMasks = (netKey, half) => {
+    blockTrace.set(edgeTemplateTraceFor(half));
     blockVia.set(edgeTemplateVia);
 
     for (const pad of pads) {
       if (pad.netKey === netKey) continue;
       const owner = ownerIdFor(pad.netKey);
-      stampPad(pad.shape, owner);
-      // The pad's own escape cell, which its net may always use.
+      stampPad(pad.shape, owner, half);
+      // The pad's own escape cell, which its net may always use — and may still
+      // leave at FULL width in any direction, so this disk is sized on
+      // `fullHalf` rather than on whatever the current job necked down to.
       if (!pad.escape) continue;
       stampDisk(
         cellX(pad.escape.col), cellY(pad.escape.row),
-        traceHalf + rules.clearance + traceHalf,
-        viaRadius + rules.clearance + traceHalf,
+        half + rules.clearance + fullHalf,
+        viaRadius + rules.clearance + fullHalf,
         owner, BOTH_LAYERS,
       );
     }
@@ -451,12 +492,12 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
       if (item.kind === 'via') {
         stampDisk(
           item.x, item.y,
-          viaRadius + rules.clearance + traceHalf,
+          viaRadius + rules.clearance + half,
           viaRadius + rules.clearance + viaRadius,
           owner, BOTH_LAYERS,
         );
       } else if (item.kind === 'segment') {
-        stampSegment(item, owner);
+        stampSegment(item, owner, half);
       }
     }
   };
@@ -471,6 +512,7 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
   const state = new Uint8Array(nodeCount); // 0 unseen, 1 open, 2 closed
   const isGoal = new Uint8Array(nodeCount);
   const isSource = new Uint8Array(nodeCount);
+  const isTerminal = new Uint8Array(nodeCount);
   const heap = [];
 
   const rowOf = (node) => Math.floor((node % cellCount) / cols);
@@ -490,10 +532,12 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
     return a < b;
   };
 
-  const search = (sourceNodes, goalNodes) => {
+  const search = (sourceNodes, goalNodes, terminalNodes) => {
     state.fill(0);
     isGoal.fill(0);
     isSource.fill(0);
+    isTerminal.fill(0);
+    for (const node of terminalNodes) isTerminal[node] = 1;
 
     // Exact L1 distance in cells to the nearest goal cell (two-pass chamfer),
     // an admissible heuristic because no step costs less than 1 per cell.
@@ -594,7 +638,15 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
           const nextRow = row + (direction === DOWN ? 1 : direction === UP ? -1 : 0);
           if (nextCol < 0 || nextRow < 0 || nextCol >= cols || nextRow >= rows) continue;
           next = cellIndex(nextCol, nextRow) + layer * cellCount;
-          if (blockTrace[next] !== FREE && !isSource[next] && !isGoal[next]) continue;
+          // The one force-allowed exception is a pad's TERMINAL cell, and only
+          // against foreign copper: it is the pad's only way onto the grid, and
+          // `escape.limit` has already proved that a trace of this width can
+          // both sit there and leave it. It is not extended to the net's other
+          // copper cells (a job at full width joining a necked run must clear
+          // the mask at ITS width) and never to the board edge, which no
+          // exception can make safe.
+          if (blockTrace[next] !== FREE
+            && (blockTrace[next] === EDGE_OWNER || !isTerminal[next])) continue;
           const vertical = direction === DOWN || direction === UP;
           const disfavoured = layer === 0 ? vertical : !vertical;
           cost = 1 + (disfavoured ? OFF_PREFERENCE_COST : 0)
@@ -657,15 +709,12 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
     const fromIsland = islandOf(job.from);
     const toIsland = islandOf(job.to);
 
-    if (fromIsland === undefined || toIsland === undefined
-      || !(job.from.escape?.limit >= traceHalf - EPSILON)
-      || !(job.to.escape?.limit >= traceHalf - EPSILON)) {
+    if (fromIsland === undefined || toIsland === undefined) {
       failedJobs.push({ job, reason: 'no_escape' });
       continue;
     }
     if (fromIsland === toIsland) continue;
 
-    buildMasks(netKey);
     const sources = [];
     const goals = [];
     for (const item of copper) {
@@ -682,14 +731,42 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
       continue;
     }
 
-    const found = search(sources, goals);
-    if (found.ok) {
-      commitPath(found.node, job, fromIsland);
-      relabel(netKey, toIsland, fromIsland);
+    const terminals = [];
+    for (const item of copper) {
+      if (item.netKey !== netKey || item.kind !== 'pad') continue;
+      if (item.island === fromIsland || item.island === toIsland) terminals.push(...item.cells);
+    }
+
+    // The neck-down ladder. Full width first, and a narrower rung only once the
+    // wide one has genuinely failed — the narrower trace's payoff is a smaller
+    // obstacle mask (stampPad/stampSegment are both parameterised on `half`),
+    // which is exactly what opens a pad the wide trace could not leave. Width
+    // is chosen per JOB, so a two-terminal connection is one uniform width.
+    let laid = false;
+    let closed = null;
+    for (const width of widthLadder) {
+      const half = width / 2;
+      if (!(job.from.escape?.limit >= half - EPSILON)
+        || !(job.to.escape?.limit >= half - EPSILON)) continue;
+      buildMasks(netKey, half);
+      const found = search(sources, goals, terminals);
+      if (found.ok) {
+        commitPath(found.node, job, fromIsland, width);
+        relabel(netKey, toIsland, fromIsland);
+        laid = true;
+        break;
+      }
+      closed = found.closed;
+    }
+    if (laid) continue;
+    // No rung even got as far as a search: both ends are walled in by their own
+    // neighbours' copper, which no amount of retrying will change.
+    if (!closed) {
+      failedJobs.push({ job, reason: 'no_escape' });
       continue;
     }
 
-    const blockers = blockingNets(found.closed, netKey);
+    const blockers = blockingNets(closed, netKey);
     if (ripUpsLeft > 0 && blockers.length) {
       ripUpsLeft -= 1;
       for (const blocker of blockers) {
@@ -708,6 +785,10 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
    */
   function blockingNets(closed, netKey) {
     const counts = new Map();
+    // Only nets with copper on the board are worth ripping; compute that once
+    // rather than re-scanning `copper` for every blocked cell in the frontier.
+    const rippable = new Set();
+    for (const item of copper) if (item.kind !== 'pad') rippable.add(item.netKey);
     for (const node of closed) {
       const cell = node % cellCount;
       const layer = node < cellCount ? 0 : 1;
@@ -725,8 +806,7 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
         if (owner < 0) continue;
         const name = ownerNames[owner];
         if (name === netKey || !netByName.has(name)) continue;
-        // Only nets with copper on the board are worth ripping.
-        if (!copper.some((item) => item.netKey === name && item.kind !== 'pad')) continue;
+        if (!rippable.has(name)) continue;
         counts.set(name, (counts.get(name) || 0) + 1);
       }
     }
@@ -737,7 +817,7 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
   }
 
   /** Turns an A* result into maximal straight segments plus layer-change vias. */
-  function commitPath(goalNode, job, island) {
+  function commitPath(goalNode, job, island, width) {
     const path = [];
     for (let node = goalNode; node !== -1; node = cameFrom[node]) path.push(node);
     path.reverse();
@@ -749,7 +829,7 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
       // A layer change repeats the cell on the other layer: close the run on
       // the old layer, drop a via, and start again from the new layer.
       if ((path[index] % cellCount) === (path[index - 1] % cellCount)) {
-        emitRun(netKey, path[runStart], path[index - 1], island);
+        emitRun(netKey, path[runStart], path[index - 1], island, width);
         emitVia(netKey, path[index - 1], island);
         runStart = index;
         continue;
@@ -759,7 +839,7 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
         && (path[index + 1] % cellCount) !== (path[index] % cellCount)
         && !sameDirection(path[index - 1], path[index], path[index + 1]);
       if (last || bend) {
-        emitRun(netKey, path[runStart], path[index], island);
+        emitRun(netKey, path[runStart], path[index], island, width);
         runStart = index;
       }
     }
@@ -772,7 +852,7 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
     return (cellB - cellA) === (cellC - cellB);
   }
 
-  function emitRun(netKey, startNode, endNode, island) {
+  function emitRun(netKey, startNode, endNode, island, width) {
     if (startNode === endNode || (startNode % cellCount) === (endNode % cellCount)) return;
     const layer = startNode < cellCount ? 0 : 1;
     const startCell = startNode % cellCount;
@@ -794,6 +874,8 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
       netKey,
       island,
       layer,
+      width,
+      half: width / 2,
       ax: cellX(startCol), ay: cellY(startRow),
       bx: cellX(endCol), by: cellY(endRow),
       cells,
@@ -828,7 +910,7 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
       net: displayNet.get(merged.netKey) ?? merged.netKey,
       from: { x: round3(merged.ax), y: round3(merged.ay) },
       to: { x: round3(merged.bx), y: round3(merged.by) },
-      width: rules.traceWidth,
+      width: merged.width,
     });
   }
 
@@ -889,6 +971,7 @@ const mergeCollinear = (segments, copper) => {
     const joinable = previous
       && previous.netKey === segment.netKey
       && previous.layer === segment.layer
+      && previous.width === segment.width
       && horizontal(previous) === horizontal(segment)
       && Math.abs(previous.bx - segment.ax) < EPSILON
       && Math.abs(previous.by - segment.ay) < EPSILON

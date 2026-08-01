@@ -153,6 +153,32 @@ describe('runDrc', () => {
     expect(violation.required).toBeCloseTo(1.3, 6);
   });
 
+  it('flags a trace necked below the fabrication floor', () => {
+    // The neck-down ladder is allowed to thin a trace to escape a tight pad,
+    // but not past what a fab will etch. Without this check a router bug could
+    // put 0.05 mm copper on a board and every other rule would still pass.
+    const result = runDrc(layoutOf({
+      components: [part('R1', [pad(10, 10, 'A')]), part('R2', [pad(20, 10, 'A')])],
+      traces: [{ ...trace('A', { x: 10, y: 10 }, { x: 20, y: 10 }), width: 0.2 }],
+    }));
+
+    expect(result.ok).toBe(false);
+    const violation = result.violations.find((item) => item.type === 'trace_width');
+    expect(violation).toBeDefined();
+    expect(violation.distance).toBeCloseTo(0.2, 6);
+    expect(violation.required).toBe(RULES.minTraceWidth);
+    expect(violation.netA).toBe('A');
+  });
+
+  it('accepts a trace laid exactly on the fabrication floor', () => {
+    const result = runDrc(layoutOf({
+      components: [part('R1', [pad(10, 10, 'A')]), part('R2', [pad(20, 10, 'A')])],
+      traces: [{ ...trace('A', { x: 10, y: 10 }, { x: 20, y: 10 }), width: RULES.minTraceWidth }],
+    }));
+
+    expect(result.violations.filter((item) => item.type === 'trace_width')).toEqual([]);
+  });
+
   it('reports violations in a stable order', () => {
     const layout = layoutOf({
       components: [

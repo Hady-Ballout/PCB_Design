@@ -263,9 +263,11 @@ export const copperItems = (layout) => {
   }
 
   for (const trace of layout?.traces || []) {
-    const half = (trace.width ?? RULES.traceWidth) / 2;
+    const width = trace.width ?? RULES.traceWidth;
+    const half = width / 2;
     push({
       kind: 'trace',
+      width,
       net: trace.net,
       netKey: trace.net,
       routable: true,
@@ -339,7 +341,7 @@ const candidatePairs = (items, margin) => {
  *
  * @param {object} layout
  * @param {import('./pcbDesignRules.js').DesignRules} [rules]
- * @returns {{ ok: boolean, violations: Array<{ type: 'clearance'|'edge'|'annular',
+ * @returns {{ ok: boolean, violations: Array<{ type: 'clearance'|'edge'|'annular'|'trace_width',
  *   netA: string, netB: string|null, x: number, y: number, distance: number,
  *   required: number, refs: { a: string, b: string|null } }> }}
  */
@@ -399,6 +401,25 @@ export const runDrc = (layout, rules = RULES) => {
         refs: { a: item.label, b: null },
       });
     }
+  }
+
+  // Etchable trace width. The router is allowed to neck a job down to squeeze
+  // out of a tight footprint, so something independent has to hold the floor —
+  // otherwise a neck could walk below what a fab can etch and every other rule
+  // here would still report the board clean.
+  for (const item of items) {
+    if (item.kind !== 'trace') continue;
+    if (item.width >= rules.minTraceWidth - 1e-9) continue;
+    violations.push({
+      type: 'trace_width',
+      netA: item.net,
+      netB: null,
+      x: round3((item.geom.ax + item.geom.bx) / 2),
+      y: round3((item.geom.ay + item.geom.by) / 2),
+      distance: round3(item.width),
+      required: rules.minTraceWidth,
+      refs: { a: item.label, b: null },
+    });
   }
 
   // Annular rings around drilled holes, measured on the pad's INSCRIBED width.

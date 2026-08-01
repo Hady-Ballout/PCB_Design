@@ -12,7 +12,8 @@
 // neighbours.
 
 /**
- * @typedef {{ gridPitch: number, traceWidth: number, clearance: number,
+ * @typedef {{ gridPitch: number, traceWidth: number, traceWidthLadder: number[],
+ *   minTraceWidth: number, clearance: number,
  *   viaDiameter: number, viaDrill: number, edgeClearance: number,
  *   boardMargin: number, placementGap: number, maskExpansion: number,
  *   silkWidth: number, boardThickness: number }} DesignRules
@@ -24,6 +25,21 @@ export const RULES = {
   gridPitch: 0.635,
   /** Signal trace width. */
   traceWidth: 0.8,
+  /**
+   * Neck-down ladder, widest first. A two-terminal routing job is always tried
+   * at `traceWidth` and only steps down a rung when the pads it joins have no
+   * room to escape at that width — the payoff is that a narrower trace inflates
+   * the obstacle mask less, which is the entire mechanism. Other nets' copper
+   * keeps its own real width in that mask, so nothing is bought on credit.
+   *
+   * Safe at the bottom rung: JLCPCB's 2-layer minimum trace/space is 0.127 mm,
+   * so 0.25 mm is about 2x the process floor; 0.25 mm of 1 oz copper carries
+   * roughly 1 A at a 10 C rise, against the ~200 mA a small-signal BJT (the
+   * part that needs the neck) will ever pull.
+   */
+  traceWidthLadder: [0.8, 0.5, 0.4, 0.25],
+  /** Narrowest trace any stage may produce; pcbDrc enforces it independently. */
+  minTraceWidth: 0.25,
   /** Copper-to-copper clearance between different nets. */
   clearance: 0.3,
   /** Through-via finished outer diameter / drill. */

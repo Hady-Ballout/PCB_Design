@@ -31,6 +31,21 @@ describe('RULES', () => {
   it('keeps a via drillable inside its own annular ring', () => {
     expect(RULES.viaDiameter).toBeGreaterThanOrEqual(RULES.viaDrill + 0.4);
   });
+
+  it('publishes a neck-down ladder that starts full width and stops at the fab floor', () => {
+    // A job is laid at RULES.traceWidth unless that width cannot escape a pad,
+    // and only then does it walk down the ladder. The bottom rung is the
+    // absolute floor: 0.25 mm is ~2x JLCPCB's 0.127 mm 2-layer minimum, and
+    // 0.25 mm of 1 oz copper carries about 1 A at a 10 C rise against the
+    // ~200 mA a small-signal BJT asks for.
+    expect(RULES.traceWidthLadder).toEqual([0.8, 0.5, 0.4, 0.25]);
+    expect(RULES.traceWidthLadder[0]).toBe(RULES.traceWidth);
+    expect(RULES.traceWidthLadder.at(-1)).toBe(RULES.minTraceWidth);
+    for (let index = 1; index < RULES.traceWidthLadder.length; index += 1) {
+      expect(RULES.traceWidthLadder[index]).toBeLessThan(RULES.traceWidthLadder[index - 1]);
+    }
+    expect(RULES.minTraceWidth).toBe(0.25);
+  });
 });
 
 describe('padCopperShape', () => {

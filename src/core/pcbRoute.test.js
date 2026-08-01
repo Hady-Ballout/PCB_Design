@@ -10,8 +10,8 @@ const pad = (x, y, net, extra = {}) => ({
 const part = (ref, pads) => ({ ref, kind: 'resistor', value: '', x: 0, y: 0, width: 2, height: 2, pads });
 
 /** A row/column of unwired pads: pure copper obstacle, never routed. */
-const wall = (ref, points) => part(ref, points.map(([x, y], index) => pad(x, y, `${ref}_${index + 1}`, {
-  connected: false, padNumber: String(index + 1), pinIndex: index + 1,
+const wall = (ref, points, extra = {}) => part(ref, points.map(([x, y], index) => pad(x, y, `${ref}_${index + 1}`, {
+  connected: false, padNumber: String(index + 1), pinIndex: index + 1, ...extra,
 })));
 
 const asLayout = (input, routed) => ({
@@ -82,12 +82,16 @@ describe('routeBoard', () => {
 
   it('reports the nets it could not route instead of shorting them', () => {
     const input = {
-      board: { width: 40, height: 32 },
+      board: { width: 40, height: 31 },
       components: [
         part('R1', [pad(6, 15, 'SIG')]),
         part('R2', [pad(34, 15, 'SIG')]),
-        // A wall from edge to edge: there is genuinely no way across.
-        wall('J1', Array.from({ length: 12 }, (_, index) => [20, 1.5 + index * 2.54])),
+        // A wall from edge to edge: there is genuinely no way across, at any
+        // rung of the neck-down ladder. 2 mm pads on a 2.54 mm pitch leave
+        // 0.54 mm of air between neighbours, and even the 0.25 mm bottom rung
+        // needs 0.25 + 2 x 0.3 = 0.85 mm to pass.
+        wall('J1', Array.from({ length: 12 }, (_, index) => [20, 1.5 + index * 2.54]),
+          { diameter: 2, drill: 1.2 }),
       ],
     };
 
@@ -176,6 +180,69 @@ describe('routeBoard', () => {
     // The copper really does cross the wall's row rather than sneaking round it.
     expect(routed.traces.some((trace) => Math.min(trace.from.y, trace.to.y) < 15.24
       && Math.max(trace.from.y, trace.to.y) > 15.24)).toBe(true);
+  });
+
+  it('necks a job down only as far as the tight pad needs, and only that job', () => {
+    // Two nets on one board. SIG has to leave a pad wedged between two foreign
+    // pads 1.27 mm away on each side — a full 0.8 mm trace needs 0.7 mm of air
+    // to each, which is not there — while WIDE has the whole board to itself.
+    //
+    // Escape room at the terminal cell, in trace half-widths: the pinched pad
+    // allows 0.445 - |offset|, so the ladder has to walk 0.8 -> 0.5 -> 0.4 ->
+    // 0.25 before the job fits. WIDE must stay at 0.8: the ladder is a rescue,
+    // not a default.
+    const pinched = (x, y, net, extra) => pad(x, y, net, {
+      shape: 'oval', size: { w: 1.05, h: 1.5 }, diameter: 1.5, drill: 0.7, ...extra,
+    });
+    // 12.95 sits 0.25 mm off the 0.635 mm grid, which is what makes this hard:
+    // the best cell inside the pad is 0.25 mm off centre, and 0.4 mm is the
+    // widest half-trace that still clears the neighbour at 1.02 mm.
+    const input = {
+      board: { width: 30, height: 26 },
+      components: [
+        part('Q1', [
+          pinched(12.95 - 1.27, 6.35, 'Q1_1', { connected: false, padNumber: '1' }),
+          pinched(12.95, 6.35, 'SIG', { padNumber: '2' }),
+          pinched(12.95 + 1.27, 6.35, 'Q1_3', { connected: false, padNumber: '3' }),
+        ]),
+        part('R1', [pad(12.7, 19.05, 'SIG')]),
+        part('R2', [pad(3.81, 12.7, 'WIDE'), pad(25.4, 12.7, 'WIDE')]),
+      ],
+    };
+
+    const routed = routeBoard(input);
+
+    expect(routed.failedNets).toEqual([]);
+    const widths = new Map();
+    for (const trace of routed.traces) {
+      widths.set(trace.net, Math.min(widths.get(trace.net) ?? Infinity, trace.width));
+    }
+    expect(widths.get('WIDE')).toBe(RULES.traceWidth);
+    expect(widths.get('SIG')).toBeLessThan(RULES.traceWidth);
+    expect(widths.get('SIG')).toBeGreaterThanOrEqual(RULES.minTraceWidth);
+    expect(RULES.traceWidthLadder).toContain(widths.get('SIG'));
+    // One width per job: the whole SIG connection is laid at the neck.
+    expect(new Set(routed.traces.filter((trace) => trace.net === 'SIG')
+      .map((trace) => trace.width)).size).toBe(1);
+
+    const layout = asLayout(input, routed);
+    expect(runDrc(layout).violations).toEqual([]);
+    expect(checkConnectivity(layout).ok).toBe(true);
+  });
+
+  it('leaves every trace at full width on a board that has the room', () => {
+    const routed = routeBoard({
+      board: { width: 44, height: 34 },
+      components: [
+        part('R1', [pad(6, 6, 'A'), pad(6, 28, 'B')]),
+        part('R2', [pad(38, 28, 'A'), pad(38, 6, 'B')]),
+        part('R3', [pad(22, 17, '0'), pad(30, 17, 'A')]),
+      ],
+    });
+
+    expect(routed.failedNets).toEqual([]);
+    expect(routed.traces.length).toBeGreaterThan(0);
+    expect(routed.traces.every((trace) => trace.width === RULES.traceWidth)).toBe(true);
   });
 
   it('is deterministic', () => {

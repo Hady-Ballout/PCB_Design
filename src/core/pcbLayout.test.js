@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildPcbLayout, isBetterAttempt } from './pcbLayout.js';
+import { TRACE_WIDTH, buildPcbLayout, isBetterAttempt } from './pcbLayout.js';
+import { RULES } from './pcbDesignRules.js';
 import { footprintRecordFor } from './pcbFootprints.js';
 import { placeComponents } from './pcbPlace.js';
 
@@ -283,28 +284,49 @@ describe.each([
   });
 });
 
-describe('buildPcbLayout when a footprint is too tight to escape', () => {
-  // TO-92_Inline puts its three pads on a 1.27 mm pitch. There is no room for
-  // a 0.8 mm trace to leave the middle pad at 0.3 mm clearance, so the router
-  // has to say so rather than lay copper that shorts to the neighbours.
-  const layout = buildPcbLayout({
+describe('buildPcbLayout on a TO-92 transistor circuit', () => {
+  // TO-92_Inline puts its three pads on a 1.27 mm pitch, and the middle one is
+  // the whole reason the neck-down ladder exists: a 0.8 mm trace leaving it
+  // needs its axis within +/-0.045 mm of the pad centre line, which a 0.635 mm
+  // grid can only promise to +/-0.318 mm. Modelling the neighbouring pads as
+  // stadiums rather than 0.75 mm discs opens the corridor to
+  // w <= 2 * (0.445 - |offset|), and the ladder walks down until the trace fits.
+  const ledDriver = {
+    title: 'BJT LED driver',
     components: [
-      { ref: 'Q1', kind: 'bjt_npn', value: '2N3904', nodes: ['C', 'B', '0'] },
-      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VCC', 'C'] },
-      { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['IN', 'B'] },
       { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VCC', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['IN', 'B'] },
+      { ref: 'R2', kind: 'resistor', value: '330', nodes: ['VCC', 'LEDA'] },
+      { ref: 'DLED1', kind: 'led', value: 'red', nodes: ['LEDA', 'C'] },
+      { ref: 'Q1', kind: 'bjt_npn', value: '2N3904', nodes: ['C', 'B', '0'] },
       { ref: 'V2', kind: 'signal_source', value: '1Vpp', nodes: ['IN', '0'] },
     ],
+  };
+  const layout = buildPcbLayout(ledDriver);
+
+  it('routes every net instead of reporting no_escape', () => {
+    expect(layout.routing.failedNets).toEqual([]);
+    expect(layout.routing.complete).toBe(true);
   });
 
-  it('reports the failure structurally instead of shorting', () => {
-    expect(layout.routing.complete).toBe(false);
-    expect(layout.routing.failedNets.every((failure) => failure.reason === 'no_escape')).toBe(true);
-    expect(layout.connectivity.ok).toBe(false);
-  });
-
-  it('still leaves the copper it did lay design-rule clean', () => {
+  it('passes an independent design rule check and leaves every net in one island', () => {
     expect(layout.drc).toEqual({ ok: true, violations: [] });
+    expect(layout.connectivity).toEqual({ ok: true, incompleteNets: [] });
+  });
+
+  it('gets there by necking a trace down, not by widening the board', () => {
+    const necked = layout.traces.filter((trace) => trace.width < TRACE_WIDTH);
+    expect(necked.length).toBeGreaterThan(0);
+    for (const trace of layout.traces) {
+      expect(RULES.traceWidthLadder).toContain(trace.width);
+      expect(trace.width).toBeGreaterThanOrEqual(RULES.minTraceWidth);
+    }
+    // The neck belongs to the net leaving the pinched middle pad.
+    expect(new Set(necked.map((trace) => trace.net))).toEqual(new Set(['C']));
+  });
+
+  it('is byte-for-byte deterministic', () => {
+    expect(JSON.stringify(buildPcbLayout(ledDriver))).toBe(JSON.stringify(buildPcbLayout(ledDriver)));
   });
 });
 
