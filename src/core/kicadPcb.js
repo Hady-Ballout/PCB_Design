@@ -33,8 +33,7 @@
 // kicadPcb.test.js's "round-trips a 90-degree-rotated footprint" test and
 // the pad-angle/board-space-size test for worked numeric proofs, and the
 // Phase D report for the derivation.
-import { KICAD_FOOTPRINTS } from './kicadFootprintLibrary.js';
-import { footprintRecordFor } from './pcbFootprints.js';
+import { recordForPlacedComponent } from './pcbFootprints.js';
 import { uuidFrom } from './deterministicUuid.js';
 
 const fmt = (value) => {
@@ -74,25 +73,6 @@ const KICAD6_LAYERS = [
 
 const COURTYARD_WIDTH = 0.05;
 
-/**
- * The true footprint-local pad/silk/fab record for a placed component.
- * (1) an exact `libId` match against the vendored library covers every
- * curated part (and any part whose original circuit `footprint` override
- * matched the library exactly, since pcbPlace.js resolves that down to a
- * concrete `libId` before layout ever sees it). (2) anything else is a
- * `Synthesized:<kind>_<count>` header pcbFootprints.js built on the fly;
- * `footprintRecordFor` regenerates the identical record from the kind and
- * pad count alone (a pure function of both — see pcbFootprints.js), so a
- * minimal reconstructed part reproduces it exactly without needing the
- * original circuit part object.
- */
-const resolveFootprintRecord = (component) => {
-  const direct = KICAD_FOOTPRINTS[component.libId];
-  if (direct) return direct;
-  const fakePart = { kind: component.kind, value: component.value, nodes: component.pads.map(() => '') };
-  return footprintRecordFor(fakePart).record;
-};
-
 const shapeKeyword = (shape) => (shape === 'oval' || shape === 'rect' ? shape : 'circle');
 
 const primitiveLines = (primitives, layer, seedPrefix) => primitives.map((primitive, index) => {
@@ -121,7 +101,7 @@ const courtyardLines = (courtyard, seedPrefix) => {
 };
 
 const footprintBlock = (component, netNumberFor) => {
-  const record = resolveFootprintRecord(component);
+  const record = recordForPlacedComponent(component);
   const padsByNumber = new Map(record.pads.map((pad) => [pad.number, pad]));
   const angle = kicadAngle(component.rotation);
   const { minY, maxY } = record.courtyard;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { footprintRecordFor } from './pcbFootprints.js';
+import { footprintRecordFor, recordForPlacedComponent } from './pcbFootprints.js';
 import { KICAD_FOOTPRINTS } from './kicadFootprintLibrary.js';
 import { ALLOWED_KINDS, DEFAULT_PIN_COUNT_BY_KIND } from './componentKinds.js';
 
@@ -100,5 +100,35 @@ describe('footprintRecordFor', () => {
     const part = { ref: 'R1', kind: 'resistor', nodes: ['A', 'B'] };
 
     expect(footprintRecordFor(part)).toEqual(footprintRecordFor({ ...part }));
+  });
+});
+
+describe('recordForPlacedComponent', () => {
+  it('returns the vendored record identically for a curated libId', () => {
+    const component = {
+      ref: 'R1', kind: 'resistor', value: '1k',
+      libId: 'Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal',
+      pads: [{ padNumber: '1' }, { padNumber: '2' }],
+    };
+
+    expect(recordForPlacedComponent(component))
+      .toBe(KICAD_FOOTPRINTS['Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal']);
+  });
+
+  it('regenerates a synthesized record from the kind and pad count alone', () => {
+    const part = { ref: 'U1', kind: 'weird_module', nodes: ['A', 'B', 'C'] };
+    const { libId, record } = footprintRecordFor(part);
+    const component = { ref: 'U1', kind: 'weird_module', value: '', libId, pads: record.pads.map((pad) => ({ padNumber: pad.number })) };
+
+    expect(recordForPlacedComponent(component)).toEqual(record);
+  });
+
+  it('reproduces the electrolytic capacitor record a layout component came from', () => {
+    const part = { ref: 'C1', kind: 'capacitor', value: '10uF', nodes: ['A', 'B'] };
+    const { libId, record } = footprintRecordFor(part);
+    const component = { ref: 'C1', kind: 'capacitor', value: '10uF', libId, pads: [{ padNumber: '1' }, { padNumber: '2' }] };
+
+    expect(libId).toBe('Capacitor_THT:CP_Radial_D5.0mm_P2.50mm');
+    expect(recordForPlacedComponent(component)).toBe(record);
   });
 });

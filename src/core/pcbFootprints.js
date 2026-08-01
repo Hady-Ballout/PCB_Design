@@ -247,6 +247,37 @@ export const footprintRecordFor = (part) => {
   return synthesizedHeaderRecord(part);
 };
 
+/**
+ * The true footprint-local pad/silk/fab record behind a *placed* component
+ * (a `pcbLayout.js` component, which carries a resolved `libId` and board-space
+ * pads but not the original circuit part). Every exporter that needs local
+ * geometry — kicadPcb.js for its footprint blocks, gerberExport.js for
+ * silkscreen — goes through here, so there is one answer to "what does this
+ * component actually look like".
+ *
+ * Two cases. (1) An exact `libId` match against the vendored library covers
+ * every curated part, and any part whose original circuit `footprint` override
+ * matched the library exactly (pcbPlace.js resolves that down to a concrete
+ * `libId` before layout ever sees it). (2) Anything else is a
+ * `Synthesized:<kind>_<count>` header pcbFootprints built on the fly;
+ * `footprintRecordFor` regenerates the identical record from the kind and pad
+ * count alone (it is a pure function of both), so a minimal reconstructed part
+ * reproduces it exactly without needing the original circuit part object.
+ *
+ * @param {{ kind?: string, value?: string, libId?: string, pads?: unknown[] }} component
+ * @returns {FootprintRecord}
+ */
+export const recordForPlacedComponent = (component) => {
+  const direct = KICAD_FOOTPRINTS[component?.libId];
+  if (direct) return direct;
+  const fakePart = {
+    kind: component?.kind,
+    value: component?.value,
+    nodes: (component?.pads || []).map(() => ''),
+  };
+  return footprintRecordFor(fakePart).record;
+};
+
 /** Body classification for the 3D viewer (src/features/pcb3d/pcbScene.js). */
 export const bodyKindFor = (libId, part) => {
   if (BODY_BY_LIBID[libId]) return BODY_BY_LIBID[libId];
