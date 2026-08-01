@@ -507,14 +507,21 @@ function App() {
 
   // Shared by the 3D viewer and the Board (.kicad_pcb) view so both windows
   // always agree on the same placed/routed layout.
+  //
+  // Gated on the PCB window actually being open. buildPcbLayout is the
+  // heaviest thing in the app — up to four expansion attempts of A* routing,
+  // ground pour and DRC, all synchronous on the main thread — and both PCB
+  // surfaces live inside the one 'pcb3d' window. Computing it for every chat
+  // generation would freeze the UI for a board nobody asked to see.
+  const pcbWindowOpen = openEditorViews.includes('pcb3d');
   const pcbLayout = useMemo(() => {
-    if (!result?.circuit) return null;
+    if (!pcbWindowOpen || !result?.circuit) return null;
     try {
       return buildPcbLayout(result.circuit);
     } catch {
       return null;
     }
-  }, [result?.circuit]);
+  }, [pcbWindowOpen, result?.circuit]);
 
   const kicadPcbSource = useMemo(() => {
     if (!pcbLayout || !result?.circuit) return '';
@@ -1661,8 +1668,11 @@ function App() {
             </div>
             {pcbViewMode === 'board' && (
               <div className="button-row">
+                {/* fabricationSlug is the same slug the Gerber archive and the
+                    files inside it carry, so the whole fabrication set for a
+                    board shares one name. */}
                 <button
-                  onClick={() => downloadText(`${(result.circuit?.title || 'board').replace(/[^a-z0-9]+/gi, '_').toLowerCase()}.kicad_pcb`, kicadPcbSource)}
+                  onClick={() => downloadText(`${fabricationSlug(result.circuit?.title)}.kicad_pcb`, kicadPcbSource)}
                   disabled={!kicadPcbSource}
                 >
                   Download .kicad_pcb

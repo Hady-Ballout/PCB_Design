@@ -24,6 +24,7 @@ interface RawLayout {
   }>;
   traces: unknown[];
   vias: unknown[];
+  pour: unknown;
   nets: string[];
   routing: { complete: boolean; failedNets: Array<{ net: string; reason: string }> };
   drc: { ok: boolean; violations: Array<{ type: string; netA: string; netB: string | null }> };
