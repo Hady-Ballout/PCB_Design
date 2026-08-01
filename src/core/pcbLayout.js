@@ -3,57 +3,18 @@
 // All dimensions are millimetres. Horizontal trace segments run on the top
 // copper layer, vertical segments on the bottom layer, with a via at every
 // bend — through-hole pads join both layers, so nets stay connected.
+// Footprint geometry (pad positions/shapes/drills, body size) comes from
+// real vendored KiCad footprints via pcbFootprints.js; this module only
+// places whole footprints and routes between their pads.
+import { bodyKindFor, footprintRecordFor } from './pcbFootprints.js';
+
 export const BOARD_THICKNESS = 1.6;
 export const TRACE_WIDTH = 0.8;
 export const VIA_DIAMETER = 1.4;
+// Fallback pad diameter for callers that don't read a pad's own `diameter`.
 export const PAD_DIAMETER = 1.8;
 const PLACEMENT_GAP = 5;
 const EDGE_MARGIN = 4;
-
-// Footprint catalogue: body size plus through-hole pad offsets from the
-// component centre. Pad order matches the circuit model's node order.
-const twoPadRow = (span) => [{ x: -span / 2, y: 0 }, { x: span / 2, y: 0 }];
-const inlineRow = (count, pitch) =>
-  Array.from({ length: count }, (_, i) => ({ x: (i - (count - 1) / 2) * pitch, y: 0 }));
-const dualRow = (count, pitch, rowSpan) =>
-  Array.from({ length: count }, (_, i) => {
-    const perRow = Math.ceil(count / 2);
-    const row = i < perRow ? 1 : -1;
-    const along = i < perRow ? i : count - 1 - i;
-    return { x: (along - (perRow - 1) / 2) * pitch, y: (row * rowSpan) / 2 };
-  });
-
-const FOOTPRINTS = {
-  resistor: { width: 9, height: 3.2, pads: twoPadRow(11.5), body: 'axial' },
-  load: { width: 9, height: 3.2, pads: twoPadRow(11.5), body: 'axial' },
-  inductor: { width: 9, height: 4, pads: twoPadRow(11.5), body: 'axial' },
-  diode: { width: 7, height: 3, pads: twoPadRow(9.5), body: 'axial' },
-  led: { width: 5.5, height: 5.5, pads: twoPadRow(2.54), body: 'led' },
-  capacitor: { width: 6, height: 6, pads: twoPadRow(5.08), body: 'radial' },
-  voltage_source: { width: 10, height: 7.5, pads: twoPadRow(5.08), body: 'terminal' },
-  signal_source: { width: 10, height: 7.5, pads: twoPadRow(5.08), body: 'terminal' },
-  bjt_npn: { width: 6, height: 5.5, pads: inlineRow(3, 2.54), body: 'to92' },
-  bjt_pnp: { width: 6, height: 5.5, pads: inlineRow(3, 2.54), body: 'to92' },
-  mosfet_n: { width: 6, height: 5.5, pads: inlineRow(3, 2.54), body: 'to92' },
-  mosfet_p: { width: 6, height: 5.5, pads: inlineRow(3, 2.54), body: 'to92' },
-  regulator: { width: 10.2, height: 6.5, pads: inlineRow(3, 2.54), body: 'to220' },
-  opamp: { width: 10.2, height: 8, pads: dualRow(8, 2.54, 7.62), body: 'dip' },
-  ua741: { width: 10.2, height: 8, pads: dualRow(8, 2.54, 7.62), body: 'dip' },
-  arduino_uno: { width: 46, height: 34, pads: dualRow(12, 2.54, 30), body: 'module' },
-  raspberry_pi: { width: 50, height: 36, pads: dualRow(10, 2.54, 32), body: 'module' },
-  esp32: { width: 44, height: 26, pads: dualRow(12, 2.54, 22), body: 'module' },
-};
-const GENERIC_FOOTPRINT = { width: 10, height: 8, pads: twoPadRow(7.62), body: 'generic' };
-
-export const footprintFor = (part) => {
-  const base = FOOTPRINTS[part.kind] || GENERIC_FOOTPRINT;
-  const nodeCount = part.nodes?.length ?? base.pads.length;
-  if (nodeCount === base.pads.length) return base;
-  // Node count differs from the catalogue entry: fall back to a stretched
-  // dual-row package so every node still gets a pad.
-  const width = Math.max(base.width, Math.ceil(nodeCount / 2) * 2.54 + 4);
-  return { width, height: Math.max(base.height, 8), pads: dualRow(nodeCount, 2.54, Math.max(base.height, 8) - 1.5), body: base.body };
-};
 
 const round = (value) => Math.round(value * 100) / 100;
 
@@ -62,15 +23,22 @@ const isUnconnectedTerminal = (node, ref, pin) =>
 
 const placeComponents = (parts) => {
   const items = parts.map((part) => {
-    const footprint = footprintFor(part);
-    // Cells reserve room for the pad row too, not just the body.
-    const padExtentX = Math.max(...footprint.pads.map((pad) => Math.abs(pad.x)), 0) * 2 + PAD_DIAMETER;
-    const padExtentY = Math.max(...footprint.pads.map((pad) => Math.abs(pad.y)), 0) * 2 + PAD_DIAMETER;
+    const { libId, record, padOrder } = footprintRecordFor(part);
+    const body = bodyKindFor(libId, part);
+    // The courtyard already encloses the pads plus clearance, so it alone
+    // sizes the placement cell.
+    const width = record.courtyard.maxX - record.courtyard.minX;
+    const height = record.courtyard.maxY - record.courtyard.minY;
     return {
       part,
-      footprint,
-      cellWidth: Math.max(footprint.width, padExtentX) + PLACEMENT_GAP,
-      cellHeight: Math.max(footprint.height, padExtentY) + PLACEMENT_GAP,
+      libId,
+      record,
+      padOrder,
+      body,
+      width,
+      height,
+      cellWidth: width + PLACEMENT_GAP,
+      cellHeight: height + PLACEMENT_GAP,
     };
   });
 
@@ -130,26 +98,38 @@ export const buildPcbLayout = (circuit) => {
 
   const { placed, width, height } = placeComponents(parts);
 
-  const components = placed.map((item) => ({
-    ref: item.part.ref,
-    kind: item.part.kind,
-    value: item.part.value,
-    body: item.footprint.body,
-    x: item.x,
-    y: item.y,
-    width: item.footprint.width,
-    height: item.footprint.height,
-    pads: (item.part.nodes || []).map((node, index) => {
-      const offset = item.footprint.pads[index] || { x: 0, y: 0 };
-      return {
-        x: round(item.x + offset.x),
-        y: round(item.y + offset.y),
-        net: node,
-        pinIndex: index + 1,
-        connected: !isUnconnectedTerminal(node, item.part.ref, index + 1),
-      };
-    }),
-  }));
+  const components = placed.map((item) => {
+    const padsByNumber = new Map(item.record.pads.map((pad) => [pad.number, pad]));
+    return {
+      ref: item.part.ref,
+      kind: item.part.kind,
+      value: item.part.value,
+      body: item.body,
+      rotation: 0,
+      libId: item.libId,
+      courtyard: item.record.courtyard,
+      x: item.x,
+      y: item.y,
+      width: item.width,
+      height: item.height,
+      pads: (item.part.nodes || []).map((node, index) => {
+        const padNumber = item.padOrder[index];
+        const recordPad = padsByNumber.get(padNumber) || { x: 0, y: 0, shape: 'circle', size: { w: PAD_DIAMETER, h: PAD_DIAMETER }, drill: 0 };
+        return {
+          x: round(item.x + recordPad.x),
+          y: round(item.y + recordPad.y),
+          net: node,
+          pinIndex: index + 1,
+          connected: !isUnconnectedTerminal(node, item.part.ref, index + 1),
+          padNumber,
+          drill: recordPad.drill,
+          diameter: Math.max(recordPad.size.w, recordPad.size.h),
+          shape: recordPad.shape,
+          size: recordPad.size,
+        };
+      }),
+    };
+  });
 
   // Group connected pads by net.
   const netPads = new Map();

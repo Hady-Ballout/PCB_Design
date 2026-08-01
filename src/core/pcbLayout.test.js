@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildPcbLayout, footprintFor } from './pcbLayout.js';
+import { buildPcbLayout } from './pcbLayout.js';
+import { footprintRecordFor } from './pcbFootprints.js';
 
 const sampleCircuit = {
   title: 'PCB layout test circuit',
@@ -95,13 +96,20 @@ describe('buildPcbLayout', () => {
   });
 
   it('stretches footprints for parts with extra nodes', () => {
-    const stretched = footprintFor({ kind: 'resistor', ref: 'RX', nodes: ['A', 'B', 'C', 'D'] });
-    expect(stretched.pads).toHaveLength(4);
+    // A resistor with 4 nodes doesn't fit the vendored 2-pad R_Axial, so it
+    // falls through to the synthesized header fallback instead.
+    const part = { kind: 'resistor', ref: 'RX', nodes: ['A', 'B', 'C', 'D'] };
+    const { record, padOrder } = footprintRecordFor(part);
+    expect(record.pads).toHaveLength(4);
+    expect(padOrder).toHaveLength(4);
   });
 
   it('gives the uA741 a clean DIP-8 footprint', () => {
-    const footprint = footprintFor({ kind: 'ua741', ref: 'XU1', nodes: ['N1', 'O', 'I', '0', 'N5', 'O', 'V', 'N8'] });
-    expect(footprint.body).toBe('dip');
-    expect(footprint.pads).toHaveLength(8);
+    const part = { kind: 'ua741', ref: 'XU1', nodes: ['N1', 'O', 'I', '0', 'N5', 'O', 'V', 'N8'] };
+    const { libId, record } = footprintRecordFor(part);
+    expect(libId).toBe('Package_DIP:DIP-8_W7.62mm');
+    expect(record.pads).toHaveLength(8);
+    const component = buildPcbLayout({ components: [part] }).components[0];
+    expect(component.body).toBe('dip');
   });
 });

@@ -60,17 +60,19 @@ export const buildPcbScene = (layout) => {
     group.add(mesh);
   }
 
-  const padGeometry = new THREE.CylinderGeometry(PAD_DIAMETER / 2, PAD_DIAMETER / 2, board.thickness + 0.16, 20);
-  const viaGeometry = new THREE.CylinderGeometry(VIA_DIAMETER / 2, VIA_DIAMETER / 2, board.thickness + 0.14, 14);
   for (const component of layout.components) {
     for (const pad of component.pads) {
-      const mesh = new THREE.Mesh(padGeometry, mats.pad);
+      const diameter = pad.diameter ?? PAD_DIAMETER;
+      const geometry = new THREE.CylinderGeometry(diameter / 2, diameter / 2, board.thickness + 0.16, 20);
+      const mesh = new THREE.Mesh(geometry, mats.pad);
       mesh.position.set(toX(pad.x), 0, toZ(pad.y));
       group.add(mesh);
     }
   }
   for (const via of layout.vias) {
-    const mesh = new THREE.Mesh(viaGeometry, mats.via);
+    const diameter = via.diameter ?? VIA_DIAMETER;
+    const geometry = new THREE.CylinderGeometry(diameter / 2, diameter / 2, board.thickness + 0.14, 14);
+    const mesh = new THREE.Mesh(geometry, mats.via);
     mesh.position.set(toX(via.x), 0, toZ(via.y));
     group.add(mesh);
   }
