@@ -14,8 +14,11 @@ export interface ArtifactRef {
   kind: 'file' | 'url';
 }
 
+/** Text for netlists and schematics, bytes for the zipped Gerber package. */
+export type ArtifactContent = string | Uint8Array;
+
 export interface ArtifactSink {
-  put(filename: string, content: string): ArtifactRef;
+  put(filename: string, content: ArtifactContent): ArtifactRef;
 }
 
 /** Local/stdio sink: writes into an artifact directory on disk. */
@@ -28,7 +31,7 @@ export const fileSink = (dir: string): ArtifactSink => ({
 
 interface StoredArtifact {
   filename: string;
-  content: string;
+  content: ArtifactContent;
   subject: string;
   expiresAt: number;
 }
@@ -88,7 +91,7 @@ export class ArtifactStore {
     };
   }
 
-  get(id: string, subject: string): { filename: string; content: string } | undefined {
+  get(id: string, subject: string): { filename: string; content: ArtifactContent } | undefined {
     const entry = this.#entries.get(id);
     if (!entry) return undefined;
     if (entry.expiresAt <= this.#now()) {

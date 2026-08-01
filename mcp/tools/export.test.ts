@@ -1,7 +1,21 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+
+/**
+ * Set by the refusal test to hand `exportNetlist` a layout with a failing
+ * verdict; null everywhere else, so every other test runs the real placer and
+ * router. Read lazily inside the stub, never during factory hoisting.
+ */
+let layoutOverride: unknown = null;
+
+vi.mock('../../src/core/pcbLayout.js', async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  const real = actual.buildPcbLayout as (...args: unknown[]) => unknown;
+  return { ...actual, buildPcbLayout: (...args: unknown[]) => layoutOverride ?? real(...args) };
+});
+
 import { exportNetlist } from './export.js';
 import { circuitSchema } from '../schemas.js';
 import { circuitOf, rcLowPass } from '../testFixtures.js';
@@ -21,10 +35,12 @@ let artifactDir: string;
 
 beforeEach(() => {
   artifactDir = mkdtempSync(path.join(tmpdir(), 'pcb-mcp-export-'));
+  layoutOverride = null;
 });
 
 afterEach(() => {
   rmSync(artifactDir, { recursive: true, force: true });
+  layoutOverride = null;
 });
 
 describe('exportNetlist', () => {
@@ -86,8 +102,65 @@ describe('exportNetlist', () => {
 
   it('rejects a format it does not know', () => {
     expect(() => exportNetlist(
-      { circuit: parse(rcLowPass), format: 'gerber' as never },
+      { circuit: parse(rcLowPass), format: 'pdf' as never },
       fileSink(artifactDir),
-    )).toThrow(/gerber/);
+    )).toThrow(/pdf/);
+  });
+
+  it('exports a zipped Gerber package for a routable board', () => {
+    const result = exportNetlist({ circuit: parse(rcLowPass), format: 'gerber' }, fileSink(artifactDir));
+
+    expect(result.artifact.location.endsWith('-gerbers.zip')).toBe(true);
+    expect([...readFileSync(result.artifact.location).subarray(0, 4)])
+      .toEqual([0x50, 0x4b, 0x03, 0x04]);
+  });
+
+  it('lists every fabrication file it produced', () => {
+    const result = exportNetlist({ circuit: parse(rcLowPass), format: 'gerber' }, fileSink(artifactDir));
+
+    expect(result.files).toEqual([
+      'rc-low-pass.GTL', 'rc-low-pass.GBL',
+      'rc-low-pass.GTS', 'rc-low-pass.GBS',
+      'rc-low-pass.GTO', 'rc-low-pass.GBO',
+      'rc-low-pass.GKO', 'rc-low-pass.DRL',
+      'PCB-README.txt',
+    ]);
+    expect(result.summary.componentCount).toBe(3);
+  });
+
+  it('returns no inline content for a Gerber export — it is binary', () => {
+    const result = exportNetlist({ circuit: parse(rcLowPass), format: 'gerber' }, fileSink(artifactDir));
+
+    expect(result).not.toHaveProperty('content');
+    expect(result).not.toHaveProperty('lines');
+  });
+
+  it('refuses to export Gerbers for a circuit with no components', () => {
+    const empty = { ...parse(rcLowPass), components: [] };
+
+    expect(() => exportNetlist({ circuit: empty, format: 'gerber' }, fileSink(artifactDir)))
+      .toThrow('Cannot lay out a circuit with no components.');
+  });
+
+  it('surfaces the refusal report when the board is not fabricable', () => {
+    // The verdict, not the geometry, is what decides an export — so stub the
+    // layout rather than hunting for a circuit the router happens to fail on.
+    layoutOverride = {
+      board: { width: 10, height: 10, thickness: 1.6, outline: { x: 0, y: 0, width: 10, height: 10 } },
+      components: [], traces: [], vias: [], nets: [],
+      routing: { complete: false, failedNets: [{ net: 'VCC', reason: 'no_path' }] },
+      drc: { ok: false, violations: [{ type: 'clearance', nets: ['VCC', 'GND'] }] },
+      connectivity: { ok: false, incompleteNets: [{ net: 'VCC', islands: 2 }] },
+    };
+
+    try {
+      exportNetlist({ circuit: parse(rcLowPass), format: 'gerber' }, fileSink(artifactDir));
+      expect.unreachable('export should have refused');
+    } catch (error) {
+      const message = (error as Error).message;
+      expect(message).toContain('Gerber export refused: 1 unrouted nets, 1 DRC violations, 1 split nets.');
+      expect(message).toContain('"net": "VCC"');
+      expect(message).toContain('"islands": 2');
+    }
   });
 });

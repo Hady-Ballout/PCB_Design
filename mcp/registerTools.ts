@@ -86,11 +86,15 @@ export const registerPcbPilotTools = (
     title: 'Export netlist',
     description:
       'Writes the circuit as a SPICE deck (.cir), a KiCad netlist (.net), a KiCad schematic '
-      + '(.kicad_sch), or a KiCad PCB board (.kicad_pcb). Returns the text inline plus a reference '
-      + 'to the written artifact.',
+      + '(.kicad_sch), a KiCad PCB board (.kicad_pcb), or a zipped RS-274X Gerber + Excellon '
+      + 'fabrication package (gerber). Text formats are returned inline plus a reference to the '
+      + 'written artifact; the Gerber package is binary, so only the artifact reference and the '
+      + 'file list come back. Gerber export REFUSES a board that is not manufacturable — routing '
+      + 'must be complete, DRC must pass, and every net must be a single connected island — and '
+      + 'the error carries the unrouted nets and DRC violations to fix.',
     inputSchema: {
       circuit: circuitSchema,
-      format: z.enum(['spice', 'kicad_netlist', 'kicad_schematic', 'kicad_pcb']),
+      format: z.enum(['spice', 'kicad_netlist', 'kicad_schematic', 'kicad_pcb', 'gerber']),
     },
   }, guarded((args: Parameters<typeof exportNetlist>[0]) => exportNetlist(args, sink)));
 

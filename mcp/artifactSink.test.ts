@@ -22,6 +22,16 @@ describe('fileSink', () => {
     expect(path.isAbsolute(ref.location)).toBe(true);
     expect(readFileSync(ref.location, 'utf8')).toBe('* netlist\n');
   });
+
+  it('writes binary content verbatim, without a text encoding pass', () => {
+    // A zipped Gerber package is the reason the sink takes bytes at all: run it
+    // through utf8 and every byte above 0x7f is replaced.
+    const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff, 0x80, 0xfe]);
+
+    const ref = fileSink(dir).put('gerbers.zip', bytes);
+
+    expect([...readFileSync(ref.location)]).toEqual([...bytes]);
+  });
 });
 
 describe('ArtifactStore', () => {
@@ -46,6 +56,15 @@ describe('ArtifactStore', () => {
     const id = ref.location.split('/').pop()!;
 
     expect(store.get(id, 'user-1')).toMatchObject({ filename: 'schematic.svg', content: '<svg/>' });
+  });
+
+  it('hands binary content back unchanged', () => {
+    const store = new ArtifactStore();
+    const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0xff]);
+    const ref = store.sinkFor('user-1').put('gerbers.zip', bytes);
+    const id = ref.location.split('/').pop()!;
+
+    expect(store.get(id, 'user-1')?.content).toBe(bytes);
   });
 
   it('refuses to serve one subject an artifact belonging to another', () => {

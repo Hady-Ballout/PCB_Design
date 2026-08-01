@@ -74,6 +74,9 @@ const CONTENT_TYPES: Record<string, string> = {
   net: 'application/xml',
   kicad_sch: 'text/plain',
   kicad_pcb: 'text/plain',
+  zip: 'application/zip',
+  drl: 'text/plain',
+  txt: 'text/plain',
 };
 
 const contentTypeFor = (filename: string): string => {
@@ -101,9 +104,14 @@ export function handleArtifactDownload(
     return;
   }
 
+  // Length in BYTES, not characters: an artifact can be a zipped Gerber package
+  // (raw bytes) or UTF-8 text whose length differs from its character count.
+  // Buffer.byteLength answers both correctly; response.end writes a Uint8Array
+  // through untouched.
   response.writeHead(200, {
     'Content-Type': contentTypeFor(artifact.filename),
     'Content-Disposition': `attachment; filename="${artifact.filename}"`,
+    'Content-Length': String(Buffer.byteLength(artifact.content)),
     'Cache-Control': 'private, no-store',
   });
   response.end(artifact.content);

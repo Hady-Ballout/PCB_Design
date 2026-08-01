@@ -148,10 +148,28 @@ describe('MCP over streamable HTTP', () => {
   it('reports a tool failure as an error result rather than an HTTP failure', async () => {
     const result = await client.callTool({
       name: 'export_netlist',
-      arguments: { circuit: rcLowPass, format: 'gerber' },
+      arguments: { circuit: rcLowPass, format: 'pdf' },
     });
 
     expect((result as { isError?: boolean }).isError).toBe(true);
     expect(textOf(result).toLowerCase()).toContain('format');
+  });
+
+  it('serves a zipped Gerber package as binary, byte for byte', async () => {
+    const exported = jsonOf(await client.callTool({
+      name: 'export_netlist',
+      arguments: { circuit: rcLowPass, format: 'gerber' },
+    }));
+
+    expect(exported.artifact.location).toMatch(/^\/api\/mcp\/artifacts\//);
+    const response = await fetch(`${baseUrl}${exported.artifact.location}`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/zip');
+    expect(response.headers.get('content-disposition')).toContain('-gerbers.zip');
+    expect(Number(response.headers.get('content-length'))).toBe(bytes.length);
+    // PK\x03\x04 — a text encoding pass anywhere on the way out would break it.
+    expect([...bytes.subarray(0, 4)]).toEqual([0x50, 0x4b, 0x03, 0x04]);
   });
 });
