@@ -401,22 +401,17 @@ export const runDrc = (layout, rules = RULES) => {
     }
   }
 
-  // Annular rings around drilled holes.
+  // Annular rings around drilled holes, measured on the pad's INSCRIBED width.
   //
-  // KNOWN GAP (pre-existing, deliberately left alone here): this measures the
-  // pad's circumscribing diameter, not its inscribed one, so a non-square pad
-  // is judged on its widest axis while the ring is actually thinnest across
-  // its narrowest. Switching to `item.inscribed * 2` is the correct measure
-  // and is already plumbed through `copperItems`, but it makes the vendored
-  // TO-92_Inline pad (1.05 x 1.5 mm on a 0.75 mm drill => 0.15 mm of copper
-  // per side against the 0.3 mm PAD_ANNULAR_RING asks for) fail — a real
-  // finding about the library, not about this pipeline, and one that needs its
-  // own decision about whether the rule or the footprint gives way. Changing
-  // it is out of scope for the containment fix.
+  // A ring is thinnest where the copper is narrowest, so a non-square pad has
+  // to be judged on its short axis: the circumscribing diameter this check used
+  // to read let a 1.05 x 1.5 mm oval claim the 1.5 mm figure while the drill
+  // actually breaks out through the 1.05 mm one. `PAD_ANNULAR_RING` is quoted
+  // per side, hence the factor of two.
   for (const item of items) {
     if (!item.drill || item.geom.type !== 'circle') continue;
-    const required = item.drill + item.annularRing;
-    const diameter = item.geom.r * 2;
+    const required = item.drill + 2 * item.annularRing;
+    const diameter = item.inscribed * 2;
     if (diameter >= required - 1e-9) continue;
     violations.push({
       type: 'annular',

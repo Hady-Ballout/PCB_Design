@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { RULES, padCopperDistance, padCopperRadius } from './pcbDesignRules.js';
+import {
+  RULES, padCopperDistance, padCopperRadius, padCopperShape,
+} from './pcbDesignRules.js';
 import { footprintRecordFor } from './pcbFootprints.js';
 import { placementPads } from './pcbPlace.js';
 import { buildPcbLayout } from './pcbLayout.js';
@@ -28,6 +30,35 @@ describe('RULES', () => {
 
   it('keeps a via drillable inside its own annular ring', () => {
     expect(RULES.viaDiameter).toBeGreaterThanOrEqual(RULES.viaDrill + 0.4);
+  });
+});
+
+describe('padCopperShape', () => {
+  it('models an unrecognised pad shape as its bounding rectangle, not a circle', () => {
+    // The fallback used to hand back max(w,h)/2 as a circle and call it exact,
+    // which for a 4 x 1 mm pad claims 2 mm of copper in EVERY direction — 1.5 mm
+    // of copper the pad does not have, straight back into the containment bug
+    // padCopperDistance exists to close. A bounding rectangle is conservative in
+    // the containment direction: it can only ever over-claim in the corners of a
+    // shape that is genuinely inside its own bounding box.
+    const roundrect = { x: 0, y: 0, shape: 'roundrect', size: { w: 4, h: 1 } };
+
+    expect(padCopperShape(roundrect)).toMatchObject({ hw: 2, hh: 0.5, r: 0 });
+    expect(padCopperDistance(roundrect, 0, 0.5)).toBeCloseTo(0, 9);
+    // The circle model called this point 0.5 mm INSIDE the copper.
+    expect(padCopperDistance(roundrect, 0, 1.5)).toBeCloseTo(1, 9);
+    expect(padCopperDistance(roundrect, 2, 0.5)).toBeCloseTo(0, 9);
+  });
+
+  it('keeps a circular pad circular even though it carries a square size', () => {
+    // Every circular pad in the vendored library ships size { w: d, h: d }, so
+    // the bounding-rectangle fallback must not swallow them — a square would
+    // claim copper at the diagonal the drill-and-plate process never puts there.
+    const disc = { x: 0, y: 0, shape: 'circle', size: { w: 1.6, h: 1.6 } };
+
+    expect(padCopperShape(disc)).toMatchObject({ hw: 0, hh: 0, r: 0.8 });
+    expect(padCopperDistance(disc, 0.8, 0)).toBeCloseTo(0, 9);
+    expect(padCopperDistance(disc, 0.8, 0.8)).toBeCloseTo(Math.hypot(0.8, 0.8) - 0.8, 9);
   });
 });
 

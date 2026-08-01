@@ -44,13 +44,24 @@ export const RULES = {
 };
 
 /**
- * Minimum copper ring left around a hole. Pads come from the vendored KiCad
- * library and vias from RULES, so these are acceptance checks rather than
- * knobs: a pad must be at least `drill + PAD_ANNULAR_RING`, a via at least
- * `drill + VIA_ANNULAR_RING`.
+ * Minimum copper ring left around a hole, PER SIDE — the way a fab house quotes
+ * it. The check is `narrowest copper diameter >= drill + 2 * ring`, measured on
+ * the pad's INSCRIBED width (a ring is thinnest across the pad's short axis, so
+ * measuring the circumscribing diameter of a non-square pad is a false PASS).
+ *
+ * Pads come from the vendored KiCad library and vias from RULES, so these are
+ * acceptance checks rather than knobs.
+ *
+ * 0.13 mm is JLCPCB's stated minimum annular ring for a 2-layer THT board. The
+ * KiCad 6.0.11 library footprints are drawn to be manufacturable at exactly
+ * these dimensions and are fab-proven at them — TO-92_Inline puts 1.05 mm of
+ * copper on a 0.75 mm drill, i.e. 0.15 mm per side — so the rule gives way to
+ * the vendored geometry rather than the other way round. The via rule is
+ * unchanged (0.2 mm per side on RULES.viaDrill/viaDiameter = 1.0 mm needed
+ * against 1.2 mm supplied).
  */
-export const PAD_ANNULAR_RING = 0.6;
-export const VIA_ANNULAR_RING = 0.4;
+export const PAD_ANNULAR_RING = 0.13;
+export const VIA_ANNULAR_RING = 0.2;
 
 /**
  * Clearance OVER-APPROXIMATION of a pad's copper: the radius of a circle that
@@ -88,6 +99,14 @@ export const padCopperRadius = (pad) => {
  *   oval   w x h  ->  r = min(w,h)/2, hw = w/2 - r, hh = h/2 - r   (a stadium)
  *   circle d      ->  hw = hh = 0, r = d/2                 (a degenerate core)
  *
+ * Anything else — a shape the library does not ship today — is modelled as its
+ * BOUNDING RECTANGLE. That is the conservative choice for the question this
+ * function exists to answer: a bounding rectangle can only over-claim copper in
+ * the corners of a shape already inside it, whereas the old fallback (a
+ * max(w,h)/2 circle marked exact) would have reinstated the containment bug in
+ * full — for a 4 x 1 mm pad it claims 2 mm of copper in every direction, 1.5 mm
+ * of it fictional, and a terminal cell picked there would miss the pad entirely.
+ *
  * Angle semantics — verified against the pad objects that actually flow
  * through the pipeline, not just the field name:
  *
@@ -124,7 +143,10 @@ export const padCopperShape = (pad) => {
       const r = Math.min(halfW, halfH);
       return { x, y, hw: halfW - r, hh: halfH - r, r, angle };
     }
-    return { x, y, hw: 0, hh: 0, r: Math.max(halfW, halfH), angle };
+    // Every circular pad the library ships carries a square `size`; keep it a
+    // disc rather than letting the bounding-rectangle fallback square it off.
+    if (pad.shape === 'circle') return { x, y, hw: 0, hh: 0, r: Math.max(halfW, halfH), angle };
+    return { x, y, hw: halfW, hh: halfH, r: 0, angle };
   }
   return { x, y, hw: 0, hh: 0, r: padCopperRadius(pad), angle };
 };

@@ -100,11 +100,48 @@ describe('runDrc', () => {
   });
 
   it('flags a pad whose annular ring is too thin', () => {
+    // 0.95 mm of copper on a 0.75 mm drill = 0.10 mm of ring per side, under
+    // the 0.13 mm PAD_ANNULAR_RING allows.
     const result = runDrc(layoutOf({
-      components: [part('R1', [pad(10, 10, 'A', { diameter: 1.2, drill: 0.8 })])],
+      components: [part('R1', [pad(10, 10, 'A', { diameter: 0.95, drill: 0.75 })])],
     }));
 
-    expect(result.violations.map((item) => item.type)).toContain('annular');
+    const violation = result.violations.find((item) => item.type === 'annular');
+    expect(violation).toBeDefined();
+    expect(violation.required).toBeCloseTo(1.01, 6);
+  });
+
+  it('measures a pad annular ring across its narrowest copper, not its widest', () => {
+    // The false PASS. An oval pad is at its thinnest across the SHORT axis, but
+    // the check used to read the circumscribing diameter, i.e. the long one:
+    //   - inscribed measure     = 0.95 mm vs 0.75 + 2 x 0.13 = 1.01 -> VIOLATION
+    //   - circumscribing measure = 1.5 mm  vs 1.01              -> clean (WRONG)
+    // 0.95 on a 0.75 drill is 0.10 mm of copper per side; a 0.75 mm hole punched
+    // through it off-register by a tenth of a millimetre breaks the ring.
+    const thin = pad(10, 10, 'A', {
+      shape: 'oval', size: { w: 0.95, h: 1.5 }, diameter: 1.5, drill: 0.75,
+    });
+
+    const result = runDrc(layoutOf({ components: [part('R1', [thin])] }));
+
+    const violation = result.violations.find((item) => item.type === 'annular');
+    expect(violation).toBeDefined();
+    expect(violation.distance).toBeCloseTo(0.95, 6);
+    expect(violation.required).toBeCloseTo(1.01, 6);
+  });
+
+  it('accepts the vendored TO-92 pad, which is fab-proven at 0.15 mm of ring', () => {
+    // The other half of the decision: the inscribed measure is the correct one,
+    // AND the rule relaxes to JLCPCB's stated 0.13 mm minimum annular ring, so
+    // the KiCad 6.0.11 TO-92_Inline pad (1.05 x 1.5 mm on a 0.75 mm drill,
+    // 0.15 mm per side) keeps passing instead of failing every BJT board.
+    const to92 = pad(10, 10, 'A', {
+      shape: 'oval', size: { w: 1.05, h: 1.5 }, diameter: 1.5, drill: 0.75,
+    });
+
+    const result = runDrc(layoutOf({ components: [part('R1', [to92])] }));
+
+    expect(result.violations.filter((item) => item.type === 'annular')).toEqual([]);
   });
 
   it('flags a via whose annular ring is too thin', () => {
@@ -208,6 +245,24 @@ describe('runDrc', () => {
     }));
 
     expect(result.violations.filter((item) => item.type === 'clearance')).toEqual([]);
+  });
+
+  it('still flags the same cornering trace once the stadium itself is crowded', () => {
+    // The mirror of the case above, so the stadium model is doing real work
+    // rather than waving everything through. The corner moves 0.1 mm left and
+    // 0.1 mm up, onto the disc end of the stadium:
+    //   - true stadium-to-trace gap = 1.1294 - 0.525 - 0.4 = 0.204 mm -> VIOLATION
+    const ovalPad = pad(10, 10, 'A', { shape: 'oval', size: { w: 1.05, h: 1.5 }, diameter: 1.5 });
+    const corner = trace('B', { x: 11, y: 10.75 }, { x: 14, y: 10.75 });
+
+    const result = runDrc(layoutOf({
+      components: [part('R1', [ovalPad])],
+      traces: [corner],
+    }));
+
+    const violation = result.violations.find((item) => item.type === 'clearance');
+    expect(violation).toBeDefined();
+    expect(violation.distance).toBeCloseTo(0.204, 6);
   });
 });
 
