@@ -227,4 +227,28 @@ describe('placeComponents', () => {
     expect(empty.placements).toEqual([]);
     expect(empty.board.width).toBeGreaterThan(0);
   });
+
+  it('swaps rotated pad size and folds angle for a 90/270-rotated non-square pad', () => {
+    // TO-92_Inline pads are 1.05 (w) x 1.5 (h) rectangles/ovals — at 90/270
+    // the footprint-local w/h axes swap in board space, so the emitted pad
+    // geometry must swap too or the Gerber output will be misoriented.
+    const part = { ref: 'Q1', kind: 'bjt_npn', nodes: ['C', 'B', 'E'] };
+    const { libId, record, padOrder } = footprintRecordFor(part);
+    const unrotatedPad = record.pads.find((pad) => pad.number === padOrder[0]);
+
+    for (const rotation of [90, 270]) {
+      const placement = { part, footprint: record, libId, padOrder, x: 0, y: 0, rotation };
+      const [pad] = placementPads(placement);
+      expect(pad.pad.size).toEqual({ w: unrotatedPad.size.h, h: unrotatedPad.size.w });
+      expect(pad.pad.angle).toBe(((unrotatedPad.angle ?? 0) + rotation) % 180);
+      expect(pad.pad.shape).toBe(unrotatedPad.shape);
+    }
+
+    for (const rotation of [0, 180]) {
+      const placement = { part, footprint: record, libId, padOrder, x: 0, y: 0, rotation };
+      const [pad] = placementPads(placement);
+      expect(pad.pad.size).toEqual(unrotatedPad.size);
+      expect(pad.pad.angle).toBe(((unrotatedPad.angle ?? 0) + rotation) % 180);
+    }
+  });
 });

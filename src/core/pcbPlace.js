@@ -106,15 +106,34 @@ export const placementBounds = (placement) =>
 const FALLBACK_PAD = { x: 0, y: 0, shape: 'circle', size: { w: 1.8, h: 1.8 }, drill: 0, angle: 0 };
 
 /**
+ * Rotates a footprint-record pad's shape data to match a placement rotation:
+ * at 90/270 the footprint-local w/h axes swap in board space, so `size` swaps
+ * with them; `angle` folds into the 0-179 range for every rotation so a pad's
+ * intrinsic tilt (rect/oval pads carry angle 0 in the vendored library, but
+ * the field exists for pads that don't) stays correct once combined with the
+ * placement's rotation.
+ */
+const rotatePadShape = (pad, rotation) => {
+  const swapSize = rotation === 90 || rotation === 270;
+  return {
+    ...pad,
+    size: swapSize ? { w: pad.size.h, h: pad.size.w } : pad.size,
+    angle: ((pad.angle ?? 0) + rotation) % 180,
+  };
+};
+
+/**
  * Absolute pad positions for a placement, one entry per circuit node in node
- * order: `{ net, padNumber, index, pad (the footprint record pad), x, y }`.
+ * order: `{ net, padNumber, index, pad (the footprint record pad, rotated to
+ * match the placement), x, y }`.
  */
 export const placementPads = (placement) => {
   const byNumber = new Map(placement.footprint.pads.map((pad) => [pad.number, pad]));
   return (placement.part?.nodes || []).map((node, index) => {
     const padNumber = placement.padOrder[index];
-    const pad = byNumber.get(padNumber) || { ...FALLBACK_PAD, number: padNumber };
-    const offset = rotateOffset(pad, placement.rotation);
+    const rawPad = byNumber.get(padNumber) || { ...FALLBACK_PAD, number: padNumber };
+    const pad = rotatePadShape(rawPad, placement.rotation);
+    const offset = rotateOffset(rawPad, placement.rotation);
     return {
       net: node,
       padNumber,
