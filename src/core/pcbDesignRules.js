@@ -152,6 +152,33 @@ export const padCopperShape = (pad) => {
 };
 
 /**
+ * Distance from a point to a pad's CORE (the convex rectangle/segment/point
+ * before inflation), clamped at zero inside it. Copper distance is this minus
+ * `shape.r`, but the router wants the un-inflated quantity: the grid-edge sag
+ * bound (see pcbRoute.js's header) is a statement about distance to a *set*,
+ * and applying it to the core rather than the copper is what keeps a fat pad
+ * from being over-stamped — `hypot(r + C, pitch/2)` is strictly smaller than
+ * `r + hypot(C, pitch/2)`, and that difference is the TO-92 escape corridor.
+ *
+ * Takes a `padCopperShape` result rather than a pad so a caller stamping a
+ * whole neighbourhood computes the shape once.
+ *
+ * @param {ReturnType<typeof padCopperShape>} shape
+ * @param {number} x
+ * @param {number} y
+ * @returns {number} millimetres, >= 0
+ */
+export const padCoreDistance = (shape, x, y) => {
+  const dx = x - shape.x;
+  const dy = y - shape.y;
+  const cos = Math.cos(shape.angle);
+  const sin = Math.sin(shape.angle);
+  const localX = Math.abs(dx * cos + dy * sin) - shape.hw;
+  const localY = Math.abs(dy * cos - dx * sin) - shape.hh;
+  return Math.hypot(Math.max(localX, 0), Math.max(localY, 0));
+};
+
+/**
  * Signed distance from a point to a pad's true copper boundary: negative
  * inside the copper, zero on the edge, positive outside. This is the exact
  * containment predicate `padCopperRadius` is not — use it wherever the

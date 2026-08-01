@@ -138,6 +138,46 @@ describe('routeBoard', () => {
     }
   });
 
+  it('threads a gap that only exists once oval pads are modelled as stadiums', () => {
+    // A wall of 1.05 x 3.0 mm oval pads on a 3.81 mm pitch, sealed against both
+    // board edges, with the routed net's pads on either side of it. The only
+    // way through is the column midway between two wall pads, 1.905 mm from
+    // each pad centre:
+    //
+    //   stadium model — the pad's core is a vertical 1.95 mm segment inflated
+    //     by r = 0.525, so the cell has to clear the CORE by
+    //     hypot(r + clearance + traceHalf, pitch/2) = hypot(1.225, 0.3175)
+    //     = 1.2655 mm.  1.905 > 1.2655, the gap is open.
+    //   circumscribing circle — the same pad becomes a max(w,h)/2 = 1.5 mm
+    //     disc, needing hypot(1.5 + 0.7, 0.3175) = 2.2228 mm.  1.905 < 2.2228,
+    //     every gap in the wall is walled off and the net is 'unroutable'.
+    //
+    // 0.45 mm per pad of copper that is not there is the difference between a
+    // BJT board and a failure report.
+    const wallPad = (x) => pad(x, 15.24, `J1_${Math.round(x * 100)}`, {
+      connected: false, shape: 'oval', size: { w: 1.05, h: 3 }, diameter: 3, drill: 0.7,
+      padNumber: String(Math.round(x * 100)),
+    });
+    const input = {
+      board: { width: 34, height: 30 },
+      components: [
+        part('R1', [pad(3.81, 5.08, 'SIG')]),
+        part('R2', [pad(3.81, 25.4, 'SIG')]),
+        part('J1', Array.from({ length: 9 }, (_, index) => wallPad(1.905 + index * 3.81))),
+      ],
+    };
+
+    const routed = routeBoard(input);
+
+    expect(routed.failedNets).toEqual([]);
+    const layout = asLayout(input, routed);
+    expect(runDrc(layout).violations).toEqual([]);
+    expect(checkConnectivity(layout).ok).toBe(true);
+    // The copper really does cross the wall's row rather than sneaking round it.
+    expect(routed.traces.some((trace) => Math.min(trace.from.y, trace.to.y) < 15.24
+      && Math.max(trace.from.y, trace.to.y) > 15.24)).toBe(true);
+  });
+
   it('is deterministic', () => {
     const input = {
       board: { width: 44, height: 34 },

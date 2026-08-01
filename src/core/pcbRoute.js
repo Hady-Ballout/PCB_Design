@@ -14,10 +14,41 @@
 // grid node onto a unit grid edge is itself a grid node), so testing cell
 // centres against other traces is *exact*, not approximate.
 //
-// Pads and vias are round obstacles that do not sit on the grid, and there the
-// interior of a segment can dip closer than either endpoint. Circles therefore
-// get the exact "sag" correction sqrt(R^2 + (pitch/2)^2) — the closest a unit
-// grid edge with both ends at distance R can come to a point.
+// Pads do not sit on the grid, and there the interior of a segment can dip
+// closer than either endpoint, so cell-centre testing needs a "sag" correction.
+//
+// The sag lemma, for an arbitrary obstacle set K (this is the generalisation
+// that lets pads be stamped as stadiums and rectangles rather than discs):
+//
+//   let A, B be the ends of a grid edge, |AB| = p, with dist(A,K), dist(B,K)
+//   >= D.  Let M be the point of AB closest to K and P in K its nearest point,
+//   so dist(M,K) = |MP|.  Since P is IN K, |AP| >= dist(A,K) >= D and likewise
+//   |BP| >= D.  Drop the perpendicular from P to line AB, foot F, height h.
+//   If F is outside AB then min |x - P| over AB is |AP| or |BP| >= D.  If F is
+//   inside then min(|AF|,|FB|) <= p/2, and D^2 <= h^2 + min(|AF|,|FB|)^2
+//   <= h^2 + (p/2)^2, so h >= sqrt(D^2 - (p/2)^2).  Either way
+//
+//       dist(M,K) = |MP| >= min over AB of |x - P| >= sqrt(D^2 - (p/2)^2).
+//
+// Nothing in that argument needs K to be a disc, or even convex. Inverting it:
+// to guarantee `need` of clearance along the whole edge, stamp every cell whose
+// distance to K is below sqrt(need^2 + (p/2)^2).
+//
+// Applying it to a pad, K is the pad's CORE (padCoreDistance) — a rectangle for
+// a rect pad, the segment between the foci for an oval, a point for a circle —
+// and the copper is that core inflated by `r`. So a cell is blocked when
+//
+//       padCoreDistance(pad, cell) < hypot(r + clearance + traceHalf, pitch/2).
+//
+// Keeping `r` INSIDE the hypot is the whole point of modelling the shape:
+// hypot(r + C, p/2) < r + hypot(C, p/2), and for a TO-92 pad (r = 0.525) that
+// difference is 0.05 mm — the entire escape corridor out of its middle pin.
+// Modelling the same pad as its circumscribing disc (r = max(w,h)/2 = 0.75)
+// costs another 0.225 mm on top.
+//
+// Vias, and the escape-cell disks below, sit ON grid nodes, and the closest
+// point of a grid edge to a grid node is itself a grid node — so those need no
+// sag correction at all and `stampDisk` tests cell centres directly.
 //
 // The other subtlety is pad escape. A pad's terminal cell is always available
 // to its own net even if foreign copper stamped over it, otherwise a pad could
@@ -27,24 +58,19 @@
 // direction. A pad whose terminal cell cannot clear foreign pad copper at full
 // trace width is reported as `no_escape` rather than routed into a short.
 //
-// Pad copper is modelled two different ways, on purpose:
-//
-// * as KEEP-OUT, a pad is its circumscribing circle (padCopperRadius:
-//   hypot(w,h)/2 for rect pads, max(w,h)/2 otherwise). That never
-//   under-reports copper, so anything the router routes around is genuinely
-//   clear and pcbDrc.js — which measures the exact outline — can only ever
-//   agree. The one place the conservatism bites is very tight footprints such
-//   as TO-92_Inline (1.27 mm pitch), whose middle pad has no room for a 0.8 mm
-//   escape at all; those come back as `no_escape` instead of a silent short.
-// * as CONTAINMENT ("is this cell on the pad?"), a pad is its exact outline
-//   (padCopperDistance). The circle is unusable here: it reaches past the
-//   copper, so a terminal cell chosen inside it can sit off the pad entirely.
+// Pad copper is shape-exact everywhere it matters — as KEEP-OUT through
+// `padCoreDistance` + the sag bound above, and as CONTAINMENT ("is this cell on
+// the pad?") through `padCopperDistance`. `padCopperRadius`'s circumscribing
+// circle survives only as a cheap bounding radius for candidate-cell scans, and
+// is never the thing that decides whether copper may be laid.
 //
 // Everything is deterministic: no RNG, no clock, and every heap comparison and
 // iteration order carries an explicit total-order tiebreaker.
 //
 // All dimensions are millimetres, y-down.
-import { RULES, padCopperDistance, padCopperRadius } from './pcbDesignRules.js';
+import {
+  RULES, padCopperDistance, padCopperRadius, padCopperShape, padCoreDistance,
+} from './pcbDesignRules.js';
 
 /**
  * Net names a ground pour would claim. Exported because the copper pour needs
@@ -172,9 +198,10 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
         wired,
         x: pad.x,
         y: pad.y,
-        // Keep-out radius (over-approximates the copper) for obstacle
-        // stamping; `record` keeps the pad itself so the terminal cell can be
-        // tested against the pad's exact outline.
+        // `shape` is the exact copper (convex core + inflation radius) and is
+        // what stamps obstacles and measures escape room; `radius` is the
+        // circumscribing circle, kept only to size candidate-cell scans.
+        shape: padCopperShape(pad),
         radius: padCopperRadius(pad),
         record: pad,
       });
@@ -183,8 +210,8 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
 
   /* --- terminal cells --------------------------------------------- */
 
-  // A pad's terminal is the cell inside its copper that keeps the most room to
-  // foreign pad copper (ties: closest to the pad centre, then top-most, then
+  // A pad's terminal is the cell inside its copper that can escape at the
+  // widest trace (ties: closest to the pad centre, then top-most, then
   // left-most). Picking the roomiest cell is what lets a DIP pin escape
   // between its neighbours instead of dead-ending.
   //
@@ -209,23 +236,26 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
         if (col < 0 || row < 0 || col >= cols || row >= rows) continue;
         if (padCopperDistance(pad.record, cellX(col), cellY(row)) > EPSILON) continue;
         const distance = Math.hypot(cellX(col) - pad.x, cellY(row) - pad.y);
-        let room = Infinity;
+        // How wide a trace this cell could carry: invert the sag bound per
+        // foreign pad. A grid edge leaving the cell keeps
+        // sqrt(coreDistance^2 - (pitch/2)^2) of core distance along its whole
+        // length, of which r + clearance is spoken for, and the rest is the
+        // trace's half-width. Taking the minimum over foreign pads makes
+        // `limit` the widest half-width the cell can escape at — which is both
+        // the ranking key and, once the width ladder exists, the acceptance
+        // test at each rung.
+        let limit = Infinity;
         for (const other of pads) {
           if (other.netKey === pad.netKey) continue;
-          room = Math.min(room, Math.hypot(cellX(col) - other.x, cellY(row) - other.y) - other.radius);
+          const core = padCoreDistance(other.shape, cellX(col), cellY(row));
+          const along = Math.sqrt(Math.max(0, core * core - halfCell * halfCell));
+          limit = Math.min(limit, along - other.shape.r - rules.clearance);
         }
-        candidates.push({ col, row, distance, room });
+        candidates.push({ col, row, distance, limit });
       }
     }
-    candidates.sort((a, b) => (b.room - a.room) || (a.distance - b.distance) || (a.row - b.row) || (a.col - b.col));
-    // `room` is measured to the escape cell's CENTRE, but the first hop out of
-    // it runs along a grid edge whose interior can sag closer to a foreign
-    // pad than either endpoint (see the sag correction above). The exact
-    // worst case is pitch*3/8; hypot(clearance + traceHalf, pitch/2) is the
-    // simpler safe bound (it's the sag distance for an edge whose endpoint is
-    // already exactly `needed` away), so require room against that instead of
-    // the bare centre-to-centre distance.
-    const needed = Math.hypot(rules.clearance + traceHalf, halfCell);
+    candidates.sort((a, b) => (b.limit - a.limit) || (a.distance - b.distance)
+      || (a.row - b.row) || (a.col - b.col));
     const pick = candidates.find((candidate) => {
       const owner = claimed.get(cellIndex(candidate.col, candidate.row));
       return owner === undefined || owner === pad.netKey;
@@ -235,7 +265,7 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
       continue;
     }
     claimed.set(cellIndex(pick.col, pick.row), pad.netKey);
-    pad.escape = { col: pick.col, row: pick.row, ok: pick.room >= needed - EPSILON };
+    pad.escape = { col: pick.col, row: pick.row, limit: pick.limit };
   }
 
   /* --- nets -------------------------------------------------------- */
@@ -323,6 +353,35 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
   const blockTrace = new Int32Array(nodeCount);
   const blockVia = new Int32Array(cellCount);
 
+  /**
+   * Pad keep-out, measured against the pad's exact core (see the sag lemma in
+   * the header). `traceNeed` carries the sag correction because a pad is not on
+   * the grid; `viaNeed` does not, because a via is a disc centred on a grid
+   * node and the nearest point of a grid edge to a grid node is a grid node.
+   */
+  const stampPad = (shape, owner) => {
+    const traceNeed = Math.hypot(shape.r + rules.clearance + traceHalf, halfCell);
+    const viaNeed = shape.r + rules.clearance + viaRadius;
+    const reach = Math.max(traceNeed, viaNeed);
+    const minCol = Math.max(0, Math.ceil((shape.x - shape.hw - shape.hh - reach) / pitch));
+    const maxCol = Math.min(cols - 1, Math.floor((shape.x + shape.hw + shape.hh + reach) / pitch));
+    const minRow = Math.max(0, Math.ceil((shape.y - shape.hw - shape.hh - reach) / pitch));
+    const maxRow = Math.min(rows - 1, Math.floor((shape.y + shape.hw + shape.hh + reach) / pitch));
+    for (let row = minRow; row <= maxRow; row += 1) {
+      for (let col = minCol; col <= maxCol; col += 1) {
+        const distance = padCoreDistance(shape, cellX(col), cellY(row));
+        const cell = cellIndex(col, row);
+        if (distance < traceNeed - EPSILON) {
+          for (const layer of BOTH_LAYERS) {
+            const node = cell + layer * cellCount;
+            if (blockTrace[node] === FREE) blockTrace[node] = owner;
+          }
+        }
+        if (distance < viaNeed - EPSILON && blockVia[cell] === FREE) blockVia[cell] = owner;
+      }
+    }
+  };
+
   const stampDisk = (cx, cy, traceRadius, viaRadiusLimit, owner, layers) => {
     const radius = Math.max(traceRadius, viaRadiusLimit);
     const minCol = Math.max(0, Math.ceil((cx - radius) / pitch));
@@ -375,9 +434,7 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
     for (const pad of pads) {
       if (pad.netKey === netKey) continue;
       const owner = ownerIdFor(pad.netKey);
-      // Pad copper, with the exact sag correction for a round obstacle.
-      const padTrace = Math.hypot(pad.radius + rules.clearance + traceHalf, halfCell);
-      stampDisk(pad.x, pad.y, padTrace, pad.radius + rules.clearance + viaRadius, owner, BOTH_LAYERS);
+      stampPad(pad.shape, owner);
       // The pad's own escape cell, which its net may always use.
       if (!pad.escape) continue;
       stampDisk(
@@ -601,7 +658,8 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
     const toIsland = islandOf(job.to);
 
     if (fromIsland === undefined || toIsland === undefined
-      || !job.from.escape?.ok || !job.to.escape?.ok) {
+      || !(job.from.escape?.limit >= traceHalf - EPSILON)
+      || !(job.to.escape?.limit >= traceHalf - EPSILON)) {
       failedJobs.push({ job, reason: 'no_escape' });
       continue;
     }

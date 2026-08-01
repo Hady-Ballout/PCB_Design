@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  RULES, padCopperDistance, padCopperRadius, padCopperShape,
+  RULES, padCopperDistance, padCopperRadius, padCopperShape, padCoreDistance,
 } from './pcbDesignRules.js';
 import { footprintRecordFor } from './pcbFootprints.js';
 import { placementPads } from './pcbPlace.js';
@@ -59,6 +59,27 @@ describe('padCopperShape', () => {
     expect(padCopperShape(disc)).toMatchObject({ hw: 0, hh: 0, r: 0.8 });
     expect(padCopperDistance(disc, 0.8, 0)).toBeCloseTo(0, 9);
     expect(padCopperDistance(disc, 0.8, 0.8)).toBeCloseTo(Math.hypot(0.8, 0.8) - 0.8, 9);
+  });
+});
+
+describe('padCoreDistance', () => {
+  it('measures to the core, not the copper, and never goes negative', () => {
+    // The router stamps obstacles in CORE distance because that is the quantity
+    // the grid-edge sag bound applies to: a segment whose endpoints are D away
+    // from a core dips no closer than sqrt(D^2 - (pitch/2)^2), whatever the core
+    // is. Inflating by r afterwards is what turns that into a copper clearance.
+    const stadium = padCopperShape({ x: 10, y: 10, shape: 'oval', size: { w: 1.05, h: 1.5 } });
+
+    expect(stadium.hw).toBeCloseTo(0, 9);
+    expect(stadium.hh).toBeCloseTo(0.225, 9);
+    expect(stadium.r).toBeCloseTo(0.525, 9);
+    // Straight out to the side: the core is a bare vertical segment.
+    expect(padCoreDistance(stadium, 12, 10)).toBeCloseTo(2, 9);
+    // Level with the core's end, so the distance turns diagonal.
+    expect(padCoreDistance(stadium, 12, 10.625)).toBeCloseTo(Math.hypot(2, 0.4), 9);
+    // Anywhere on the core itself reads zero rather than a negative depth.
+    expect(padCoreDistance(stadium, 10, 10.1)).toBe(0);
+    expect(padCoreDistance(stadium, 10, 10)).toBe(0);
   });
 });
 
