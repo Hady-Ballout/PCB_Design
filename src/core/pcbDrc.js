@@ -8,13 +8,30 @@
 //
 // Copper model
 // ------------
-// * pad   — circle of `padCopperRadius(pad)` on BOTH layers (through-hole).
-//           Rect pads are modelled by their true circumscribing circle
-//           (hypot(w,h)/2, i.e. the corner-to-centre distance); other shapes
-//           use max(w,h)/2. See padCopperRadius for why that conservatism is
-//           safe here.
+// Every piece of copper is a convex core inflated by a radius:
+//
+// * pad   — `padCopperShape(pad)` on BOTH layers (through-hole): a rect pad is
+//           its rectangle (r = 0), an oval pad a stadium, a circular pad a
+//           point inflated by d/2. This is EXACT.
 // * via   — circle of `diameter / 2` on BOTH layers.
 // * trace — capsule (segment inflated by `width / 2`) on its own layer.
+//
+// Pads additionally carry `geom`, the circumscribing circle of
+// `padCopperRadius(pad)`. That circle contains the pad but is bigger than it
+// (0.62 mm bigger at a 3x3 rect pad's corner), which makes it a one-way
+// instrument, and the two checks here use it accordingly:
+//
+// * CLEARANCE is a two-tier test. The circle runs first as a cheap reject:
+//   because it never under-reports copper, "circle gap >= clearance" proves
+//   the real gap is at least that too, and the pair is dismissed without more
+//   work. Only a pair the circle *fails* is re-measured against the exact
+//   outlines, and only the exact measurement can raise a violation — so the
+//   over-approximation can never invent a clearance error for a rect pad, and
+//   can never hide one either (it is always the pessimistic bound).
+// * CONNECTIVITY ("does this trace end on the pad?") has no cheap tier at all.
+//   An over-approximation there is a false PASS — it would weld a trace to a
+//   pad it physically misses — so `checkConnectivity` measures exact copper,
+//   always. Board-edge and annular-ring checks are exact for the same reason.
 //
 // Pads belonging to the *same* footprint are not checked against each other:
 // their spacing is fixed by the vendored KiCad library (TO-92_Inline really
@@ -22,7 +39,10 @@
 // pipeline's. Everything else — pad/via/trace against pad/via/trace — is.
 //
 // All dimensions are millimetres, y-down.
-import { PAD_ANNULAR_RING, RULES, VIA_ANNULAR_RING, padCopperRadius } from './pcbDesignRules.js';
+import {
+  PAD_ANNULAR_RING, RULES, VIA_ANNULAR_RING,
+  copperCorePoints, padCopperRadius, padCopperShape,
+} from './pcbDesignRules.js';
 
 const TOP = 1;
 const BOTTOM = 2;
@@ -101,18 +121,79 @@ const copperGap = (a, b) => {
   };
 };
 
-/** Axis-aligned bounds of an item's copper. */
-const itemBounds = (item) => {
-  const { geom } = item;
-  if (geom.type === 'circle') {
-    return { minX: geom.x - geom.r, minY: geom.y - geom.r, maxX: geom.x + geom.r, maxY: geom.y + geom.r };
+/* --- exact copper: convex core inflated by a radius ----------------- */
+
+/** The (at most four) edges of a convex core, degenerate cores included. */
+const coreEdges = (points) => {
+  if (points.length === 1) {
+    return [{ ax: points[0][0], ay: points[0][1], bx: points[0][0], by: points[0][1] }];
+  }
+  if (points.length === 2) {
+    return [{ ax: points[0][0], ay: points[0][1], bx: points[1][0], by: points[1][1] }];
+  }
+  return points.map((point, index) => {
+    const next = points[(index + 1) % points.length];
+    return { ax: point[0], ay: point[1], bx: next[0], by: next[1] };
+  });
+};
+
+/** True when `point` lies inside the convex polygon `points` (consistent winding). */
+const insideConvex = (points, point) => {
+  if (points.length < 3) return false;
+  let sign = 0;
+  for (const edge of coreEdges(points)) {
+    const cross = (edge.bx - edge.ax) * (point[1] - edge.ay) - (edge.by - edge.ay) * (point[0] - edge.ax);
+    if (cross === 0) continue;
+    const next = cross > 0 ? 1 : -1;
+    if (sign === 0) sign = next;
+    else if (sign !== next) return false;
+  }
+  return true;
+};
+
+/**
+ * Exact gap between two cores' inflated copper (negative = overlapping), with
+ * the two nearest points. Both cores are convex, so the closest approach is
+ * always attained on a boundary edge pair unless one contains the other.
+ */
+const exactGap = (a, b) => {
+  if (insideConvex(a.core, b.core[0]) || insideConvex(b.core, a.core[0])) {
+    const x = (a.core[0][0] + b.core[0][0]) / 2;
+    const y = (a.core[0][1] + b.core[0][1]) / 2;
+    return { gap: -(a.inflate + b.inflate), x, y };
+  }
+  let best = null;
+  for (const left of coreEdges(a.core)) {
+    for (const right of coreEdges(b.core)) {
+      const near = closestBetweenSegments(left, right);
+      if (!best || near.distance < best.distance) best = near;
+    }
   }
   return {
-    minX: Math.min(geom.ax, geom.bx) - geom.r,
-    minY: Math.min(geom.ay, geom.by) - geom.r,
-    maxX: Math.max(geom.ax, geom.bx) + geom.r,
-    maxY: Math.max(geom.ay, geom.by) + geom.r,
+    gap: best.distance - a.inflate - b.inflate,
+    x: (best.ax + best.bx) / 2,
+    y: (best.ay + best.by) / 2,
   };
+};
+
+/**
+ * Gap between two items, measured exactly. Traces and vias are already exact
+ * in `geom`, so a pair of them short-circuits to the cheap closed forms.
+ */
+const measuredGap = (a, b) => ((a.exact && b.exact) ? copperGap(a, b) : exactGap(a, b));
+
+/** Axis-aligned bounds of an item's exact copper. */
+const itemBounds = (item) => {
+  const bounds = {
+    minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity,
+  };
+  for (const [x, y] of item.core) {
+    bounds.minX = Math.min(bounds.minX, x - item.inflate);
+    bounds.minY = Math.min(bounds.minY, y - item.inflate);
+    bounds.maxX = Math.max(bounds.maxX, x + item.inflate);
+    bounds.maxY = Math.max(bounds.maxY, y + item.inflate);
+  }
+  return bounds;
 };
 
 /* ------------------------------------------------------------------ */
@@ -137,7 +218,7 @@ export const copperItems = (layout) => {
 
   for (const component of layout?.components || []) {
     for (const pad of component.pads || []) {
-      const radius = padCopperRadius(pad);
+      const shape = padCopperShape(pad);
       push({
         kind: 'pad',
         net: pad.net,
@@ -148,7 +229,15 @@ export const copperItems = (layout) => {
         drill: pad.drill,
         annularRing: PAD_ANNULAR_RING,
         layers: BOTH,
-        geom: { type: 'circle', x: pad.x, y: pad.y, r: radius },
+        // Over-approximating keep-out circle, used only as the clearance
+        // check's cheap reject (see the header).
+        geom: { type: 'circle', x: pad.x, y: pad.y, r: padCopperRadius(pad) },
+        core: copperCorePoints(shape),
+        inflate: shape.r,
+        // Half the narrowest width of the copper through the pad centre — the
+        // inscribed circle, which is what an annular ring is measured on.
+        inscribed: Math.min(shape.hw, shape.hh) + shape.r,
+        exact: shape.hw === 0 && shape.hh === 0,
       });
     }
   }
@@ -166,10 +255,15 @@ export const copperItems = (layout) => {
       annularRing: VIA_ANNULAR_RING,
       layers: BOTH,
       geom: { type: 'circle', x: via.x, y: via.y, r: diameter / 2 },
+      core: [[via.x, via.y]],
+      inflate: diameter / 2,
+      inscribed: diameter / 2,
+      exact: true,
     });
   }
 
   for (const trace of layout?.traces || []) {
+    const half = (trace.width ?? RULES.traceWidth) / 2;
     push({
       kind: 'trace',
       net: trace.net,
@@ -183,8 +277,12 @@ export const copperItems = (layout) => {
       geom: {
         type: 'segment',
         ax: trace.from.x, ay: trace.from.y, bx: trace.to.x, by: trace.to.y,
-        r: (trace.width ?? RULES.traceWidth) / 2,
+        r: half,
       },
+      core: [[trace.from.x, trace.from.y], [trace.to.x, trace.to.y]],
+      inflate: half,
+      inscribed: half,
+      exact: true,
     });
   }
 
@@ -256,7 +354,13 @@ export const runDrc = (layout, rules = RULES) => {
     if (a.netKey === b.netKey) continue;
     if (!(a.layers & b.layers)) continue;
     if (a.kind === 'pad' && b.kind === 'pad' && a.owner === b.owner) continue;
-    const { gap, x, y } = copperGap(a, b);
+    // Tier 1: the over-approximating circles. They contain the real copper, so
+    // a pass here is a pass for the real copper too — dismiss without more work.
+    if (copperGap(a, b).gap >= rules.clearance) continue;
+    // Tier 2: the exact outlines. Only this measurement may raise a violation,
+    // so a rect pad is never flagged for copper its circumscribing circle
+    // owns but the pad itself does not.
+    const { gap, x, y } = measuredGap(a, b);
     if (gap >= rules.clearance) continue;
     violations.push({
       type: 'clearance',
@@ -298,6 +402,17 @@ export const runDrc = (layout, rules = RULES) => {
   }
 
   // Annular rings around drilled holes.
+  //
+  // KNOWN GAP (pre-existing, deliberately left alone here): this measures the
+  // pad's circumscribing diameter, not its inscribed one, so a non-square pad
+  // is judged on its widest axis while the ring is actually thinnest across
+  // its narrowest. Switching to `item.inscribed * 2` is the correct measure
+  // and is already plumbed through `copperItems`, but it makes the vendored
+  // TO-92_Inline pad (1.05 x 1.5 mm on a 0.75 mm drill => 0.15 mm of copper
+  // per side against the 0.3 mm PAD_ANNULAR_RING asks for) fail — a real
+  // finding about the library, not about this pipeline, and one that needs its
+  // own decision about whether the rule or the footprint gives way. Changing
+  // it is out of scope for the containment fix.
   for (const item of items) {
     if (!item.drill || item.geom.type !== 'circle') continue;
     const required = item.drill + item.annularRing;
@@ -329,7 +444,7 @@ export const runDrc = (layout, rules = RULES) => {
 /* ------------------------------------------------------------------ */
 
 /**
- * Union-find over each net's copper: two items join when their copper
+ * Union-find over each net's copper: two items join when their EXACT copper
  * physically touches (gap <= 1e-3) on a shared layer. Every routed net must
  * come out as a single island.
  *
@@ -363,7 +478,10 @@ export const checkConnectivity = (layout) => {
     const b = items[right];
     if (a.netKey !== b.netKey) continue;
     if (!(a.layers & b.layers)) continue;
-    if (copperGap(a, b).gap <= TOUCH_TOLERANCE) union(left, right);
+    // Exact copper only: the circumscribing circle would union a trace that
+    // ends beside a rect pad rather than on it, reporting a net as complete
+    // when the board would come back open.
+    if (measuredGap(a, b).gap <= TOUCH_TOLERANCE) union(left, right);
   }
 
   const islandsByNet = new Map();

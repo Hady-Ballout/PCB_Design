@@ -156,6 +156,59 @@ describe('runDrc', () => {
     expect([violation.netA, violation.netB].sort()).toEqual(['A', 'B']);
     expect(result.ok).toBe(false);
   });
+
+  it('does not invent a clearance error a rect pad only has in its bounding circle', () => {
+    // The other side of the coin. Net B's trace runs down the pad's flank,
+    // where the true copper stops at x = 11.5 but the circumscribing circle
+    // keeps going to 12.1213:
+    //   - true edge-to-trace gap   = 12.21 - 11.5    - 0.4 = 0.31 mm -> LEGAL
+    //   - circumscribing-circle gap = 2.21 - 2.1213  - 0.4 = -0.31 mm -> would
+    //     be reported, and would be wrong
+    // Only the exact measurement may raise a violation, so this stays clean.
+    const rectPad = pad(10, 10, 'A', { shape: 'rect', size: { w: 3, h: 3 }, diameter: 3 });
+    const flankingTrace = trace('B', { x: 12.21, y: 5 }, { x: 12.21, y: 15 });
+
+    const result = runDrc(layoutOf({
+      components: [part('R1', [rectPad])],
+      traces: [flankingTrace],
+    }));
+
+    expect(result.violations).toEqual([]);
+    expect(result.ok).toBe(true);
+  });
+
+  it('still flags the same flanking trace once it crosses the true rect edge', () => {
+    // 0.29 mm clear instead of 0.31 — one hundredth of a millimetre inside the
+    // rule — so the exact measurement is doing real work, not just passing
+    // everything.
+    const rectPad = pad(10, 10, 'A', { shape: 'rect', size: { w: 3, h: 3 }, diameter: 3 });
+    const result = runDrc(layoutOf({
+      components: [part('R1', [rectPad])],
+      traces: [trace('B', { x: 12.19, y: 5 }, { x: 12.19, y: 15 })],
+    }));
+
+    const violation = result.violations.find((item) => item.type === 'clearance');
+    expect(violation).toBeDefined();
+    expect(violation.distance).toBeCloseTo(0.29, 6);
+  });
+
+  it('measures an oval pad as a stadium rather than its bounding box', () => {
+    // A 1.05 x 1.5 mm TO-92 pad is a 0.525 mm disc swept 0.45 mm vertically,
+    // so off to the side its copper stops well inside the max(w,h)/2 = 0.75 mm
+    // circle. Net B's trace corners in at (11.1, 10.85):
+    //   - true stadium-to-trace gap = 1.2652 - 0.525 - 0.4 = 0.34 mm -> LEGAL
+    //   - max(w,h)/2 circle gap     = 1.3902 - 0.75  - 0.4 = 0.24 mm -> would
+    //     be reported, and would be wrong
+    const ovalPad = pad(10, 10, 'A', { shape: 'oval', size: { w: 1.05, h: 1.5 }, diameter: 1.5 });
+    const corner = trace('B', { x: 11.1, y: 10.85 }, { x: 14, y: 10.85 });
+
+    const result = runDrc(layoutOf({
+      components: [part('R1', [ovalPad])],
+      traces: [corner],
+    }));
+
+    expect(result.violations.filter((item) => item.type === 'clearance')).toEqual([]);
+  });
 });
 
 describe('checkConnectivity', () => {
@@ -221,6 +274,39 @@ describe('checkConnectivity', () => {
     }));
 
     expect(result).toEqual({ ok: true, incompleteNets: [] });
+  });
+
+  it('splits a net whose trace stops beside a rect pad instead of on it', () => {
+    // The false PASS this whole exercise is about. A 1.7 x 1.7 mm rect pad's
+    // copper stops at x = 10.85; its circumscribing circle keeps going to
+    // 11.2021. Net A's trace starts at x = 11.15 — 0.3 mm off the copper, yet
+    // still INSIDE that circle — and runs away with a 0.1 mm half-width:
+    //   - true gap                  = 0.3 - 0.1 = 0.2 mm of air. OPEN board.
+    //   - circumscribing-circle gap = 1.15 - 1.2021 - 0.1 = -0.15 mm, i.e.
+    //     "overlapping", so the circle model welds them and calls the net done.
+    const rectPad = pad(10, 10, 'A', { shape: 'rect', size: { w: 1.7, h: 1.7 }, diameter: 1.7 });
+    const stub = { ...trace('A', { x: 11.15, y: 10 }, { x: 16, y: 10 }), width: 0.2 };
+    const layout = layoutOf({
+      components: [part('R1', [rectPad]), part('R2', [pad(16, 10, 'A')])],
+      traces: [stub],
+    });
+
+    // The endpoint really is inside the circle the old model used...
+    expect(stub.from.x - rectPad.x).toBeLessThan(Math.hypot(1.7, 1.7) / 2);
+    // ...and really is off the copper.
+    expect(stub.from.x - rectPad.x).toBeGreaterThan(1.7 / 2);
+
+    expect(checkConnectivity(layout).incompleteNets).toEqual([{ net: 'A', islands: 2 }]);
+  });
+
+  it('joins the same net once the trace reaches the rect pad copper', () => {
+    const rectPad = pad(10, 10, 'A', { shape: 'rect', size: { w: 1.7, h: 1.7 }, diameter: 1.7 });
+    const layout = layoutOf({
+      components: [part('R1', [rectPad]), part('R2', [pad(16, 10, 'A')])],
+      traces: [{ ...trace('A', { x: 10.85, y: 10 }, { x: 16, y: 10 }), width: 0.2 }],
+    });
+
+    expect(checkConnectivity(layout).ok).toBe(true);
   });
 
   it('ignores single-pad nets, which need no copper at all', () => {

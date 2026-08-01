@@ -27,19 +27,24 @@
 // direction. A pad whose terminal cell cannot clear foreign pad copper at full
 // trace width is reported as `no_escape` rather than routed into a short.
 //
-// Pad copper is modelled as the pad's true circumscribing circle (see
-// padCopperRadius: hypot(w,h)/2 for rect pads, max(w,h)/2 otherwise). That is
-// conservative — it never under-reports copper — and matches what pcbDrc.js
-// measures, so the router and the checker agree. The
-// one place the conservatism bites is very tight footprints such as
-// TO-92_Inline (1.27 mm pitch), whose middle pad has no room for a 0.8 mm
-// escape at all; those come back as `no_escape` instead of a silent short.
+// Pad copper is modelled two different ways, on purpose:
+//
+// * as KEEP-OUT, a pad is its circumscribing circle (padCopperRadius:
+//   hypot(w,h)/2 for rect pads, max(w,h)/2 otherwise). That never
+//   under-reports copper, so anything the router routes around is genuinely
+//   clear and pcbDrc.js — which measures the exact outline — can only ever
+//   agree. The one place the conservatism bites is very tight footprints such
+//   as TO-92_Inline (1.27 mm pitch), whose middle pad has no room for a 0.8 mm
+//   escape at all; those come back as `no_escape` instead of a silent short.
+// * as CONTAINMENT ("is this cell on the pad?"), a pad is its exact outline
+//   (padCopperDistance). The circle is unusable here: it reaches past the
+//   copper, so a terminal cell chosen inside it can sit off the pad entirely.
 //
 // Everything is deterministic: no RNG, no clock, and every heap comparison and
 // iteration order carries an explicit total-order tiebreaker.
 //
 // All dimensions are millimetres, y-down.
-import { RULES, padCopperRadius } from './pcbDesignRules.js';
+import { RULES, padCopperDistance, padCopperRadius } from './pcbDesignRules.js';
 
 /**
  * Net names a ground pour would claim. Exported because the copper pour needs
@@ -167,7 +172,11 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
         wired,
         x: pad.x,
         y: pad.y,
+        // Keep-out radius (over-approximates the copper) for obstacle
+        // stamping; `record` keeps the pad itself so the terminal cell can be
+        // tested against the pad's exact outline.
         radius: padCopperRadius(pad),
+        record: pad,
       });
     }
   }
@@ -178,6 +187,16 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
   // foreign pad copper (ties: closest to the pad centre, then top-most, then
   // left-most). Picking the roomiest cell is what lets a DIP pin escape
   // between its neighbours instead of dead-ending.
+  //
+  // "Inside its copper" has to be measured against the pad's EXACT outline
+  // (padCopperDistance), not the circumscribing circle padCopperRadius
+  // reports. The circle is the right model for keep-out — it never
+  // under-reports copper — but as a containment test it over-reaches: a 3x3 mm
+  // rect pad's circle stretches 0.62 mm past the pad edge at the diagonal, and
+  // because the sort below prefers the cell with the MOST room it actively
+  // seeks out the outermost candidate. A terminal cell off the copper is a
+  // trace that physically misses the pad while every downstream check, working
+  // from the same circle, still calls the net connected.
   const claimed = new Map();
   for (const pad of pads) {
     if (!pad.wired) continue;
@@ -188,8 +207,8 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
     for (let row = centreRow - span; row <= centreRow + span; row += 1) {
       for (let col = centreCol - span; col <= centreCol + span; col += 1) {
         if (col < 0 || row < 0 || col >= cols || row >= rows) continue;
+        if (padCopperDistance(pad.record, cellX(col), cellY(row)) > EPSILON) continue;
         const distance = Math.hypot(cellX(col) - pad.x, cellY(row) - pad.y);
-        if (distance > pad.radius + EPSILON) continue;
         let room = Infinity;
         for (const other of pads) {
           if (other.netKey === pad.netKey) continue;
