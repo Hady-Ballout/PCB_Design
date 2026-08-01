@@ -150,7 +150,10 @@ const footprintForKind = (part) => {
   const mapped = KIND_TO_FOOTPRINT[part?.kind];
   if (!mapped) return null;
   if (part.kind === 'capacitor' && isElectrolytic(part)) {
-    return { libId: 'Capacitor_THT:CP_Radial_D5.0mm_P2.50mm', padOrder: ['1', '2'] };
+    // CP_Radial pad "1" is the NEGATIVE terminal (rect pad at origin,
+    // minus-sign on fab layer per the vendored KiCad 6.0.11 source); the
+    // project convention is part.nodes[0] = positive, so remap like diode/LED.
+    return { libId: 'Capacitor_THT:CP_Radial_D5.0mm_P2.50mm', padOrder: ['2', '1'] };
   }
   return mapped;
 };
@@ -219,7 +222,15 @@ export const footprintRecordFor = (part) => {
   if (part?.footprint && KICAD_FOOTPRINTS[part.footprint]) {
     const record = KICAD_FOOTPRINTS[part.footprint];
     if (record.pads.length >= nodeCount) {
-      return { libId: part.footprint, record, padOrder: identity(nodeCount) };
+      // If the exactly-matched libId is the same one the kind's curated
+      // default would pick, reuse its polarity-aware padOrder instead of
+      // identity (an exact footprint match shouldn't silently drop the
+      // diode/LED/electrolytic-cap pad remap).
+      const kindDefault = KIND_TO_FOOTPRINT[part?.kind];
+      const padOrder = kindDefault && kindDefault.libId === part.footprint && kindDefault.padOrder.length === nodeCount
+        ? kindDefault.padOrder
+        : identity(nodeCount);
+      return { libId: part.footprint, record, padOrder };
     }
   }
 

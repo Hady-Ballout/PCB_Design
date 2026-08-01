@@ -44,6 +44,24 @@ describe('footprintRecordFor', () => {
     expect(padOrder).toEqual(['2', '1']);
   });
 
+  it('maps electrolytic capacitor positive node to pad 2 and negative to pad 1', () => {
+    const { padOrder } = footprintRecordFor({ ref: 'C1', kind: 'capacitor', value: '100uF', nodes: ['POS', 'NEG'] });
+
+    expect(padOrder).toEqual(['2', '1']);
+  });
+
+  it('applies the kind-default polarity padOrder when part.footprint exactly matches the kind default', () => {
+    const part = {
+      ref: 'D1',
+      kind: 'diode',
+      footprint: 'Diode_THT:D_DO-41_SOD81_P10.16mm_Horizontal',
+      nodes: ['ANODE', 'CATHODE'],
+    };
+    const { padOrder } = footprintRecordFor(part);
+
+    expect(padOrder).toEqual(['2', '1']);
+  });
+
   it('round-trips an exact part.footprint string to its vendored record', () => {
     const part = { ref: 'U1', kind: 'opamp', footprint: 'Package_DIP:DIP-8_W7.62mm', nodes: ['1', '2', '3', '4', '5', '6', '7', '8'] };
     const { libId, record } = footprintRecordFor(part);
