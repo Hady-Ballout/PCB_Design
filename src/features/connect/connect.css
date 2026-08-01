@@ -181,3 +181,17 @@
     width: 100%;
   }
 }
+
+/* Shown when the endpoint is not a public https URL — Claude rejects those, so
+   the page says so rather than letting the user find out in another product. */
+.connect-card.connect-card-primary .connect-warning {
+  background: #fffdf7;
+  border: 2px solid var(--color-on-accent);
+  border-radius: 8px;
+  color: var(--color-on-accent);
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.55;
+  margin: 14px 0 0;
+  padding: 10px 12px;
+}

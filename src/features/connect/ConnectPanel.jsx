@@ -1,7 +1,9 @@
 import { useCallback, useMemo, useState } from 'react';
+import { API_BASE } from '../../core/config.js';
 import {
   claudeCodeCommand,
   desktopSteps,
+  endpointWarning,
   examplePrompts,
   mcpEndpointUrl,
 } from './connectInstructions.js';
@@ -41,11 +43,13 @@ export default function ConnectPanel({ onBack }) {
   const endpoint = useMemo(
     () => mcpEndpointUrl({
       origin: typeof window === 'undefined' ? '' : window.location.origin,
+      apiBase: API_BASE,
       configuredBase: import.meta.env?.VITE_MCP_BASE_URL,
     }),
     [],
   );
   const command = useMemo(() => claudeCodeCommand(endpoint), [endpoint]);
+  const warning = useMemo(() => endpointWarning(endpoint), [endpoint]);
 
   return (
     <main className="app-shell connect-page">
@@ -68,6 +72,7 @@ export default function ConnectPanel({ onBack }) {
           <code className="connect-url">{endpoint}</code>
           <CopyButton value={endpoint} label="Copy URL" />
         </div>
+        {warning && <p className="connect-warning">{warning}</p>}
         <p className="connect-note">
           Claude will ask you to sign in and approve access the first time it connects.
           That authorization is separate from your PCB Pilot login — you can revoke it

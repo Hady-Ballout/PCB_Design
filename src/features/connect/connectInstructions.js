@@ -6,14 +6,37 @@
 /**
  * The MCP endpoint a client connects to.
  *
- * In production the frontend and API share an origin, so the page's own origin is
- * right. In local development Vite serves on 5174 and proxies /api to 8787, so the
- * proxied path still resolves — but a Claude client connects directly, not through
- * the dev server, which is why an explicit override exists.
+ * Resolution order matters, and the page origin is deliberately last:
+ *
+ *   1. VITE_MCP_BASE_URL — explicit override
+ *   2. VITE_API_URL (API_BASE) — where the app already sends its own API calls
+ *   3. the page origin — only correct when frontend and API share a host
+ *
+ * On impedo.ai they do NOT share a host: the frontend is Firebase Hosting, which
+ * rewrites every path to /index.html, and the API is a separate Render service.
+ * Deriving this from window.location.origin there would hand the user
+ * `https://impedo.ai/api/mcp`, which returns the SPA's HTML — a URL that looks
+ * plausible and fails confusingly inside Claude.
  */
-export const mcpEndpointUrl = ({ origin, configuredBase } = {}) => {
-  const base = (configuredBase || origin || '').replace(/\/+$/, '');
+export const mcpEndpointUrl = ({ origin, apiBase, configuredBase } = {}) => {
+  const base = (configuredBase || apiBase || origin || '').replace(/\/+$/, '');
   return `${base}/api/mcp`;
+};
+
+/**
+ * Remote MCP servers must be HTTPS — Claude rejects an http:// connector outright.
+ * A localhost URL is therefore never pasteable, and saying so on the page beats
+ * letting the user discover it in another product.
+ */
+export const endpointWarning = (url) => {
+  if (/^https:\/\//i.test(url)) return null;
+  if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])/i.test(url) || url.startsWith('/')) {
+    return 'This is a local development URL. Claude requires a public https:// address '
+      + 'for remote connectors, so this one cannot be pasted in. Use the local stdio '
+      + 'server instead (see mcp/README.md), or deploy and connect to the hosted URL.';
+  }
+  return 'Claude requires an https:// address for remote connectors. This URL will be '
+    + 'rejected until the server is served over HTTPS.';
 };
 
 /** The one-liner for Claude Code. */

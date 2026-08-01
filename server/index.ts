@@ -35,18 +35,26 @@ const allowedOrigins = parseAllowedOrigins(process.env.CORS_ORIGIN);
 const mcpEnabled = process.env.MCP_HTTP_ENABLED === '1';
 const mcpArtifacts = new ArtifactStore();
 
-// OAuth config comes from the environment. When it is absent the endpoint runs
-// unauthenticated, which is only tolerable locally — so refuse to start that way
-// with NODE_ENV=production rather than quietly exposing the tools.
+// OAuth config comes from the environment. Without it the endpoint would be
+// unauthenticated, which is only tolerable locally.
 const mcpAuth = mcpAuthConfigFromEnv();
-if (mcpEnabled && !mcpAuth) {
-  if (process.env.NODE_ENV === 'production') {
-    console.error(
-      'MCP_HTTP_ENABLED=1 without MCP_RESOURCE_URI/MCP_OAUTH_ISSUER would expose an '
-      + 'unauthenticated MCP endpoint. Refusing to start.',
-    );
-    process.exit(1);
-  }
+
+// In production, misconfiguration disables the MCP endpoint rather than killing the
+// process. Exiting would fail closed too — but it would also take generation,
+// simulation, and auth down with it, so a typo in an optional feature's env var
+// becomes a full outage. Disabling just this feature keeps the same security
+// property (the tools are never exposed unauthenticated) at feature-sized cost.
+const mcpUnauthenticatedInProduction = mcpEnabled && !mcpAuth && process.env.NODE_ENV === 'production';
+const mcpServingEnabled = mcpEnabled && !mcpUnauthenticatedInProduction;
+
+if (mcpUnauthenticatedInProduction) {
+  console.error(
+    '[mcp] MCP_HTTP_ENABLED=1 but MCP_RESOURCE_URI/MCP_OAUTH_ISSUER are unset. '
+    + 'Serving the MCP endpoint would expose the tools without authorization, so it '
+    + 'is DISABLED. The rest of the API is unaffected. Set the OAuth variables to '
+    + 'enable it (see docs/OPERATIONS.md).',
+  );
+} else if (mcpEnabled && !mcpAuth) {
   console.warn('[mcp] Running WITHOUT authorization — local development only.');
 }
 
@@ -273,12 +281,12 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
   // lands, `MCP_HTTP_ENABLED` keeps it off by default.
   // RFC 9728 discovery. Unauthenticated by design — it is how a client finds out
   // where to authenticate, so gating it would deadlock the flow.
-  if (mcpEnabled && mcpAuth && request.url === '/.well-known/oauth-protected-resource') {
+  if (mcpServingEnabled && mcpAuth && request.url === '/.well-known/oauth-protected-resource') {
     sendJson(response, 200, protectedResourceMetadata(mcpAuth));
     return;
   }
 
-  if (mcpEnabled && request.url?.startsWith('/api/mcp')) {
+  if (mcpServingEnabled && request.url?.startsWith('/api/mcp')) {
     let subject: string;
 
     if (mcpAuth) {
