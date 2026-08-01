@@ -589,6 +589,14 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
       else if (item.island === toIsland) goals.push(...item.cells);
     }
 
+    // Two pads close enough to share a terminal cell already share copper, so
+    // there is nothing to route between them.
+    const sourceCells = new Set(sources);
+    if (goals.some((node) => sourceCells.has(node))) {
+      relabel(netKey, toIsland, fromIsland);
+      continue;
+    }
+
     const found = search(sources, goals);
     if (found.ok) {
       commitPath(found.node, job, fromIsland);
