@@ -10,6 +10,8 @@
 | `npm run build` | `vite build` | production frontend build to `dist/` |
 | `npm run preview` | `vite preview` | preview the production build |
 | `npm test` | `vitest run` | unit tests |
+| `npm run mcp` | `tsx mcp/server.ts` | local MCP server over stdio (for Claude Desktop / Claude Code) |
+| `npm run mcp:live-check` | `node scripts/mcp-live-check.mjs` | boots the real API server and drives the hosted MCP endpoint end-to-end |
 
 `vite.config.js` proxies `/api` to `http://127.0.0.1:8787` in dev mode only; in production
 the frontend expects `VITE_API_URL` (see below) or same-origin `/api`.
@@ -35,6 +37,14 @@ the frontend expects `VITE_API_URL` (see below) or same-origin `/api`.
 | `STRIPE_WEBHOOK_SECRET` | signing secret (`whsec_...`) of the webhook endpoint / `stripe listen` session |
 | `STRIPE_PRICE_PRO_MONTHLY`, `STRIPE_PRICE_PRO_YEARLY`, `STRIPE_PRICE_TEAM_MONTHLY`, `STRIPE_PRICE_TEAM_YEARLY` | the four recurring price IDs (`price_...`) from the Stripe dashboard |
 | `APP_URL` | canonical frontend URL used in Checkout success/cancel and Portal return URLs (e.g. `https://impedo.ai`) |
+| `MCP_HTTP_ENABLED` | `1` mounts the hosted MCP endpoint at `/api/mcp`; **unset = off**. With `NODE_ENV=production` the server refuses to start if this is on without the OAuth vars below, rather than exposing the tools unauthenticated |
+| `MCP_RESOURCE_URI` | canonical URI of this MCP server (e.g. `https://impedo.ai/api/mcp`). Tokens must carry it as `aud` — this is the audience binding that stops a token issued for another service being replayed here |
+| `MCP_OAUTH_ISSUER` | the authorization server's issuer URL (WorkOS AuthKit) |
+| `MCP_OAUTH_JWKS_URI` | JWKS endpoint; defaults to `<issuer>/oauth2/jwks` |
+| `MCP_REQUIRED_SCOPE` | scope a token must carry (default `circuits:use`) |
+| `MCP_MAX_CONCURRENT_SIMULATIONS` | simultaneous ngspice runs per user (default `1`) |
+| `NGSPICE_TIMEOUT_MS` | wall-clock cap on a single ngspice run before it is killed (default `30000`) |
+| `VITE_MCP_BASE_URL` | frontend override for the URL shown on the Connect page, when the API is not same-origin |
 
 Real `.env*` files are gitignored; `.env.local` and `.env.production` exist locally but
 aren't tracked content-wise beyond `.env.production/env.production`.

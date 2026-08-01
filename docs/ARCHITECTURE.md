@@ -19,6 +19,7 @@ src/
     editors/   editorConfig.js (the SPICE/JSON/Canvas/block-schematic/
                realistic-schematic editor *windows* themselves live in app/App.jsx)
     waveform/  WaveformChart.jsx
+    connect/   ConnectPanel.jsx — the MCP connection URL + install instructions
 
 server/
   index.ts     HTTP hub (routing) + env.ts + types.ts — shared foundation
@@ -26,12 +27,20 @@ server/
   ai/          ollamaProvider.ts, chatMemory.ts, circuitKnowledge.ts
   circuit/     circuitResponse.ts, streamingCircuit.ts (imports src/core)
   simulation/  simulator.ts
+  mcp/         httpServer.ts (streamable HTTP transport), resourceServer.ts
+               (OAuth 2.1 resource server: RFC 9728 metadata, token validation)
 
 mcp/
-  server.ts    MCP stdio server — exposes the deterministic engine as tools
-  schemas.ts   zod circuit contract, artifacts.ts  artifact files
-  tools/       componentKinds, validate, export, simulate, render, layout, diagram
+  registerTools.ts  the six-tool surface, shared by BOTH transports
+  server.ts         stdio entry point (local)
+  schemas.ts        zod circuit contract + component-count cap
+  artifactSink.ts   fileSink (writes to disk) / ArtifactStore (short-lived URLs)
+  limits.ts         per-subject simulation concurrency
+  tools/            componentKinds, validate, export, simulate, render, layout, diagram
 ```
+
+The hosted transport lives in `server/mcp/` and the local one in `mcp/server.ts`;
+both call `mcp/registerTools.ts`, so the tool surface cannot drift between them.
 
 ## The feature-chunk rule
 
@@ -79,17 +88,31 @@ src/core/circuitSync.ts    the server imports the frontend's circuit engine
 ```
 
 ```text
-mcp/server.ts              MCP stdio server, a third consumer of the same engine
-        |
-mcp/tools/*                one module per tool, each a plain async function
-        |
-src/core/*  +              no AI provider and no HTTP hop: the MCP tools call
-server/simulation           the engine directly, so an MCP result and an in-app
-                           result for the same circuit are the same computation
+mcp/server.ts   server/mcp/    two transports: stdio (local) and streamable
+                httpServer.ts   HTTP (hosted, mounted at /api/mcp)
+        \             /
+      mcp/registerTools.ts     one tool surface, registered once
+             |
+mcp/tools/*                    one module per tool, each a plain async function
+             |
+src/core/*  +                  no AI provider and no HTTP hop: the MCP tools call
+server/simulation               the engine directly, so an MCP result and an in-app
+                                result for the same circuit are the same computation
 ```
 
 The MCP server is a peer of the frontend and the backend, not a layer above them: it
 consumes `src/core` on the same terms and adds no circuit logic of its own.
+
+Two routing constraints in `server/index.ts` are load-bearing:
+
+- `/api/mcp` is registered **above** the JWT gate. MCP clients authenticate as OAuth
+  clients against an external authorization server and have no app session token, so
+  mounting it below the gate 401s every call.
+- `/.well-known/oauth-protected-resource` is unauthenticated by design — it is how a
+  client discovers *where* to authenticate.
+
+`scripts/mcp-live-check.mjs` boots the real server and asserts both, because neither
+is visible to a test that imports the handlers directly.
 
 ## Size at a glance
 

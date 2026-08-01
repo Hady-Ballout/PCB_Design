@@ -52,6 +52,7 @@ import {
   wireId,
 } from '../features/schematic/geometry.js';
 import { AuthProvider, useAuth, HomePage, LoginPage, SignupPage, VerifyPage } from '../features/auth/auth.jsx';
+import ConnectPanel from '../features/connect/ConnectPanel.jsx';
 import { applyTheme, loadTheme, saveTheme } from './theme.js';
 import { ThemeToggle } from './ThemeToggle.jsx';
 import '../features/auth/auth.css';
@@ -1780,6 +1781,10 @@ function App() {
   if (visiblePage === 'signup') return withFloatingThemeToggle(<SignupPage />);
   if (visiblePage === 'verify') return withFloatingThemeToggle(<VerifyPage />);
 
+  if (visiblePage === 'connect') {
+    return withFloatingThemeToggle(<ConnectPanel onBack={showWorkspace} />);
+  }
+
   if (visiblePage === 'waveform') {
     return withFloatingThemeToggle(
       <main className="app-shell waveform-page-shell">
@@ -1826,6 +1831,12 @@ function App() {
     <main className="app-shell">
       <div className="user-bar app-user-bar">
         <ThemeToggle theme={theme} onToggle={toggleTheme} />
+        <button
+          type="button"
+          onClick={() => { window.location.hash = 'connect'; setPage('connect'); }}
+        >
+          Connect to Claude
+        </button>
         <span>{user.email}</span>
         <button type="button" onClick={logout}>Log out</button>
       </div>

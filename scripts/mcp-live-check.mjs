@@ -102,6 +102,75 @@ try {
 
   const missing = await fetch(`${base}/api/mcp/artifacts/never-issued-id`);
   check('unknown artifact id 404s', missing.status === 404, String(missing.status));
+
+  await client.close();
+  client = null;
+  api.kill();
+  api = null;
+
+  // ---- Second pass: the same server with OAuth configured. ----
+  // Unit tests cover token verification thoroughly but cannot see the router;
+  // this proves the resource-server wiring is actually reachable in index.ts.
+  const authPort = await freePort();
+  const authBase = `http://127.0.0.1:${authPort}`;
+  const resourceUri = `${authBase}/api/mcp`;
+
+  api = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
+    env: {
+      ...process.env,
+      MCP_HTTP_ENABLED: '1',
+      MCP_RESOURCE_URI: resourceUri,
+      MCP_OAUTH_ISSUER: 'https://example-idp.invalid',
+      MCP_OAUTH_JWKS_URI: 'https://example-idp.invalid/oauth2/jwks',
+      JWT_SECRET: process.env.JWT_SECRET || 'live-check-secret',
+      API_PORT: String(authPort),
+      HOST: '127.0.0.1',
+    },
+    cwd: process.cwd(),
+  });
+  api.stderr.on('data', (chunk) => process.stderr.write(`[api] ${chunk}`));
+
+  let authUp = false;
+  for (let attempt = 0; attempt < 60 && !authUp; attempt += 1) {
+    try {
+      authUp = (await fetch(`${authBase}/api/health`)).ok;
+    } catch { /* not listening yet */ }
+    if (!authUp) await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  if (!authUp) throw new Error('API server did not come up in authorized mode');
+
+  const metadata = await fetch(`${authBase}/.well-known/oauth-protected-resource`);
+  const metadataBody = metadata.ok ? await metadata.json() : {};
+  check('RFC 9728 metadata is served unauthenticated',
+    metadata.status === 200 && metadataBody.resource === resourceUri,
+    `${metadata.status} resource=${metadataBody.resource}`);
+  check('metadata names the authorization server',
+    metadataBody.authorization_servers?.[0] === 'https://example-idp.invalid',
+    JSON.stringify(metadataBody.authorization_servers));
+
+  const unauthorized = await fetch(`${authBase}/api/mcp`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+  });
+  const challengeHeader = unauthorized.headers.get('www-authenticate') ?? '';
+  check('unauthenticated MCP call is challenged with 401', unauthorized.status === 401,
+    String(unauthorized.status));
+  check('challenge points at the metadata document',
+    challengeHeader.includes('resource_metadata=') && challengeHeader.includes('scope='),
+    challengeHeader);
+
+  const badToken = await fetch(`${authBase}/api/mcp`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+      Authorization: 'Bearer not-a-real-token',
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+  });
+  check('a garbage bearer token is rejected, not passed through',
+    badToken.status === 401, String(badToken.status));
 } catch (error) {
   failed = true;
   console.error('FAIL  live check threw —', error.message);

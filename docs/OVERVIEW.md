@@ -51,11 +51,22 @@ for simulation to work.
 
 ## Use it from Claude (MCP)
 
-`mcp/` is an MCP stdio server that exposes the deterministic engine — validation, the
-topology rule engine, SPICE/KiCad export, Ngspice simulation, schematic SVG and PCB
-layout — as tools for Claude Desktop or Claude Code. There is no AI in that path: Claude
-authors the circuit JSON itself and the tools check/run/export it, calling `src/core`
-directly with no HTTP hop and no provider. See `mcp/README.md` for the install snippet.
+The deterministic engine — validation, the topology rule engine, SPICE/KiCad export,
+Ngspice simulation, schematic SVG and PCB layout — is exposed as MCP tools. There is no
+AI in that path: Claude authors the circuit JSON itself and the tools check/run/export
+it, calling `src/core` directly with no HTTP hop and no provider.
+
+Two transports, one tool surface (`mcp/registerTools.ts`):
+
+| | Runs as | For | Auth |
+|---|---|---|---|
+| **Local** (`mcp/server.ts`) | stdio subprocess | a developer on this repo | none needed |
+| **Hosted** (`server/mcp/`) | `/api/mcp` on the API server | any user, via a copy-paste URL | OAuth 2.1 |
+
+The local server is ready to use — see `mcp/README.md`. The hosted one is behind
+`MCP_HTTP_ENABLED=1` and needs an authorization server configured before it can be
+exposed; see `docs/superpowers/specs/2026-08-01-hosted-mcp-connector-design.md`. The
+in-app "Connect to Claude" page (`#connect`) hands users the URL.
 
 ## Where to look next
 
