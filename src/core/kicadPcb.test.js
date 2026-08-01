@@ -19,6 +19,18 @@ const rotationCircuit = {
   ],
 };
 
+// A circuit with no ground net at all — nothing here matches the router's
+// GROUND_NET_RE. Snapshotted so the bottom-copper ground pour can be proved
+// ADDITIVE: these bytes were recorded before the pour existed and must not move
+// when it lands.
+const groundFreeCircuit = {
+  title: 'Ground-free divider',
+  components: [
+    { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['A', 'B'] },
+    { ref: 'R2', kind: 'resistor', value: '2k2', nodes: ['B', 'C'] },
+  ],
+};
+
 const balancedParens = (text) => {
   let depth = 0;
   let inString = false;
@@ -194,6 +206,12 @@ describe('toKiCadPcb', () => {
 
   it('matches the committed byte-for-byte snapshot (cross-commit stability guard)', () => {
     expect(toKiCadPcb(layout, circuit)).toMatchSnapshot();
+  });
+
+  it('matches the ground-free byte-for-byte snapshot recorded before the ground pour existed', () => {
+    const groundFree = buildPcbLayout(groundFreeCircuit);
+    expect(groundFree.nets.some((net) => /^(gnd|ground|0)$/i.test(net))).toBe(false);
+    expect(toKiCadPcb(groundFree, groundFreeCircuit)).toMatchSnapshot();
   });
 
   it('writes a board even when routing/DRC are not clean', () => {

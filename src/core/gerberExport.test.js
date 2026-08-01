@@ -373,6 +373,27 @@ describe('toGerberArchive README', () => {
   });
 });
 
+describe('toGerberArchive on a circuit with no ground net', () => {
+  // Nothing here matches the router's GROUND_NET_RE, so the bottom-copper
+  // ground pour must never appear. Snapshotted before the pour existed, so its
+  // additiveness is provable rather than merely asserted.
+  const groundFreeCircuit = {
+    title: 'Ground-free divider',
+    components: [
+      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['A', 'B'] },
+      { ref: 'R2', kind: 'resistor', value: '2k2', nodes: ['B', 'C'] },
+    ],
+  };
+
+  it('matches the bottom-copper bytes recorded before the ground pour existed', () => {
+    const layout = buildPcbLayout(groundFreeCircuit);
+    expect(layout.nets.some((net) => /^(gnd|ground|0)$/i.test(net))).toBe(false);
+
+    const archive = toGerberArchive(layout, groundFreeCircuit);
+    expect(fileNamed(archive, 'ground-free-divider.GBL')).toMatchSnapshot();
+  });
+});
+
 describe('toGerberArchive on a real routed layout', () => {
   const rcLowPass = {
     title: 'RC low-pass',

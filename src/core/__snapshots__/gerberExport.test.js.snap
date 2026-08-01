@@ -1,0 +1,24 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`toGerberArchive on a circuit with no ground net > matches the bottom-copper bytes recorded before the ground pour existed 1`] = `
+"G04 Bottom copper*
+%TF.GenerationSoftware,PromptToPCB,pcb-pilot,dev*%
+%TF.FileFunction,Copper,L2,Bot*%
+%TF.FilePolarity,Positive*%
+%FSLAX46Y46*%
+%MOMM*%
+%LPD*%
+G01*
+%ADD10C,1.600000*%
+%ADD11C,0.800000*%
+D10*
+X5050000Y6420000D03*
+X15210000Y6420000D03*
+X15210000Y11500000D03*
+X5050000Y11500000D03*
+D11*
+X15875000Y6840000D02*
+X15875000Y11920000D01*
+M02*
+"
+`;
