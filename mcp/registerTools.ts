@@ -85,11 +85,12 @@ export const registerPcbPilotTools = (
   server.registerTool('export_netlist', {
     title: 'Export netlist',
     description:
-      'Writes the circuit as a SPICE deck (.cir), a KiCad netlist (.net), or a KiCad schematic '
-      + '(.kicad_sch). Returns the text inline plus a reference to the written artifact.',
+      'Writes the circuit as a SPICE deck (.cir), a KiCad netlist (.net), a KiCad schematic '
+      + '(.kicad_sch), or a KiCad PCB board (.kicad_pcb). Returns the text inline plus a reference '
+      + 'to the written artifact.',
     inputSchema: {
       circuit: circuitSchema,
-      format: z.enum(['spice', 'kicad_netlist', 'kicad_schematic']),
+      format: z.enum(['spice', 'kicad_netlist', 'kicad_schematic', 'kicad_pcb']),
     },
   }, guarded((args: Parameters<typeof exportNetlist>[0]) => exportNetlist(args, sink)));
 

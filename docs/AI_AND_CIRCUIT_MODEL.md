@@ -652,7 +652,10 @@ codebase's suffix conventions: bare `m` is MEG for resistances but milli inside 
 
 - The SPICE parser handles only this app's generated syntax, not arbitrary SPICE dialects.
 - MOSFET and general subcircuit parsing from hand-edited SPICE/KiCad is not implemented.
-- KiCad export is an XML netlist, not a full `.kicad_sch`/PCB project.
+- KiCad export covers an XML netlist, a full `.kicad_sch` schematic (`core/kicadSchematic.js`,
+  real library symbols), and a full `.kicad_pcb` board (`core/kicadPcb.js`, placed/routed
+  footprints on the vendored KiCad THT library) — not a `.kicad_pro` project file tying them
+  together.
 - Ngspice validates that the deck *runs*, not that the circuit is electrically correct;
   functional correctness is checked by the topology rule engine above, whose rules are
   heuristics — a clean report is strong evidence, not proof, of a working circuit.

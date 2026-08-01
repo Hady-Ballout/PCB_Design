@@ -6,12 +6,14 @@
 
 import { addMissingSpiceModels, toKiCadNetlist, toSpice } from '../../src/core/pcbGenerator.js';
 import { toKiCadSchematic } from '../../src/core/kicadSchematic.js';
+import { buildPcbLayout } from '../../src/core/pcbLayout.js';
+import { toKiCadPcb } from '../../src/core/kicadPcb.js';
 import { slugify } from '../artifacts.js';
 import type { ArtifactSink } from '../artifactSink.js';
 import type { ParsedCircuit } from '../schemas.js';
 import { diagramFor } from './diagram.js';
 
-export type NetlistFormat = 'spice' | 'kicad_netlist' | 'kicad_schematic';
+export type NetlistFormat = 'spice' | 'kicad_netlist' | 'kicad_schematic' | 'kicad_pcb';
 
 export interface ExportArgs {
   circuit: ParsedCircuit;
@@ -22,6 +24,7 @@ const EXTENSIONS: Record<NetlistFormat, string> = {
   spice: '.cir',
   kicad_netlist: '.net',
   kicad_schematic: '.kicad_sch',
+  kicad_pcb: '.kicad_pcb',
 };
 
 export const exportNetlist = ({ circuit, format }: ExportArgs, sink: ArtifactSink) => {
@@ -37,8 +40,14 @@ export const exportNetlist = ({ circuit, format }: ExportArgs, sink: ArtifactSin
     content = addMissingSpiceModels(toSpice(circuit), circuit);
   } else if (format === 'kicad_netlist') {
     content = toKiCadNetlist(circuit);
-  } else {
+  } else if (format === 'kicad_schematic') {
     content = toKiCadSchematic(circuit, diagramFor(circuit));
+  } else {
+    const layout = buildPcbLayout(circuit);
+    if (!layout) {
+      throw new Error('Cannot lay out a circuit with no components.');
+    }
+    content = toKiCadPcb(layout, circuit);
   }
 
   const artifact = sink.put(`${slugify(circuit.title)}${extension}`, content);

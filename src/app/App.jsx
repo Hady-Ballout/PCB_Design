@@ -22,6 +22,8 @@ import {
 } from '../core/circuitSync.js';
 import { toDiagramSvg } from '../core/pcbGenerator.js';
 import { toKiCadSchematic } from '../core/kicadSchematic.js';
+import { buildPcbLayout } from '../core/pcbLayout.js';
+import { toKiCadPcb } from '../core/kicadPcb.js';
 import { changedLineIndexes } from '../core/lineDiff.js';
 import { layoutCircuitDiagram } from '../core/schematicLayout.js';
 import { API_BASE } from '../core/config.js';
@@ -66,6 +68,7 @@ function App() {
   const [chatStore, setChatStore] = useState(loadChatStore);
   const [diagramTool, setDiagramTool] = useState('select');
   const [canvasMode, setCanvasMode] = useState('kicad');
+  const [pcbViewMode, setPcbViewMode] = useState('3d');
   const [diagramSelection, setDiagramSelection] = useState(null);
   const [pendingTerminal, setPendingTerminal] = useState(null);
   const [openEditorViews, setOpenEditorViews] = useState(['realisticSchematic']);
@@ -500,6 +503,26 @@ function App() {
       return '';
     }
   }, [result?.circuit, result?.diagram, editedDiagram, isGenerating]);
+
+  // Shared by the 3D viewer and the Board (.kicad_pcb) view so both windows
+  // always agree on the same placed/routed layout.
+  const pcbLayout = useMemo(() => {
+    if (!result?.circuit) return null;
+    try {
+      return buildPcbLayout(result.circuit);
+    } catch {
+      return null;
+    }
+  }, [result?.circuit]);
+
+  const kicadPcbSource = useMemo(() => {
+    if (!pcbLayout || !result?.circuit) return '';
+    try {
+      return toKiCadPcb(pcbLayout, result.circuit);
+    } catch {
+      return '';
+    }
+  }, [pcbLayout, result?.circuit]);
 
   const openEditorView = (view) => {
     setOpenEditorViews((current) => {
@@ -1584,6 +1607,11 @@ function App() {
     ...(generation?.validation?.warnings || []).map((message) => ({ id: 'erc', severity: 'warning', message, fix: '' })),
   ];
 
+  const pcbLayoutWarning = pcbLayout && (!pcbLayout.routing.complete || !pcbLayout.drc.ok)
+    ? `Layout incomplete: ${pcbLayout.routing.failedNets.length} unrouted nets / `
+      + `${pcbLayout.drc.violations.length} DRC violations — Gerber export will refuse.`
+    : '';
+
   const renderPcb3dView = () => (
     <div className="editor-window-body canvas-window-body">
       {!result ? (
@@ -1595,9 +1623,56 @@ function App() {
           </div>
         </>
       ) : (
-        <React.Suspense fallback={<div className="editor-window-empty"><p>Loading 3D viewer...</p></div>}>
-          <Pcb3DViewer circuit={result.circuit} windowControls={renderWindowControls('pcb3d')} />
-        </React.Suspense>
+        <>
+          <div className="canvas-window-toolbar">
+            <div className="diagram-editbar canvas-mode-toggle" aria-label="PCB view mode">
+              <button
+                className={pcbViewMode === '3d' ? 'active-tool' : ''}
+                onClick={() => setPcbViewMode('3d')}
+                type="button"
+              >
+                3D
+              </button>
+              <button
+                className={pcbViewMode === 'board' ? 'active-tool' : ''}
+                onClick={() => setPcbViewMode('board')}
+                type="button"
+              >
+                Board
+              </button>
+            </div>
+            {pcbViewMode === 'board' && (
+              <div className="button-row">
+                <button
+                  onClick={() => downloadText(`${(result.circuit?.title || 'board').replace(/[^a-z0-9]+/gi, '_').toLowerCase()}.kicad_pcb`, kicadPcbSource)}
+                  disabled={!kicadPcbSource}
+                >
+                  Download .kicad_pcb
+                </button>
+                {renderWindowControls('pcb3d')}
+              </div>
+            )}
+          </div>
+          {pcbLayoutWarning && <p className="inline-error simulation-message">{pcbLayoutWarning}</p>}
+          {pcbViewMode === 'board' ? (
+            kicadPcbSource ? (
+              <KiCanvasEmbed source={kicadPcbSource} />
+            ) : (
+              <div className="editor-window-empty">
+                <strong>Board not ready</strong>
+                <p>The KiCad board appears here once a layout is available.</p>
+              </div>
+            )
+          ) : (
+            <React.Suspense fallback={<div className="editor-window-empty"><p>Loading 3D viewer...</p></div>}>
+              <Pcb3DViewer
+                circuit={result.circuit}
+                layout={pcbLayout}
+                windowControls={pcbViewMode === '3d' ? renderWindowControls('pcb3d') : undefined}
+              />
+            </React.Suspense>
+          )}
+        </>
       )}
     </div>
   );

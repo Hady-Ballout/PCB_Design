@@ -1,26 +1,20 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
-import { buildPcbLayout } from '../../core/pcbLayout.js';
 import { buildLabelSprites, buildPcbScene, disposeObject } from './pcbScene.js';
 import './Pcb3DViewer.css';
 
 // Interactive 3D view of the procedurally routed PCB, with GLB export.
-export function Pcb3DViewer({ circuit, windowControls }) {
+// `layout` is a pcbLayout.js buildPcbLayout() result (or null), lifted to
+// the caller so the 3D view and the Board (.kicad_pcb) view always agree on
+// the same placed/routed layout instead of each computing their own.
+export function Pcb3DViewer({ circuit, layout, windowControls }) {
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
   const pcbGroupRef = useRef(null);
   const [showLabels, setShowLabels] = useState(true);
   const [exportError, setExportError] = useState('');
-
-  const layout = useMemo(() => {
-    try {
-      return buildPcbLayout(circuit);
-    } catch {
-      return null;
-    }
-  }, [circuit]);
 
   // One renderer per mounted viewer; rebuilt board group per layout change.
   useEffect(() => {

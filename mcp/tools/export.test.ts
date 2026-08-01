@@ -55,6 +55,20 @@ describe('exportNetlist', () => {
     expect(result.content).toContain('kicad_sch');
   });
 
+  it('emits a KiCad PCB board file', () => {
+    const result = exportNetlist({ circuit: parse(rcLowPass), format: 'kicad_pcb' }, fileSink(artifactDir));
+
+    expect(result.content.startsWith('(kicad_pcb ')).toBe(true);
+    expect(result.artifact.location.endsWith('.kicad_pcb')).toBe(true);
+  });
+
+  it('refuses to lay out a kicad_pcb board with no components', () => {
+    const empty = { ...parse(rcLowPass), components: [] };
+
+    expect(() => exportNetlist({ circuit: empty, format: 'kicad_pcb' }, fileSink(artifactDir)))
+      .toThrow('Cannot lay out a circuit with no components.');
+  });
+
   it('writes each format to an artifact file with the right extension', () => {
     const spice = exportNetlist({ circuit: parse(rcLowPass), format: 'spice' }, fileSink(artifactDir));
     const sch = exportNetlist({ circuit: parse(rcLowPass), format: 'kicad_schematic' }, fileSink(artifactDir));

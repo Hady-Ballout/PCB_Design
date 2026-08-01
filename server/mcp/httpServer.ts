@@ -73,6 +73,7 @@ const CONTENT_TYPES: Record<string, string> = {
   cir: 'text/plain',
   net: 'application/xml',
   kicad_sch: 'text/plain',
+  kicad_pcb: 'text/plain',
 };
 
 const contentTypeFor = (filename: string): string => {
