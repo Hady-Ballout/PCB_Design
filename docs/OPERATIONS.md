@@ -12,6 +12,7 @@
 | `npm test` | `vitest run` | unit tests |
 | `npm run mcp` | `tsx mcp/server.ts` | local MCP server over stdio (for Claude Desktop / Claude Code) |
 | `npm run mcp:live-check` | `node scripts/mcp-live-check.mjs` | boots the real API server and drives the hosted MCP endpoint end-to-end |
+| — | `node scripts/kicad-drc-oracle.mjs` | lays out three fixtures, writes their `.kicad_pcb` files to a temp dir and runs KiCad's own DRC over them (see below) |
 
 `vite.config.js` proxies `/api` to `http://127.0.0.1:8787` in dev mode only; in production
 the frontend expects `VITE_API_URL` (see below) or same-origin `/api`.
@@ -77,6 +78,26 @@ Render → one real-card end-to-end test.
 (`*.test.js` / `*.test.ts`), covering: circuit validation, SPICE/KiCad export, circuit sync
 round-trips, schematic layout, chat store, Ngspice deck construction/waveform parsing,
 Ollama request building/response validation, and circuit response reconciliation.
+
+## KiCad DRC oracle (optional)
+
+`src/core/pcbDrc.js` is an independent check of the boards this repo generates, but it is
+still *our* check — same design rules, same pad model, same conventions as everything that
+built the board. `scripts/kicad-drc-oracle.mjs` brings in an outside opinion: it lays out
+three fixtures (an RC low-pass, the TO-92 board that forces the router's neck-down ladder,
+and a 555 astable) through the real pipeline, writes their `.kicad_pcb` files to a temp
+directory, prints our own verdict for each, and then runs
+`kicad-cli pcb drc --exit-code-violations` over them.
+
+```bash
+node scripts/kicad-drc-oracle.mjs     # KICAD_CLI=/path/to/kicad-cli to override
+```
+
+`kicad-cli` is **optional**: without it the script says so and exits 0. `.github/workflows/
+kicad-drc-oracle.yml` runs it on PRs that touch the PCB modules, with `continue-on-error`
+at the **job** level — KiCad enforces rules this pipeline never claimed to satisfy
+(courtyard overlaps, unconnected items), so a violation there is a prompt to go and look,
+not a build failure.
 
 ## Ngspice
 

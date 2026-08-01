@@ -104,6 +104,40 @@ server/simulation               the engine directly, so an MCP result and an in-
 The MCP server is a peer of the frontend and the backend, not a layer above them: it
 consumes `src/core` on the same terms and adds no circuit logic of its own.
 
+## The PCB pipeline
+
+One direction, five independent stages, then two writers. Every stage is plain
+deterministic `src/core` JavaScript — no KiCad install, no RNG, no clock — and each hands
+the next one a finished artifact rather than a shared mutable state.
+
+```text
+circuit JSON
+   |
+pcbFootprints.js   real vendored KiCad THT geometry per part (part.footprint
+   |               honoured as an exact override, else resolved from the kind)
+pcbPlace.js        netlist-aware placement, courtyard clearance
+   |
+pcbRoute.js        two-layer clearance-aware A* maze routing with neck-down
+   |
+pcbPour.js         bottom-copper ground pour over what routing left
+   |
+pcbDrc.js          an INDEPENDENT measurement of the finished copper +
+   |               connectivity — the verdict the layout carries with it
+   |
+   +--> kicadPcb.js      .kicad_pcb — writes even a dirty board (a half-routed
+   |                     board is still worth opening and finishing)
+   +--> gerberExport.js  RS-274X + Excellon + README, zipped by zipStore.js —
+                         REFUSES unless routing, DRC and connectivity are all
+                         clean, because a Gerber package is an order
+```
+
+`pcbLayout.js` is the orchestrator: it runs the ladder (re-place and re-route on a roomier
+board when routing fails) and keeps the best attempt by a DRC-first ranking. The same
+result object drives the 3D viewer, the Board view, the download buttons and the MCP
+`pcb_layout` / `export_netlist` tools, so all four agree by construction.
+`scripts/kicad-drc-oracle.mjs` (and its optional, non-gating CI job) is the outside
+opinion: KiCad's own DRC over boards this pipeline produced.
+
 Two routing constraints in `server/index.ts` are load-bearing:
 
 - `/api/mcp` is registered **above** the JWT gate. MCP clients authenticate as OAuth

@@ -36,6 +36,24 @@ The AI's only job is to produce a structured circuit model (+ matching SPICE). E
 else — validation, diagram layout, SPICE/KiCad export, simulation, waveform parsing — is
 deterministic code in `src/core` and `server/`.
 
+## From circuit to manufacturable board
+
+The same circuit model also becomes a real two-layer PCB, with no KiCad install anywhere in
+the path:
+
+```text
+circuit -> footprints -> placement -> two-layer A* routing -> ground pour -> DRC
+        -> .kicad_pcb   (3D PCB view's Board mode, downloadable)
+        -> Gerber + Excellon zip  (gated: refuses a board that isn't fabricable)
+```
+
+Every stage is deterministic — the same circuit gives byte-identical files, so an order can
+be checksummed against what was reviewed. The Gerber export is the one exporter that
+**refuses**: unless routing is complete, the independent DRC passes and every net is a
+single connected island, it throws instead of shipping a board that cannot work. See
+`docs/ARCHITECTURE.md` for the stage-by-stage picture and `docs/FRONTEND.md` for each
+module.
+
 ## Run it
 
 ```bash

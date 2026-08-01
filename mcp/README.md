@@ -48,7 +48,7 @@ Restart the client; the six tools appear as `pcb-pilot`.
 | `export_netlist` | SPICE `.cir`, KiCad `.net`/`.kicad_sch`/`.kicad_pcb`, or a zipped RS-274X Gerber + Excellon fabrication package (`gerber`) | `toSpice`, `toKiCadNetlist`, `toKiCadSchematic`, `toKiCadPcb`, `toGerberArchive` |
 | `simulate_circuit` | Transient analysis; per-node stats + CSV | `server/simulation/simulator.ts` |
 | `render_schematic` | Laid-out schematic as SVG | `buildCircuitDiagram`, `toDiagramSvg` |
-| `pcb_layout` | Two-layer placement + clearance-aware maze routing, with a `manufacturable` verdict from an independent DRC | `src/core/pcbLayout.js` |
+| `pcb_layout` | Two-layer placement + clearance-aware maze routing + a bottom-copper ground pour, with a `manufacturable` verdict from an independent DRC | `src/core/pcbLayout.js` |
 
 **Start with `list_component_kinds`.** It returns the pin-order contract for positional
 kinds (op amps, MCU boards, modules) and the ref-prefix rules the exporter enforces —
@@ -67,6 +67,10 @@ the reference, the list of files inside the zip, and a board summary, with nothi
 `format: "gerber"` refuses a board that is not manufacturable — routing must be complete,
 DRC must pass, and every net must be a single connected island. The error carries the
 unrouted nets and DRC violations verbatim so they can be fixed and the board re-laid.
+
+Both board formats carry the same copper. `kicad_pcb` writes the ground pour as a `B.Cu`
+zone and `gerber` paints it into `.GBL`; a circuit with no ground net simply gets no pour.
+Both are byte-deterministic, so the same circuit always produces the same artifact.
 
 Default location is `mcp/.artifacts/` (gitignored). Override with `--artifact-dir <path>`
 in the launch args or `PCB_MCP_ARTIFACT_DIR`.
