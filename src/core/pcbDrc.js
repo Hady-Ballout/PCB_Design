@@ -9,8 +9,10 @@
 // Copper model
 // ------------
 // * pad   — circle of `padCopperRadius(pad)` on BOTH layers (through-hole).
-//           Rect/oval pads are modelled by their circumscribing circle; see
-//           padCopperRadius for why that conservatism is safe here.
+//           Rect pads are modelled by their true circumscribing circle
+//           (hypot(w,h)/2, i.e. the corner-to-centre distance); other shapes
+//           use max(w,h)/2. See padCopperRadius for why that conservatism is
+//           safe here.
 // * via   — circle of `diameter / 2` on BOTH layers.
 // * trace — capsule (segment inflated by `width / 2`) on its own layer.
 //

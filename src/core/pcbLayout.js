@@ -25,6 +25,38 @@ import {
 } from './pcbPlace.js';
 import { routeBoard } from './pcbRoute.js';
 
+/**
+ * Lexicographic ranking for an expansion-ladder attempt: DRC violations first
+ * (a short is worse than an unrouted net or a broken island), then unrouted
+ * nets, then broken-connectivity nets. Connectivity used to never enter the
+ * comparison at all, so an attempt with fewer failedNets but a short could
+ * outrank a clean-but-incomplete one; extracted so the ranking itself is
+ * unit-testable without a full placement/routing pass.
+ *
+ * @param {{ drc: { violations: unknown[] }, routing: { failedNets: unknown[] },
+ *   connectivity: { incompleteNets: unknown[] } }} candidate
+ * @param {{ drc: { violations: unknown[] }, routing: { failedNets: unknown[] },
+ *   connectivity: { incompleteNets: unknown[] } }} incumbent
+ * @returns {boolean} true if `candidate` should replace `incumbent`
+ */
+export const isBetterAttempt = (candidate, incumbent) => {
+  if (!incumbent) return true;
+  const candidateKey = [
+    candidate.drc.violations.length,
+    candidate.routing.failedNets.length,
+    candidate.connectivity.incompleteNets.length,
+  ];
+  const incumbentKey = [
+    incumbent.drc.violations.length,
+    incumbent.routing.failedNets.length,
+    incumbent.connectivity.incompleteNets.length,
+  ];
+  for (let index = 0; index < candidateKey.length; index += 1) {
+    if (candidateKey[index] !== incumbentKey[index]) return candidateKey[index] < incumbentKey[index];
+  }
+  return false;
+};
+
 export const BOARD_THICKNESS = RULES.boardThickness;
 export const TRACE_WIDTH = RULES.traceWidth;
 export const VIA_DIAMETER = RULES.viaDiameter;
@@ -128,11 +160,7 @@ export const buildPcbLayout = (circuit, options = {}) => {
   let best = null;
   for (const factor of EXPANSION_LADDER) {
     const attempt = layoutAttempt(parts, base * factor);
-    const better = !best
-      || attempt.routing.failedNets.length < best.routing.failedNets.length
-      || (attempt.routing.failedNets.length === best.routing.failedNets.length
-        && attempt.drc.violations.length < best.drc.violations.length);
-    if (better) best = attempt;
+    if (isBetterAttempt(attempt, best)) best = attempt;
     if (best.routing.complete && best.drc.ok && best.connectivity.ok) break;
   }
   return best;

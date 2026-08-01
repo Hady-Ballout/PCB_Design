@@ -53,16 +53,20 @@ export const PAD_ANNULAR_RING = 0.6;
 export const VIA_ANNULAR_RING = 0.4;
 
 /**
- * Conservative copper radius of a pad. Rect/oval pads are modelled as the
- * circumscribing circle (max of the two sides): it never under-reports copper,
- * so clearance checks stay on the safe side, and at our 0.3 mm clearance the
- * few tenths of a millimetre it over-reports never change a verdict for pads
- * that belong to different parts.
+ * Conservative copper radius of a pad. Rect pads are modelled as their
+ * circumscribing circle (Math.hypot(w,h)/2 — the distance to a rect corner),
+ * which never under-reports copper, so clearance checks stay on the safe
+ * side; other shapes use max(w,h)/2. `size` is checked before `diameter` so a
+ * caller that sets both (pcbLayout.js derives `diameter = max(size.w,
+ * size.h)` for display) still gets the true circumscribing radius for rect
+ * pads instead of the diameter-derived inscribed one.
  *
- * @param {{ diameter?: number, size?: { w: number, h: number } }} pad
+ * @param {{ diameter?: number, size?: { w: number, h: number }, shape?: string }} pad
  */
 export const padCopperRadius = (pad) => {
+  if (pad?.size) return pad.shape === 'rect'
+    ? Math.hypot(pad.size.w, pad.size.h) / 2
+    : Math.max(pad.size.w, pad.size.h) / 2;
   if (Number.isFinite(pad?.diameter)) return pad.diameter / 2;
-  if (pad?.size) return Math.max(pad.size.w, pad.size.h) / 2;
   return 0;
 };

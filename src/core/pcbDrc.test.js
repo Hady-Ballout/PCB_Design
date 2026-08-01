@@ -127,6 +127,35 @@ describe('runDrc', () => {
     expect(JSON.stringify(runDrc(layout))).toBe(JSON.stringify(runDrc(layout)));
     expect(runDrc(layout).violations).toHaveLength(2);
   });
+
+  it('catches a rect pad whose diagonal corner reaches a foreign trace (inscribed-circle under-model)', () => {
+    // A 3x3 mm rect pad's true copper reaches Math.hypot(3, 3) / 2 ≈ 2.1213 mm
+    // from its centre at the diagonal corner, not max(3, 3) / 2 = 1.5 mm (the
+    // inscribed circle). `diameter: 3` mirrors what pcbLayout.js actually
+    // stamps on a pad (diameter = max(size.w, size.h)), so this also exercises
+    // that padCopperRadius must check `size` before `diameter`.
+    //
+    // Net B's trace runs perpendicular to the pad's 45 degree diagonal, with
+    // its closest approach exactly on that diagonal, 2.5 mm from the pad
+    // centre:
+    //   - true corner-to-trace gap  = 2.5 - 2.1213 - 0.4 (trace half-width)
+    //                               ≈ -0.021 mm  -> overlapping copper, VIOLATION
+    //   - inscribed-circle gap      = 2.5 - 1.5   - 0.4
+    //                               = 0.6 mm      -> clear, no violation (WRONG)
+    const rectPad = pad(10, 10, 'A', { shape: 'rect', size: { w: 3, h: 3 }, diameter: 3 });
+    const diagonalTrace = trace('B', { x: 12.474874, y: 11.06066 }, { x: 11.06066, y: 12.474874 });
+
+    const result = runDrc(layoutOf({
+      components: [part('R1', [rectPad])],
+      traces: [diagonalTrace],
+    }));
+
+    const violation = result.violations.find((item) => item.type === 'clearance');
+    expect(violation).toBeDefined();
+    expect(violation.distance).toBeCloseTo(-0.0213, 3);
+    expect([violation.netA, violation.netB].sort()).toEqual(['A', 'B']);
+    expect(result.ok).toBe(false);
+  });
 });
 
 describe('checkConnectivity', () => {

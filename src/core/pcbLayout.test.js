@@ -1,7 +1,45 @@
 import { describe, expect, it } from 'vitest';
-import { buildPcbLayout } from './pcbLayout.js';
+import { buildPcbLayout, isBetterAttempt } from './pcbLayout.js';
 import { footprintRecordFor } from './pcbFootprints.js';
 import { placeComponents } from './pcbPlace.js';
+
+/** Minimal fake attempt summary for isBetterAttempt, sized by how bad each stage is. */
+const summary = (drcViolations, failedNets, incompleteNets) => ({
+  drc: { violations: new Array(drcViolations).fill(null) },
+  routing: { failedNets: new Array(failedNets).fill(null) },
+  connectivity: { incompleteNets: new Array(incompleteNets).fill(null) },
+});
+
+describe('isBetterAttempt', () => {
+  it('accepts any attempt when there is no incumbent yet', () => {
+    expect(isBetterAttempt(summary(0, 0, 0), null)).toBe(true);
+  });
+
+  it('ranks DRC violations (shorts) above failedNets count, unlike the old failedNets-first comparator', () => {
+    // Old comparator: fewer failedNets always won, so a 1-failedNet/0-violation
+    // board would lose to a 0-failedNet/1-violation (shorted) board.
+    const shortedButFullyRouted = summary(1, 0, 0);
+    const cleanButOneNetUnrouted = summary(0, 1, 0);
+    expect(isBetterAttempt(cleanButOneNetUnrouted, shortedButFullyRouted)).toBe(true);
+    expect(isBetterAttempt(shortedButFullyRouted, cleanButOneNetUnrouted)).toBe(false);
+  });
+
+  it('tiebreaks on failedNets when DRC is equal', () => {
+    expect(isBetterAttempt(summary(0, 1, 0), summary(0, 2, 0))).toBe(true);
+    expect(isBetterAttempt(summary(0, 2, 0), summary(0, 1, 0))).toBe(false);
+  });
+
+  it('falls through to connectivity when DRC and failedNets are equal', () => {
+    // This is the finding: connectivity used to never enter the comparison at
+    // all, so an attempt could be kept even though it broke a net's island.
+    expect(isBetterAttempt(summary(0, 0, 0), summary(0, 0, 1))).toBe(true);
+    expect(isBetterAttempt(summary(0, 0, 1), summary(0, 0, 0))).toBe(false);
+  });
+
+  it('is not fooled into replacing the incumbent with an equal attempt', () => {
+    expect(isBetterAttempt(summary(1, 2, 3), summary(1, 2, 3))).toBe(false);
+  });
+});
 
 const sampleCircuit = {
   title: 'PCB layout test circuit',
@@ -293,5 +331,6 @@ describe('buildPcbLayout performance', () => {
     expect(Date.now() - started).toBeLessThan(10000);
     expect(layout.components).toHaveLength(30);
     expect(layout.drc.violations).toEqual([]);
+    expect(layout.routing.complete).toBe(true);
   });
 });

@@ -27,9 +27,10 @@
 // direction. A pad whose terminal cell cannot clear foreign pad copper at full
 // trace width is reported as `no_escape` rather than routed into a short.
 //
-// Pad copper is modelled as the circumscribing circle of the pad (see
-// padCopperRadius). That is conservative — it never under-reports copper — and
-// matches what pcbDrc.js measures, so the router and the checker agree. The
+// Pad copper is modelled as the pad's true circumscribing circle (see
+// padCopperRadius: hypot(w,h)/2 for rect pads, max(w,h)/2 otherwise). That is
+// conservative — it never under-reports copper — and matches what pcbDrc.js
+// measures, so the router and the checker agree. The
 // one place the conservatism bites is very tight footprints such as
 // TO-92_Inline (1.27 mm pitch), whose middle pad has no room for a 0.8 mm
 // escape at all; those come back as `no_escape` instead of a silent short.
@@ -198,7 +199,14 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
       }
     }
     candidates.sort((a, b) => (b.room - a.room) || (a.distance - b.distance) || (a.row - b.row) || (a.col - b.col));
-    const needed = rules.clearance + traceHalf;
+    // `room` is measured to the escape cell's CENTRE, but the first hop out of
+    // it runs along a grid edge whose interior can sag closer to a foreign
+    // pad than either endpoint (see the sag correction above). The exact
+    // worst case is pitch*3/8; hypot(clearance + traceHalf, pitch/2) is the
+    // simpler safe bound (it's the sag distance for an edge whose endpoint is
+    // already exactly `needed` away), so require room against that instead of
+    // the bare centre-to-centre distance.
+    const needed = Math.hypot(rules.clearance + traceHalf, halfCell);
     const pick = candidates.find((candidate) => {
       const owner = claimed.get(cellIndex(candidate.col, candidate.row));
       return owner === undefined || owner === pad.netKey;
