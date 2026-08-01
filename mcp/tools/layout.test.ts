@@ -44,6 +44,15 @@ describe('pcbLayoutTool', () => {
     expect(result.nets).toContain('VOUT');
   });
 
+  it('reports whether the board is actually manufacturable', () => {
+    const result = pcbLayoutTool({ circuit: parse(rcLowPass) }, fileSink(artifactDir));
+
+    expect(result.manufacturable).toBe(true);
+    expect(result.routing).toEqual({ complete: true, failedNets: [] });
+    expect(result.drc).toEqual({ ok: true, violations: [] });
+    expect(result.connectivity).toEqual({ ok: true, incompleteNets: [] });
+  });
+
   it('writes the full geometry to a JSON artifact', () => {
     const result = pcbLayoutTool({ circuit: parse(rcLowPass) }, fileSink(artifactDir));
 

@@ -1,12 +1,21 @@
-// Procedural PCB layout: component placement + two-layer Manhattan trace
-// routing computed from the circuit alone (no KiCad install required).
-// All dimensions are millimetres. Horizontal trace segments run on the top
-// copper layer, vertical segments on the bottom layer, with a via at every
-// bend — through-hole pads join both layers, so nets stay connected.
-// Footprint geometry (pad positions/shapes/drills, body size) comes from
-// real vendored KiCad footprints via pcbFootprints.js, and placement from the
-// netlist-aware placer in pcbPlace.js; this module turns those placements into
-// the layout object and routes between their pads.
+// Procedural PCB layout: the orchestrator that turns a circuit into a
+// manufacturable two-layer board, with no KiCad install required.
+//
+// The pipeline is four independent stages:
+//   1. pcbFootprints.js — real vendored KiCad footprint geometry per part
+//   2. pcbPlace.js      — netlist-aware placement with courtyard clearance
+//   3. pcbRoute.js      — clearance-aware two-layer A* maze routing
+//   4. pcbDrc.js        — an independent measurement of the finished copper
+//
+// If routing leaves nets unfinished, the board is re-placed on a roomier
+// outline (the expansion ladder below) and routed again from scratch, mirroring
+// routeWithExpansion in schematicLayout.js. What comes back always carries the
+// verdict with it: `routing`, `drc` and `connectivity` say whether the board is
+// actually fabricable, so a caller never has to guess.
+//
+// All dimensions are millimetres, y-down.
+import { RULES } from './pcbDesignRules.js';
+import { checkConnectivity, runDrc } from './pcbDrc.js';
 import { bodyKindFor } from './pcbFootprints.js';
 import {
   isUnconnectedTerminal,
@@ -14,47 +23,26 @@ import {
   placementBounds,
   placementPads,
 } from './pcbPlace.js';
+import { routeBoard } from './pcbRoute.js';
 
-export const BOARD_THICKNESS = 1.6;
-export const TRACE_WIDTH = 0.8;
-export const VIA_DIAMETER = 1.4;
+export const BOARD_THICKNESS = RULES.boardThickness;
+export const TRACE_WIDTH = RULES.traceWidth;
+export const VIA_DIAMETER = RULES.viaDiameter;
 // Fallback pad diameter for callers that don't read a pad's own `diameter`.
 export const PAD_DIAMETER = 1.8;
 
+/**
+ * How much extra room each routing attempt gets. The first pass is the tight
+ * placement; each retry re-places from scratch (rotations and relative order
+ * are preserved, distances grow) and re-routes.
+ */
+const EXPANSION_LADDER = [1, 1.15, 1.35, 1.6];
+
 const round = (value) => Math.round(value * 100) / 100;
 
-// Minimum spanning tree over a net's pads (Prim, Manhattan distance) so every
-// pad is reached with short, non-redundant traces.
-const spanningEdges = (pads) => {
-  if (pads.length < 2) return [];
-  const inTree = [pads[0]];
-  const remaining = pads.slice(1);
-  const edges = [];
-  while (remaining.length) {
-    let best = null;
-    for (const candidate of remaining) {
-      for (const anchor of inTree) {
-        const cost = Math.abs(candidate.x - anchor.x) + Math.abs(candidate.y - anchor.y);
-        if (!best || cost < best.cost) best = { candidate, anchor, cost };
-      }
-    }
-    edges.push({ from: best.anchor, to: best.candidate });
-    inTree.push(best.candidate);
-    remaining.splice(remaining.indexOf(best.candidate), 1);
-  }
-  return edges;
-};
-
-/**
- * @param {object} circuit
- * @param {{ expandFactor?: number }} [options] forwarded to the placer; > 1
- *   spreads the parts apart to give routing more room.
- */
-export const buildPcbLayout = (circuit, options = {}) => {
-  const parts = (circuit?.components || []).filter((part) => part.kind !== 'ground');
-  if (!parts.length) return null;
-
-  const { placements, board } = placeComponents(parts, options);
+/** One placement + routing pass at a given expansion factor. */
+const layoutAttempt = (parts, expandFactor) => {
+  const { placements, board } = placeComponents(parts, { expandFactor });
 
   const components = placements.map((placement) => {
     const { part } = placement;
@@ -89,7 +77,7 @@ export const buildPcbLayout = (circuit, options = {}) => {
     };
   });
 
-  // Group connected pads by net.
+  // Nets, in pad order, so the list reads the way the circuit does.
   const netPads = new Map();
   for (const component of components) {
     for (const pad of component.pads) {
@@ -99,42 +87,53 @@ export const buildPcbLayout = (circuit, options = {}) => {
     }
   }
 
-  // Route each net edge as an L: horizontal on top copper, vertical on bottom,
-  // with a via at the bend. Alternating bend corners spreads parallel runs.
-  const traces = [];
-  const vias = [];
-  let netIndex = 0;
-  for (const [net, pads] of netPads.entries()) {
-    const bendFirst = netIndex % 2 === 0;
-    for (const edge of spanningEdges(pads)) {
-      const { from, to } = edge;
-      if (from.y === to.y) {
-        traces.push({ layer: 'top', net, from: { x: from.x, y: from.y }, to: { x: to.x, y: to.y }, width: TRACE_WIDTH });
-        continue;
-      }
-      if (from.x === to.x) {
-        traces.push({ layer: 'bottom', net, from: { x: from.x, y: from.y }, to: { x: to.x, y: to.y }, width: TRACE_WIDTH });
-        continue;
-      }
-      const corner = bendFirst ? { x: to.x, y: from.y } : { x: from.x, y: to.y };
-      const horizontal = bendFirst
-        ? { from: { x: from.x, y: from.y }, to: corner }
-        : { from: corner, to: { x: to.x, y: to.y } };
-      const vertical = bendFirst
-        ? { from: corner, to: { x: to.x, y: to.y } }
-        : { from: { x: from.x, y: from.y }, to: corner };
-      traces.push({ layer: 'top', net, ...horizontal, width: TRACE_WIDTH });
-      traces.push({ layer: 'bottom', net, ...vertical, width: TRACE_WIDTH });
-      vias.push({ x: corner.x, y: corner.y, net });
-    }
-    netIndex += 1;
-  }
+  const routed = routeBoard({ components, board });
 
-  return {
-    board: { width: board.width, height: board.height, thickness: BOARD_THICKNESS },
+  const layout = {
+    board: {
+      width: board.width,
+      height: board.height,
+      thickness: BOARD_THICKNESS,
+      outline: { x: 0, y: 0, width: board.width, height: board.height },
+    },
     components,
-    traces,
-    vias,
+    traces: routed.traces,
+    vias: routed.vias,
     nets: [...netPads.keys()],
+    routing: { complete: routed.failedNets.length === 0, failedNets: routed.failedNets },
   };
+  layout.drc = runDrc(layout);
+  layout.connectivity = checkConnectivity(layout);
+  return layout;
+};
+
+/**
+ * Places and routes a circuit onto a single two-layer board.
+ *
+ * @param {object} circuit
+ * @param {{ expandFactor?: number }} [options] `expandFactor > 1` spreads the
+ *   parts apart before the first attempt; the retry ladder is applied on top
+ *   of it.
+ * @returns {null | { board: object, components: Array<object>, traces: Array<object>,
+ *   vias: Array<object>, nets: string[],
+ *   routing: { complete: boolean, failedNets: Array<object> },
+ *   drc: { ok: boolean, violations: Array<object> },
+ *   connectivity: { ok: boolean, incompleteNets: Array<object> } }}
+ */
+export const buildPcbLayout = (circuit, options = {}) => {
+  const parts = (circuit?.components || []).filter((part) => part.kind !== 'ground');
+  if (!parts.length) return null;
+
+  const base = options.expandFactor ?? 1;
+  let best = null;
+  for (const factor of EXPANSION_LADDER) {
+    const attempt = layoutAttempt(parts, base * factor);
+    const better = !best
+      || attempt.routing.failedNets.length < best.routing.failedNets.length
+      || (attempt.routing.failedNets.length === best.routing.failedNets.length
+        && attempt.drc.violations.length < best.drc.violations.length);
+    if (better) best = attempt;
+    if (best.routing.complete && best.drc.ok && best.connectivity.ok) break;
+  }
+  return best;
 };

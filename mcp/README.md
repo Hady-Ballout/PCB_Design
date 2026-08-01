@@ -48,7 +48,7 @@ Restart the client; the six tools appear as `pcb-pilot`.
 | `export_netlist` | SPICE `.cir`, KiCad `.net`, or KiCad `.kicad_sch` | `toSpice`, `toKiCadNetlist`, `toKiCadSchematic` |
 | `simulate_circuit` | Transient analysis; per-node stats + CSV | `server/simulation/simulator.ts` |
 | `render_schematic` | Laid-out schematic as SVG | `buildCircuitDiagram`, `toDiagramSvg` |
-| `pcb_layout` | Two-layer placement and routing | `src/core/pcbLayout.js` |
+| `pcb_layout` | Two-layer placement + clearance-aware maze routing, with a `manufacturable` verdict from an independent DRC | `src/core/pcbLayout.js` |
 
 **Start with `list_component_kinds`.** It returns the pin-order contract for positional
 kinds (op amps, MCU boards, modules) and the ref-prefix rules the exporter enforces —
