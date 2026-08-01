@@ -1,0 +1,242 @@
+// Mapping seam between the circuit model (SPICE-order nodes on a part) and
+// real KiCad through-hole footprint geometry (src/core/kicadFootprintLibrary.js).
+// Mirrors the KIND_TO_SYMBOL remap pattern in kicadSchematic.js, but for pads
+// instead of schematic pins: KIND_TO_FOOTPRINT[kind].padOrder[i] is the
+// footprint pad *number* that carries part.nodes[i].
+import { KICAD_FOOTPRINTS } from './kicadFootprintLibrary.js';
+
+/**
+ * @typedef {{ number: string, x: number, y: number, shape: string,
+ *   size: { w: number, h: number }, drill: number, angle: number }} FootprintPad
+ * @typedef {{ type: 'line'|'circle'|'arc', width: number, [key: string]: any }} FootprintPrimitive
+ * @typedef {{ libId: string, pads: FootprintPad[], silk: FootprintPrimitive[],
+ *   fab: FootprintPrimitive[], courtyard: { minX: number, minY: number, maxX: number, maxY: number } }} FootprintRecord
+ */
+
+const identity = (count) => Array.from({ length: count }, (_, index) => String(index + 1));
+
+const pinHeader = (count) => ({
+  libId: `Connector_PinHeader_2.54mm:PinHeader_1x0${count}_P2.54mm_Vertical`,
+  padOrder: identity(count),
+});
+
+// Body classification for the 3D viewer (src/features/pcb3d/pcbScene.js),
+// keyed by libId. Anything not listed (e.g. a bare pin header) renders as a
+// plain labeled box, same as the old catalogue's default.
+const BODY_BY_LIBID = {
+  'Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal': 'axial',
+  'Inductor_THT:L_Axial_L9.5mm_D4.0mm_P15.24mm_Horizontal_Fastron_SMCC': 'axial',
+  'Diode_THT:D_DO-41_SOD81_P10.16mm_Horizontal': 'axial',
+  'LED_THT:LED_D5.0mm': 'led',
+  'Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P5.00mm': 'radial',
+  'Capacitor_THT:CP_Radial_D5.0mm_P2.50mm': 'radial',
+  'Package_TO_SOT_THT:TO-92_Inline': 'to92',
+  'Package_TO_SOT_THT:TO-220-3_Vertical': 'to220',
+  'Package_DIP:DIP-8_W7.62mm': 'dip',
+  'Package_DIP:DIP-14_W7.62mm': 'dip',
+  'Package_DIP:DIP-16_W7.62mm': 'dip',
+  'TerminalBlock:TerminalBlock_bornier-2_P5.08mm': 'terminal',
+};
+
+// Module-ish kinds that get the synthesized fallback's larger silk body and
+// the 3D viewer's "module" body (sub-board + header strips), matching the
+// old FOOTPRINTS catalogue's arduino_uno/raspberry_pi/esp32 entries.
+const MODULE_KINDS = new Set(['arduino_uno', 'raspberry_pi', 'esp32']);
+
+/** Body dims (mm) for the synthesized fallback's silk rectangle / 3D sub-board. */
+const BODY_SIZES = {
+  arduino_uno: { width: 46, height: 34 },
+  raspberry_pi: { width: 50, height: 36 },
+  esp32: { width: 44, height: 26 },
+  generic: { width: 10, height: 8 },
+};
+
+// Circuit kind → vendored footprint + node-to-pad remap. Node orders mirror
+// KIND_TO_SYMBOL in kicadSchematic.js where the same physical convention
+// applies (diode/LED polarity, BJT/MOSFET C-B-E-ish order, regulator
+// IN-GND-OUT); footprint pad numbers are assigned by the KiCad library
+// authors to match the part's physical pinout, not the SPICE node order.
+const KIND_TO_FOOTPRINT = {
+  // Resistive 2-terminal parts (resistor-shaped in the schematic too).
+  resistor: { libId: 'Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal', padOrder: ['1', '2'] },
+  load: { libId: 'Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal', padOrder: ['1', '2'] },
+  fuse: { libId: 'Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal', padOrder: ['1', '2'] },
+  photoresistor: { libId: 'Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal', padOrder: ['1', '2'] },
+  ir_phototransistor: { libId: 'Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal', padOrder: ['1', '2'] },
+  thermistor: { libId: 'Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal', padOrder: ['1', '2'] },
+
+  // Non-polar by default; overridden to CP_Radial for electrolytic values
+  // (see isElectrolytic below).
+  capacitor: { libId: 'Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P5.00mm', padOrder: ['1', '2'] },
+
+  inductor: { libId: 'Inductor_THT:L_Axial_L9.5mm_D4.0mm_P15.24mm_Horizontal_Fastron_SMCC', padOrder: ['1', '2'] },
+
+  // SPICE diode order is (anode, cathode); DO-41 pad 1 is the cathode
+  // (silkscreen "K" is next to pad 1 in the vendored footprint).
+  diode: { libId: 'Diode_THT:D_DO-41_SOD81_P10.16mm_Horizontal', padOrder: ['2', '1'] },
+  zener: { libId: 'Diode_THT:D_DO-41_SOD81_P10.16mm_Horizontal', padOrder: ['2', '1'] },
+  schottky: { libId: 'Diode_THT:D_DO-41_SOD81_P10.16mm_Horizontal', padOrder: ['2', '1'] },
+
+  // Same (anode, cathode) SPICE order as diode; LED_D5.0mm pad 1 is the
+  // square (keyed) pad, matching the DO-41 cathode convention.
+  led: { libId: 'LED_THT:LED_D5.0mm', padOrder: ['2', '1'] },
+  ir_led: { libId: 'LED_THT:LED_D5.0mm', padOrder: ['2', '1'] },
+
+  // TO-92_Inline pads are just numbered 1-2-3 left to right; they carry no
+  // inherent E/B/C meaning, so reuse kicadSchematic's Q_*_BCE pin numbers
+  // verbatim (SPICE order is C, B, E; physical pins there are 1=B 2=C 3=E).
+  bjt_npn: { libId: 'Package_TO_SOT_THT:TO-92_Inline', padOrder: ['2', '1', '3'] },
+  bjt_pnp: { libId: 'Package_TO_SOT_THT:TO-92_Inline', padOrder: ['2', '1', '3'] },
+  mosfet_n: { libId: 'Package_TO_SOT_THT:TO-92_Inline', padOrder: ['2', '1', '3'] },
+  mosfet_p: { libId: 'Package_TO_SOT_THT:TO-92_Inline', padOrder: ['2', '1', '3'] },
+
+  // Circuit order (IN, GND, OUT) matches the TO-220-3 physical pin order.
+  regulator: { libId: 'Package_TO_SOT_THT:TO-220-3_Vertical', padOrder: ['1', '2', '3'] },
+
+  // Single op-amp 5-node (in+, in-, out, v+, v-) placed on a DIP-8 in the
+  // LM358-A pin style.
+  opamp: { libId: 'Package_DIP:DIP-8_W7.62mm', padOrder: ['3', '2', '1', '8', '4'] },
+  comparator: { libId: 'Package_DIP:DIP-8_W7.62mm', padOrder: ['3', '2', '1', '8', '4'] },
+  // Canonical order = physical DIP-8 pins 1-8 (see componentKinds.js).
+  ua741: { libId: 'Package_DIP:DIP-8_W7.62mm', padOrder: ['1', '2', '3', '4', '5', '6', '7', '8'] },
+  timer_555: { libId: 'Package_DIP:DIP-8_W7.62mm', padOrder: ['1', '2', '3', '4', '5', '6', '7', '8'] },
+  // PC817 is physically DIP-4 with canonical order = pins 1-4 (anode,
+  // cathode, emitter, collector); placed on the vendored DIP-8's first 4 pads.
+  optocoupler: { libId: 'Package_DIP:DIP-8_W7.62mm', padOrder: ['1', '2', '3', '4'] },
+
+  // 2-terminal sources and other simple 2-pin loads/actuators.
+  voltage_source: { libId: 'TerminalBlock:TerminalBlock_bornier-2_P5.08mm', padOrder: ['1', '2'] },
+  signal_source: { libId: 'TerminalBlock:TerminalBlock_bornier-2_P5.08mm', padOrder: ['1', '2'] },
+  solar_panel: { libId: 'TerminalBlock:TerminalBlock_bornier-2_P5.08mm', padOrder: ['1', '2'] },
+  dc_motor: { libId: 'TerminalBlock:TerminalBlock_bornier-2_P5.08mm', padOrder: ['1', '2'] },
+  vibration_motor: { libId: 'TerminalBlock:TerminalBlock_bornier-2_P5.08mm', padOrder: ['1', '2'] },
+  buzzer: { libId: 'TerminalBlock:TerminalBlock_bornier-2_P5.08mm', padOrder: ['1', '2'] },
+
+  // N-pin breakout-style connectors: header pin N carries node N.
+  temp_sensor: pinHeader(3),
+  ultrasonic_sensor: pinHeader(4),
+  dht_sensor: pinHeader(3),
+  oled_display: pinHeader(4),
+  pir_sensor: pinHeader(3),
+  servo: pinHeader(3),
+  relay_module: pinHeader(6),
+  stepper_motor: pinHeader(5),
+  lcd_display: pinHeader(4),
+  rotary_encoder: pinHeader(5),
+  led_strip: pinHeader(3),
+  imu_sensor: pinHeader(4),
+  ir_receiver: pinHeader(3),
+  keypad: pinHeader(8),
+  joystick: pinHeader(5),
+  rtc_module: pinHeader(4),
+  sd_card: pinHeader(6),
+  rfid_reader: pinHeader(8),
+  mouse_sensor: pinHeader(8),
+  soil_moisture: pinHeader(3),
+  gas_sensor: pinHeader(4),
+  sound_sensor: pinHeader(4),
+  hall_sensor: pinHeader(3),
+  baro_sensor: pinHeader(4),
+  current_sensor: pinHeader(5),
+};
+
+// Electrolytic heuristic: value ends in µF/uF with a magnitude >= 1uF.
+const isElectrolytic = (part) => {
+  const match = /^([\d.]+)\s*[uµ]f$/i.exec(String(part?.value ?? '').trim());
+  return match !== null && Number(match[1]) >= 1;
+};
+
+const footprintForKind = (part) => {
+  const mapped = KIND_TO_FOOTPRINT[part?.kind];
+  if (!mapped) return null;
+  if (part.kind === 'capacitor' && isElectrolytic(part)) {
+    return { libId: 'Capacitor_THT:CP_Radial_D5.0mm_P2.50mm', padOrder: ['1', '2'] };
+  }
+  return mapped;
+};
+
+// Programmatic 1xN (N <= 6) or 2xN dual-row header at 2.54mm pitch for every
+// kind without a curated footprint above (uncurated sensors/modules,
+// arduino_uno/esp32/raspberry_pi, and any part whose node count doesn't
+// match its kind's usual footprint).
+const synthesizedHeaderRecord = (part) => {
+  const count = Math.max(part?.nodes?.length ?? 0, 1);
+  const pitch = 2.54;
+  const drill = 1.0;
+  const padSize = 1.7;
+  const dualRow = count > 6;
+  const perRow = dualRow ? Math.ceil(count / 2) : count;
+  const pads = Array.from({ length: count }, (_, index) => {
+    const row = dualRow && index >= perRow ? 1 : 0;
+    const along = dualRow && index >= perRow ? count - 1 - index : index;
+    return {
+      number: String(index + 1),
+      x: (along - (perRow - 1) / 2) * pitch,
+      y: dualRow ? (row === 0 ? -pitch / 2 : pitch / 2) : 0,
+      shape: index === 0 ? 'rect' : 'circle',
+      size: { w: padSize, h: padSize },
+      drill,
+      angle: 0,
+    };
+  });
+
+  const bodySize = BODY_SIZES[part?.kind] || BODY_SIZES.generic;
+  const padExtentX = Math.max(...pads.map((pad) => Math.abs(pad.x)), 0) * 2 + padSize;
+  const padExtentY = Math.max(...pads.map((pad) => Math.abs(pad.y)), 0) * 2 + padSize;
+  const halfW = Math.max(bodySize.width, padExtentX) / 2;
+  const halfH = Math.max(bodySize.height, padExtentY) / 2;
+  const silk = [
+    { type: 'line', start: { x: -halfW, y: -halfH }, end: { x: halfW, y: -halfH }, width: 0.12 },
+    { type: 'line', start: { x: halfW, y: -halfH }, end: { x: halfW, y: halfH }, width: 0.12 },
+    { type: 'line', start: { x: halfW, y: halfH }, end: { x: -halfW, y: halfH }, width: 0.12 },
+    { type: 'line', start: { x: -halfW, y: halfH }, end: { x: -halfW, y: -halfH }, width: 0.12 },
+  ];
+  const libId = `Synthesized:${part?.kind || 'generic'}_${count}`;
+
+  return {
+    libId,
+    record: { libId, pads, silk, fab: silk, courtyard: { minX: -halfW - 0.25, minY: -halfH - 0.25, maxX: halfW + 0.25, maxY: halfH + 0.25 } },
+    padOrder: pads.map((pad) => pad.number),
+  };
+};
+
+/**
+ * Resolves the real KiCad footprint geometry for a placed part and the
+ * node-index -> pad-number remap that carries its circuit nodes onto that
+ * footprint's pads.
+ *
+ * Resolution order: (1) an exact `part.footprint` match against the vendored
+ * library, (2) the kind's curated default, (3) a programmatic header
+ * fallback. Falls through to the next step whenever a resolved footprint
+ * doesn't have enough pads for the part's actual node count.
+ *
+ * @param {{ kind?: string, value?: string, footprint?: string, nodes?: unknown[] }} part
+ * @returns {{ libId: string, record: FootprintRecord, padOrder: string[] }}
+ */
+export const footprintRecordFor = (part) => {
+  const nodeCount = part?.nodes?.length ?? 0;
+
+  if (part?.footprint && KICAD_FOOTPRINTS[part.footprint]) {
+    const record = KICAD_FOOTPRINTS[part.footprint];
+    if (record.pads.length >= nodeCount) {
+      return { libId: part.footprint, record, padOrder: identity(nodeCount) };
+    }
+  }
+
+  const mapped = footprintForKind(part);
+  if (mapped) {
+    const record = KICAD_FOOTPRINTS[mapped.libId];
+    if (record && record.pads.length >= nodeCount && mapped.padOrder.length === nodeCount) {
+      return { libId: mapped.libId, record, padOrder: mapped.padOrder };
+    }
+  }
+
+  return synthesizedHeaderRecord(part);
+};
+
+/** Body classification for the 3D viewer (src/features/pcb3d/pcbScene.js). */
+export const bodyKindFor = (libId, part) => {
+  if (BODY_BY_LIBID[libId]) return BODY_BY_LIBID[libId];
+  if (libId?.startsWith('Synthesized:') && MODULE_KINDS.has(part?.kind)) return 'module';
+  return 'generic';
+};
