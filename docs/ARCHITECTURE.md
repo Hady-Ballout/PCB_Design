@@ -34,7 +34,8 @@ mcp/
   registerTools.ts  the six-tool surface, shared by BOTH transports
   server.ts         stdio entry point (local)
   schemas.ts        zod circuit contract + component-count cap
-  artifactSink.ts   fileSink (writes to disk) / ArtifactStore (short-lived URLs)
+  artifactSink.ts   fileSink (writes to disk) / ArtifactStore (short-lived URLs);
+                    content is string | Uint8Array (the Gerber archive is bytes)
   limits.ts         per-subject simulation concurrency
   tools/            componentKinds, validate, export, simulate, render, layout, diagram
 ```

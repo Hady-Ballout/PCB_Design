@@ -10,7 +10,7 @@ import { addMissingSpiceModels, toKiCadNetlist, toSpice } from '../../src/core/p
 import { toKiCadSchematic } from '../../src/core/kicadSchematic.js';
 import { buildPcbLayout } from '../../src/core/pcbLayout.js';
 import { toKiCadPcb } from '../../src/core/kicadPcb.js';
-import { PcbExportError, toGerberArchive } from '../../src/core/gerberExport.js';
+import { PcbExportError, fabricationSlug, toGerberArchive } from '../../src/core/gerberExport.js';
 import { slugify } from '../artifacts.js';
 import type { ArtifactRef, ArtifactSink } from '../artifactSink.js';
 import type { ParsedCircuit } from '../schemas.js';
@@ -71,7 +71,9 @@ const exportGerbers = (circuit: ParsedCircuit, sink: ArtifactSink): GerberExport
 
   return {
     format: 'gerber',
-    artifact: sink.put(`${slugify(circuit.title)}${EXTENSIONS.gerber}`, archive.zip),
+    // fabricationSlug, not the artifact slugify the text formats use: the zip's
+    // own name has to match the files inside it, which gerberExport named.
+    artifact: sink.put(`${fabricationSlug(circuit.title)}${EXTENSIONS.gerber}`, archive.zip),
     files: archive.files.map((file) => file.name),
     summary: archive.summary,
   };

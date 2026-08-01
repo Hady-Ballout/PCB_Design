@@ -14,13 +14,15 @@
 //
 // THE Y FLIP. The layout is millimetres, y-DOWN (screen convention). Gerber and
 // Excellon are y-UP. So every coordinate is emitted as `boardHeight - y`. That
-// flip happens in exactly ONE place — `gerberFile`'s `Y()` and `excellonHits`,
-// both fed the same `board.height` — because a board mirrored on one layer and
-// not another is the classic way this file goes wrong, and it is invisible until
-// the panels arrive. Anything added here must go through those helpers; nothing
-// may pre-flip its own coordinates. `gerberExport.test.js` pins an exact
-// coordinate string on copper, mask, outline AND drill for the same pad so a
-// second flip anywhere shows up as a test failure rather than a scrapped run.
+// flip happens in exactly ONE place per file kind — `gerberFile`'s `at()` and
+// `drillFile`'s hit loop, both fed the same `board.height` — because a board
+// mirrored on one layer and not another is the classic way this file goes
+// wrong, and it is invisible until the panels arrive (the fab will not catch
+// it: a mirrored board is a perfectly manufacturable board, just not yours).
+// Anything added here must go through those helpers; nothing may pre-flip its
+// own coordinates. `gerberExport.test.js` pins an exact coordinate string on
+// copper, mask, outline AND drill for the same pad, so a second flip anywhere
+// shows up as a test failure rather than as a scrapped run.
 //
 // DETERMINISM. No timestamps, anywhere: no TF.CreationDate in the Gerber
 // headers, and zipStore.js stamps a fixed DOS date. Two runs of the same design
@@ -60,8 +62,17 @@ const human = (mm) => String(Math.round(mm * 1000) / 1000);
 
 const GENERATION_SOFTWARE = '%TF.GenerationSoftware,PromptToPCB,pcb-pilot,dev*%';
 
-/** Filesystem-safe slug, mirroring mcp/artifacts.ts so names agree everywhere. */
-const slugify = (title, fallback = 'circuit') => {
+/**
+ * Filesystem-safe board name, used for every file inside the archive. Exported
+ * because the archive's own filename has to match its contents, and the two
+ * callers that name it (the MCP export tool and the browser download button)
+ * would otherwise each invent their own slug.
+ *
+ * @param {string} [title]
+ * @param {string} [fallback]
+ * @returns {string}
+ */
+export const fabricationSlug = (title, fallback = 'circuit') => {
   const slug = String(title || '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -522,7 +533,7 @@ export const toGerberArchive = (layout, circuit) => {
     throw new PcbExportError(report);
   }
 
-  const slug = slugify(circuit?.title);
+  const slug = fabricationSlug(circuit?.title);
   const holes = drillHoles(layout);
   const names = [
     `${slug}.GTL`, `${slug}.GBL`, `${slug}.GTS`, `${slug}.GBS`,

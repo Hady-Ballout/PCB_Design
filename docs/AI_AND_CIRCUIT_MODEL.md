@@ -655,7 +655,10 @@ codebase's suffix conventions: bare `m` is MEG for resistances but milli inside 
 - KiCad export covers an XML netlist, a full `.kicad_sch` schematic (`core/kicadSchematic.js`,
   real library symbols), and a full `.kicad_pcb` board (`core/kicadPcb.js`, placed/routed
   footprints on the vendored KiCad THT library) — not a `.kicad_pro` project file tying them
-  together.
+  together. Fabrication output (`core/gerberExport.js`: RS-274X Gerbers + Excellon drill,
+  zipped) is separate and **gated** — it refuses any board whose routing, DRC or connectivity
+  verdict isn't clean, and it assumes a 2-layer through-hole stack with every part top-side
+  (the bottom silkscreen is emitted as a valid but empty file).
 - Ngspice validates that the deck *runs*, not that the circuit is electrically correct;
   functional correctness is checked by the topology rule engine above, whose rules are
   heuristics — a clean report is strong evidence, not proof, of a working circuit.

@@ -24,10 +24,11 @@ import { toDiagramSvg } from '../core/pcbGenerator.js';
 import { toKiCadSchematic } from '../core/kicadSchematic.js';
 import { buildPcbLayout } from '../core/pcbLayout.js';
 import { toKiCadPcb } from '../core/kicadPcb.js';
+import { fabricationSlug, toGerberArchive } from '../core/gerberExport.js';
 import { changedLineIndexes } from '../core/lineDiff.js';
 import { layoutCircuitDiagram } from '../core/schematicLayout.js';
 import { API_BASE } from '../core/config.js';
-import { downloadText } from '../core/download.js';
+import { downloadBlob, downloadText } from '../core/download.js';
 import { AUTH_PAGES, PUBLIC_PAGES, pageFromHash } from './routing.js';
 import { markSpiceAsProvisional, readGenerationStream } from './generationStream.js';
 import { messageId } from '../features/chat/chatFormat.js';
@@ -1607,10 +1608,27 @@ function App() {
     ...(generation?.validation?.warnings || []).map((message) => ({ id: 'erc', severity: 'warning', message, fix: '' })),
   ];
 
-  const pcbLayoutWarning = pcbLayout && (!pcbLayout.routing.complete || !pcbLayout.drc.ok)
-    ? `Layout incomplete: ${pcbLayout.routing.failedNets.length} unrouted nets / `
-      + `${pcbLayout.drc.violations.length} DRC violations — Gerber export will refuse.`
+  // The three conditions toGerberArchive gates on, phrased once so the warning
+  // line, the button's disabled state and its tooltip can never disagree with
+  // what the export actually does.
+  const pcbFabricable = Boolean(
+    pcbLayout && pcbLayout.routing.complete && pcbLayout.drc.ok && pcbLayout.connectivity.ok,
+  );
+  const pcbGateSummary = pcbLayout
+    ? `${pcbLayout.routing.failedNets.length} unrouted nets / `
+      + `${pcbLayout.drc.violations.length} DRC violations / `
+      + `${pcbLayout.connectivity.incompleteNets.length} split nets`
     : '';
+  const pcbLayoutWarning = pcbLayout && !pcbFabricable
+    ? `Layout incomplete: ${pcbGateSummary} — Gerber export will refuse.`
+    : '';
+
+  const downloadGerbers = () => {
+    if (!pcbFabricable || !result?.circuit) return;
+    // Same slug the files inside the archive carry, so the two agree.
+    const slug = fabricationSlug(result.circuit.title);
+    downloadBlob(`${slug}-gerbers.zip`, toGerberArchive(pcbLayout, result.circuit).zip, 'application/zip');
+  };
 
   const renderPcb3dView = () => (
     <div className="editor-window-body canvas-window-body">
@@ -1649,6 +1667,19 @@ function App() {
                 >
                   Download .kicad_pcb
                 </button>
+                {/* The title lives on the wrapper, not the button: a disabled
+                    control gets no mouse events, so Chrome never shows its own
+                    tooltip — and the disabled state is exactly when the reason
+                    needs explaining. */}
+                <span
+                  title={pcbFabricable
+                    ? 'RS-274X Gerbers + Excellon drill, ready to upload to a fab house'
+                    : `Fix ${pcbGateSummary} first`}
+                >
+                  <button onClick={downloadGerbers} disabled={!pcbFabricable}>
+                    Download Gerbers (.zip)
+                  </button>
+                </span>
                 {renderWindowControls('pcb3d')}
               </div>
             )}

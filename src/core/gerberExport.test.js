@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PcbExportError, toGerberArchive } from './gerberExport.js';
+import { PcbExportError, fabricationSlug, toGerberArchive } from './gerberExport.js';
 import { KICAD_FOOTPRINTS } from './kicadFootprintLibrary.js';
 import { buildPcbLayout } from './pcbLayout.js';
 import { RULES } from './pcbDesignRules.js';
@@ -56,6 +56,21 @@ const GERBER_NAMES = ['GTL', 'GBL', 'GTS', 'GBS', 'GTO', 'GBO', 'GKO']
   .map((extension) => `rc-low-pass.${extension}`);
 
 const countOf = (text, pattern) => (text.match(pattern) || []).length;
+
+describe('fabricationSlug', () => {
+  it('names the archive the same way the files inside it are named', () => {
+    const archive = archiveOf();
+
+    expect(fabricationSlug('RC low-pass')).toBe('rc-low-pass');
+    expect(archive.files.every((file) => file.name.startsWith(fabricationSlug('RC low-pass'))
+      || file.name === 'PCB-README.txt')).toBe(true);
+  });
+
+  it('falls back to a usable name when the title has nothing slug-worthy in it', () => {
+    expect(fabricationSlug('!!!')).toBe('circuit');
+    expect(fabricationSlug(undefined)).toBe('circuit');
+  });
+});
 
 describe('toGerberArchive export gate', () => {
   it('refuses a board with unrouted nets', () => {
