@@ -26,6 +26,11 @@ server/
   ai/          ollamaProvider.ts, chatMemory.ts, circuitKnowledge.ts
   circuit/     circuitResponse.ts, streamingCircuit.ts (imports src/core)
   simulation/  simulator.ts
+
+mcp/
+  server.ts    MCP stdio server — exposes the deterministic engine as tools
+  schemas.ts   zod circuit contract, artifacts.ts  artifact files
+  tools/       componentKinds, validate, export, simulate, render, layout, diagram
 ```
 
 ## The feature-chunk rule
@@ -72,6 +77,19 @@ src/core/circuitSync.ts    the server imports the frontend's circuit engine
                            ../../src/core/circuitSync.js) — core is the one
                            module shared across the frontend/backend boundary
 ```
+
+```text
+mcp/server.ts              MCP stdio server, a third consumer of the same engine
+        |
+mcp/tools/*                one module per tool, each a plain async function
+        |
+src/core/*  +              no AI provider and no HTTP hop: the MCP tools call
+server/simulation           the engine directly, so an MCP result and an in-app
+                           result for the same circuit are the same computation
+```
+
+The MCP server is a peer of the frontend and the backend, not a layer above them: it
+consumes `src/core` on the same terms and adds no circuit logic of its own.
 
 ## Size at a glance
 

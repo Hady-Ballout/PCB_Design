@@ -49,9 +49,18 @@ Ollama must be running locally (`ollama serve`) with a pulled model, or `AI_PROV
 point at an OpenAI-compatible endpoint (see `docs/OPERATIONS.md`). Ngspice must be on PATH
 for simulation to work.
 
+## Use it from Claude (MCP)
+
+`mcp/` is an MCP stdio server that exposes the deterministic engine — validation, the
+topology rule engine, SPICE/KiCad export, Ngspice simulation, schematic SVG and PCB
+layout — as tools for Claude Desktop or Claude Code. There is no AI in that path: Claude
+authors the circuit JSON itself and the tools check/run/export it, calling `src/core`
+directly with no HTTP hop and no provider. See `mcp/README.md` for the install snippet.
+
 ## Where to look next
 
 - `docs/ARCHITECTURE.md` — repo/module layout and the feature-chunk rule
+- `mcp/README.md` — the MCP server: tools, install, artifacts
 - `docs/FRONTEND.md` — `src/app`, `src/core`, `src/features` breakdown
 - `docs/BACKEND.md` — `server/` breakdown and API endpoints
 - `docs/AI_AND_CIRCUIT_MODEL.md` — circuit JSON schema, AI prompting, SPICE/KiCad/canvas sync
