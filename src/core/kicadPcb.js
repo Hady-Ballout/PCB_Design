@@ -22,11 +22,17 @@
 // Local pad geometry (position, size, shape) is pulled straight from the
 // vendored footprint record (src/core/kicadFootprintLibrary.js) rather than
 // reconstructed by inverse-rotating the layout's board-space pad data: every
-// vendored/synthesized pad carries its own local `angle: 0`, so with
-// `kicadAngle` on the footprint, KiCad reproduces the exact absolute pad
-// position and shape orientation with no extra bookkeeping. See
-// kicadPcb.test.js's "round-trips a 90-degree-rotated footprint" test for a
-// worked numeric proof, and the Phase D report for the derivation.
+// vendored/synthesized pad carries its own local `angle: 0`. Position is
+// inherited from the parent footprint's `(at x y angle)` automatically, but
+// a pad's OWN `(at x y angle)` angle is a separate, ABSOLUTE value in the
+// .kicad_pcb format (KiCanvas's PadPainter — and pcbnew — cancel the parent
+// footprint's rotation before applying the pad's own angle). So each pad
+// must also carry the footprint's `kicadAngle` on its own `(at …)`, or a
+// non-square pad (e.g. a TO-220's 2mm x 1.905mm pad) renders using its raw
+// local (unrotated) size instead of the layout's board-space size. See
+// kicadPcb.test.js's "round-trips a 90-degree-rotated footprint" test and
+// the pad-angle/board-space-size test for worked numeric proofs, and the
+// Phase D report for the derivation.
 import { KICAD_FOOTPRINTS } from './kicadFootprintLibrary.js';
 import { footprintRecordFor } from './pcbFootprints.js';
 import { uuidFrom } from './deterministicUuid.js';
@@ -122,14 +128,26 @@ const footprintBlock = (component, netNumberFor) => {
 
   const padLines = component.pads.map((pad) => {
     const local = padsByNumber.get(pad.padNumber);
-    const x = local ? local.x : 0;
-    const y = local ? local.y : 0;
-    const shape = shapeKeyword(local?.shape ?? pad.shape);
-    const w = local ? local.size.w : pad.size.w;
-    const h = local ? local.size.h : pad.size.h;
+    if (!local) {
+      throw new Error(`kicadPcb: no local footprint-record pad found for ${component.ref} pad ${pad.padNumber} (libId "${component.libId}")`);
+    }
+    const x = local.x;
+    const y = local.y;
+    const shape = shapeKeyword(local.shape);
+    const w = local.size.w;
+    const h = local.size.h;
     const netNode = pad.connected ? ` (net ${netNumberFor(pad.net)} ${q(pad.net)})` : '';
     const uuid = uuidFrom(`pcb:pad:${component.ref}:${pad.padNumber}`);
-    return `      (pad ${q(pad.padNumber)} thru_hole ${shape} (at ${fmt(x)} ${fmt(y)}) (size ${fmt(w)} ${fmt(h)}) (drill ${fmt(pad.drill)}) (layers "*.Cu" "*.Mask")${netNode} (tstamp ${uuid}))`;
+    // The pad's own (at x y angle) angle is ABSOLUTE in the .kicad_pcb
+    // format (KiCanvas's PadPainter cancels the parent footprint's rotation
+    // and then applies the pad's own angle) — it is not inherited from the
+    // parent footprint automatically the way position is. Every vendored
+    // pad's local `angle` is 0, so the pad's absolute angle must equal the
+    // footprint's own kicadAngle for the pad to land at the correct
+    // orientation; omitting it makes non-square pads (e.g. a TO-220's 2mm x
+    // 1.905mm pad) render with their raw local size instead of the layout's
+    // board-space size. See kicadPcb.test.js's pad-angle test.
+    return `      (pad ${q(pad.padNumber)} thru_hole ${shape} (at ${fmt(x)} ${fmt(y)}${angle ? ` ${fmt(angle)}` : ''}) (size ${fmt(w)} ${fmt(h)}) (drill ${fmt(pad.drill)}) (layers "*.Cu" "*.Mask")${netNode} (tstamp ${uuid}))`;
   });
 
   const refUuid = uuidFrom(`pcb:fptext:${component.ref}:reference`);

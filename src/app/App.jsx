@@ -1668,7 +1668,7 @@ function App() {
               <Pcb3DViewer
                 circuit={result.circuit}
                 layout={pcbLayout}
-                windowControls={pcbViewMode === '3d' ? renderWindowControls('pcb3d') : undefined}
+                windowControls={renderWindowControls('pcb3d')}
               />
             </React.Suspense>
           )}

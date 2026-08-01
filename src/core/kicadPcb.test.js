@@ -146,7 +146,7 @@ describe('toKiCadPcb', () => {
 
     for (const pad of rotated.pads) {
       const padMatch = footprintBlock.match(
-        new RegExp(`\\(pad "${pad.padNumber}" thru_hole \\w+ \\(at ([-\\d.]+) ([-\\d.]+)\\)`),
+        new RegExp(`\\(pad "${pad.padNumber}" thru_hole \\w+ \\(at ([-\\d.]+) ([-\\d.]+)(?: [-\\d.]+)?\\)`),
       );
       const local = { x: Number(padMatch[1]), y: Number(padMatch[2]) };
       const absolute = kicadRotate(local, Number(fangle));
@@ -156,6 +156,44 @@ describe('toKiCadPcb', () => {
       expect(round2(Number(fx) + absolute.x)).toBe(pad.x);
       expect(round2(Number(fy) + absolute.y)).toBe(pad.y);
     }
+  });
+
+  it('emits an absolute pad angle so a non-square pad on a rotated footprint keeps its board-space size', () => {
+    // KiCanvas's PadPainter cancels the parent footprint's rotation and then
+    // applies the pad's own (at x y angle) angle, which the .kicad_pcb
+    // format defines as ABSOLUTE (not relative to the footprint). Every
+    // vendored pad is local angle 0, so the pad's absolute angle must equal
+    // the footprint's own kicadAngle for the pad to land at the footprint's
+    // orientation. Without that, a non-square pad (e.g. TO-220 2mm x
+    // 1.905mm) renders using its raw local (unrotated) size instead of the
+    // rotated board-space size the layout computed.
+    for (const component of layout.components) {
+      const refIndex = pcb.indexOf(`(fp_text reference "${component.ref}"`);
+      const blockStart = pcb.lastIndexOf('\n  (footprint "', refIndex);
+      const nextIndex = pcb.indexOf('\n  (footprint "', refIndex);
+      const block = pcb.slice(blockStart, nextIndex === -1 ? undefined : nextIndex);
+
+      for (const pad of component.pads) {
+        const padMatch = block.match(
+          new RegExp(`\\(pad "${pad.padNumber}" thru_hole \\w+ \\(at ([-\\d.]+) ([-\\d.]+)(?: ([-\\d.]+))?\\) \\(size ([\\d.]+) ([\\d.]+)\\)`),
+        );
+        expect(padMatch).toBeTruthy();
+        const padAngle = Number(padMatch[3] ?? 0);
+        const localW = Number(padMatch[4]);
+        const localH = Number(padMatch[5]);
+        // KiCad swaps the rendered footprint of a rect/oval pad's (w,h) at
+        // a 90/270 absolute angle, same as pcbPlace.js's rotatePadShape.
+        const swapped = (((Math.round(padAngle) % 180) + 180) % 180) === 90;
+        const boardW = swapped ? localH : localW;
+        const boardH = swapped ? localW : localH;
+        expect(boardW).toBe(pad.size.w);
+        expect(boardH).toBe(pad.size.h);
+      }
+    }
+  });
+
+  it('matches the committed byte-for-byte snapshot (cross-commit stability guard)', () => {
+    expect(toKiCadPcb(layout, circuit)).toMatchSnapshot();
   });
 
   it('writes a board even when routing/DRC are not clean', () => {

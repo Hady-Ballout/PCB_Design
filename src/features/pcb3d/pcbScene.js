@@ -3,6 +3,7 @@
 // component stays thin and the scene is reusable for GLB export.
 import * as THREE from 'three';
 import { BOARD_THICKNESS, PAD_DIAMETER, VIA_DIAMETER } from '../../core/pcbLayout.js';
+import { rotateOffset } from '../../core/pcbPlace.js';
 
 const TRACE_HEIGHT = 0.06;
 const BOARD_TOP = BOARD_THICKNESS / 2;
@@ -215,13 +216,19 @@ const componentMesh = (component, mats, toX, toZ) => {
         mats.silver,
       );
       tab.name = 'to220-tab';
-      if (horizontal) {
-        bodyMesh.position.set(x, BOARD_TOP + 2.2, z - 0.8);
-        tab.position.set(x, BOARD_TOP + 4.4 + (tall - 4.4) / 2, z - 1.7);
-      } else {
-        bodyMesh.position.set(x - 0.8, BOARD_TOP + 2.2, z);
-        tab.position.set(x - 1.7, BOARD_TOP + 4.4 + (tall - 4.4) / 2, z);
-      }
+      // The body/tab sit offset from the lead row along the footprint's
+      // local perpendicular axis (local (0, -1), i.e. "north" of the pins
+      // in unrotated footprint space). `horizontal` only tells us which
+      // board axis the pins ended up on, which is symmetric between 90 and
+      // 270 (and between 0 and 180) — it can't tell which SIDE the tab goes
+      // on. Rotate the local offset by the component's actual rotation
+      // (same convention as pcbPlace.js's rotateOffset, which produced this
+      // component's own placement) to get that sign right for every
+      // rotation, not just axis.
+      const bodyOffset = rotateOffset({ x: 0, y: -0.8 }, component.rotation);
+      const tabOffset = rotateOffset({ x: 0, y: -1.7 }, component.rotation);
+      bodyMesh.position.set(x + bodyOffset.x, BOARD_TOP + 2.2, z + bodyOffset.y);
+      tab.position.set(x + tabOffset.x, BOARD_TOP + 4.4 + (tall - 4.4) / 2, z + tabOffset.y);
       holder.add(bodyMesh, tab);
     }
     for (const point of padPoints) holder.add(lead(point.x, point.z, BOARD_TOP + 1.2, mats));

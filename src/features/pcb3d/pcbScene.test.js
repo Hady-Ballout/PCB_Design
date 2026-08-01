@@ -76,25 +76,31 @@ describe('buildPcbScene rotation fixes', () => {
     }
   });
 
-  const to220Component = (rotation) => (rotation === 0
-    ? {
-      ref: 'U1', kind: 'regulator', value: '7805', body: 'to220', rotation: 0,
-      x: 50, y: 50, width: 10.5, height: 5,
-      pads: [
-        { x: 45, y: 50, net: 'A', diameter: 2 },
-        { x: 50, y: 50, net: 'B', diameter: 2 },
-        { x: 55, y: 50, net: 'C', diameter: 2 },
-      ],
+  const to220Component = (rotation) => {
+    if (rotation === 0) {
+      return {
+        ref: 'U1', kind: 'regulator', value: '7805', body: 'to220', rotation: 0,
+        x: 50, y: 50, width: 10.5, height: 5,
+        pads: [
+          { x: 45, y: 50, net: 'A', diameter: 2 },
+          { x: 50, y: 50, net: 'B', diameter: 2 },
+          { x: 55, y: 50, net: 'C', diameter: 2 },
+        ],
+      };
     }
-    : {
-      ref: 'U1', kind: 'regulator', value: '7805', body: 'to220', rotation: 90,
+    // 90 and 270 share the same board-space width/height/pad span (the
+    // lead row still runs along Z either way) — only the tab/body offset
+    // sign along X should differ between them.
+    return {
+      ref: 'U1', kind: 'regulator', value: '7805', body: 'to220', rotation,
       x: 50, y: 50, width: 5, height: 10.5,
       pads: [
         { x: 50, y: 45, net: 'A', diameter: 2 },
         { x: 50, y: 50, net: 'B', diameter: 2 },
         { x: 50, y: 55, net: 'C', diameter: 2 },
       ],
-    });
+    };
+  };
 
   it('keeps the unrotated TO-220 body/tab offset along Z (regression guard)', () => {
     const group = buildPcbScene(layoutFor(to220Component(0)));
@@ -116,6 +122,24 @@ describe('buildPcbScene rotation fixes', () => {
     expect(tab.position.z).toBeCloseTo(0, 6);
     expect(body.position.x).not.toBeCloseTo(0, 6);
     expect(tab.position.x).not.toBeCloseTo(0, 6);
+  });
+
+  it('flips the TO-220 tab/body offset side between rotation 90 and rotation 270', () => {
+    // Fix wave 1, Minor 2: the offset used to be derived purely from the
+    // pad span (symmetric in 90 vs 270), so both rotations put the tab on
+    // the same X side. It must now flip sign with the actual rotation
+    // direction.
+    const group90 = buildPcbScene(layoutFor(to220Component(90)));
+    const group270 = buildPcbScene(layoutFor(to220Component(270)));
+    const body90 = group90.getObjectByName('part-U1').getObjectByName('to220-body');
+    const tab90 = group90.getObjectByName('part-U1').getObjectByName('to220-tab');
+    const body270 = group270.getObjectByName('part-U1').getObjectByName('to220-body');
+    const tab270 = group270.getObjectByName('part-U1').getObjectByName('to220-tab');
+
+    expect(body90.position.x).not.toBeCloseTo(0, 6);
+    expect(body270.position.x).not.toBeCloseTo(0, 6);
+    expect(Math.sign(body90.position.x)).toBe(-Math.sign(body270.position.x));
+    expect(Math.sign(tab90.position.x)).toBe(-Math.sign(tab270.position.x));
   });
 
   const moduleComponent = (pads) => ({
