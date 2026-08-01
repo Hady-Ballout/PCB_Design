@@ -96,6 +96,13 @@ const layoutAttempt = (parts, expandFactor) => {
       y: placement.y,
       width: round(bounds.maxX - bounds.minX),
       height: round(bounds.maxY - bounds.minY),
+      // Every pad the footprint physically has, not just the wired ones:
+      // placementPads appends the record pads no node claimed under NC_* net
+      // names, so `connected` below falls out false for them and they flow on
+      // as real copper with no net (router obstacle, DRC clearance
+      // participant, Gerber flash + mask opening + drill hit, .kicad_pcb pad
+      // without a net node). `pinIndex` keeps counting past the node list for
+      // those, which is what makes it unique per pad.
       pads: placementPads(placement).map((placedPad) => ({
         x: round(placedPad.x),
         y: round(placedPad.y),

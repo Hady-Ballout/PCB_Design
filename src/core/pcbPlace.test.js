@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { ALLOWED_KINDS, DEFAULT_PIN_COUNT_BY_KIND } from './componentKinds.js';
 import { footprintRecordFor } from './pcbFootprints.js';
 import {
   BOARD_MARGIN,
   PLACEMENT_GAP,
+  isUnconnectedTerminal,
   placeComponents,
   placementBounds,
   placementPads,
@@ -137,7 +139,10 @@ describe('placeComponents', () => {
   it('puts each pad on its node, rotated with the footprint', () => {
     for (const placement of placements) {
       const pads = placementPads(placement);
-      expect(pads.map((pad) => pad.net)).toEqual(placement.part.nodes);
+      // Node pads come first, in node order; anything after them is footprint
+      // copper the netlist never claimed (see the completeness suite below).
+      const nodeCount = placement.part.nodes.length;
+      expect(pads.slice(0, nodeCount).map((pad) => pad.net)).toEqual(placement.part.nodes);
       for (const pad of pads) {
         const bounds = placementBounds(placement);
         expect(pad.x).toBeGreaterThanOrEqual(bounds.minX);
@@ -250,5 +255,80 @@ describe('placeComponents', () => {
       expect(pad.pad.size).toEqual(unrotatedPad.size);
       expect(pad.pad.angle).toBe(((unrotatedPad.angle ?? 0) + rotation) % 180);
     }
+  });
+});
+
+/**
+ * A footprint's pads are physical holes in the board, not netlist entries: a
+ * DIP-8 op-amp uses five nodes but the chip still has eight legs, and a board
+ * drilled for only five of them cannot take the part at all. Every pad in the
+ * resolved footprint record must therefore reach the exporters.
+ */
+describe('placementPads footprint completeness', () => {
+  const placementFor = (part) => {
+    const { libId, record, padOrder } = footprintRecordFor(part);
+    return { placement: { part, footprint: record, libId, padOrder, x: 0, y: 0, rotation: 0 }, record, padOrder };
+  };
+
+  it('emits every footprint-record pad for every kind in the component registry', () => {
+    for (const kind of ALLOWED_KINDS) {
+      const nodeCount = DEFAULT_PIN_COUNT_BY_KIND[kind] ?? 2;
+      const part = {
+        ref: 'U1',
+        kind,
+        value: '',
+        nodes: Array.from({ length: nodeCount }, (_, index) => `N${index + 1}`),
+      };
+      const { placement, record, padOrder } = placementFor(part);
+      const pads = placementPads(placement);
+
+      expect(pads.length, `${kind}: emitted pad count`).toBe(record.pads.length);
+      const emitted = pads.map((pad) => pad.padNumber);
+      expect(new Set(emitted).size, `${kind}: emitted pad numbers are distinct`).toBe(emitted.length);
+      expect([...emitted].sort(), `${kind}: emitted pads are exactly the record's`)
+        .toEqual(record.pads.map((pad) => pad.number).sort());
+
+      // Every padOrder entry resolves to a distinct real record pad — no node
+      // silently sharing a hole with another, and no phantom pad number.
+      expect(new Set(padOrder).size, `${kind}: padOrder entries are distinct`).toBe(padOrder.length);
+      const recordNumbers = new Set(record.pads.map((pad) => pad.number));
+      for (const number of padOrder) {
+        expect(recordNumbers.has(number), `${kind}: padOrder references record pad "${number}"`).toBe(true);
+      }
+    }
+  });
+
+  it('appends the DIP-8 pads a 5-node op-amp never claims, as unwired copper', () => {
+    const part = { ref: 'XU1', kind: 'opamp', value: 'LM358', nodes: ['IP', 'IN', 'OUT', 'VCC', '0'] };
+    const { placement, record } = placementFor(part);
+    const pads = placementPads(placement);
+
+    expect(pads).toHaveLength(8);
+    expect(pads.slice(0, 5).map((pad) => pad.padNumber)).toEqual(['3', '2', '1', '8', '4']);
+    const extras = pads.slice(5);
+    expect(extras.map((pad) => pad.padNumber)).toEqual(['5', '6', '7']);
+    for (const extra of extras) {
+      // The unwired-terminal convention, so downstream code (pcbLayout's
+      // `connected` flag, pcbRoute/pcbDrc's `#nc:` obstacle keys) classifies
+      // these without needing a new field.
+      expect(isUnconnectedTerminal(extra.net, part.ref, extra.index + 1)).toBe(true);
+      const local = record.pads.find((pad) => pad.number === extra.padNumber);
+      expect({ x: extra.x, y: extra.y }).toEqual({ x: local.x, y: local.y });
+      expect(extra.pad.drill).toBe(local.drill);
+      expect(extra.pad.size).toEqual(local.size);
+    }
+  });
+
+  it('rotates the appended pads with the rest of the footprint', () => {
+    const part = { ref: 'XU1', kind: 'opamp', value: 'LM358', nodes: ['IP', 'IN', 'OUT', 'VCC', '0'] };
+    const { record } = placementFor(part);
+    const { libId, padOrder } = footprintRecordFor(part);
+    const placement = { part, footprint: record, libId, padOrder, x: 20, y: 30, rotation: 90 };
+    const pad5 = placementPads(placement).find((pad) => pad.padNumber === '5');
+    const local = record.pads.find((pad) => pad.number === '5');
+
+    // 90 degrees, y-down: (x, y) -> (-y, x), then translated to the placement.
+    expect(pad5.x).toBeCloseTo(20 - local.y, 6);
+    expect(pad5.y).toBeCloseTo(30 + local.x, 6);
   });
 });

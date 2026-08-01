@@ -84,12 +84,20 @@ describe('buildPcbLayout', () => {
     }
   });
 
-  it('gives every node a pad on its component', () => {
+  it('gives every node a pad on its component, then every unclaimed footprint pad', () => {
     for (const part of sampleCircuit.components) {
       const component = layout.components.find((item) => item.ref === part.ref);
-      expect(component.pads).toHaveLength(part.nodes.length);
-      expect(component.pads.map((pad) => pad.net)).toEqual(part.nodes);
+      const { record } = footprintRecordFor(part);
+      // The whole footprint is emitted — XU1 is a 5-node op-amp on a DIP-8, so
+      // it carries eight pads, five of them wired.
+      expect(component.pads, part.ref).toHaveLength(record.pads.length);
+      expect(component.pads.slice(0, part.nodes.length).map((pad) => pad.net)).toEqual(part.nodes);
+      for (const pad of component.pads.slice(part.nodes.length)) expect(pad.connected).toBe(false);
     }
+    const opamp = layout.components.find((item) => item.ref === 'XU1');
+    expect(opamp.pads).toHaveLength(8);
+    expect(opamp.pads.filter((pad) => pad.connected)).toHaveLength(5);
+    expect(new Set(opamp.pads.map((pad) => pad.padNumber)).size).toBe(8);
   });
 
   it('routes every multi-pad net with connected orthogonal traces', () => {

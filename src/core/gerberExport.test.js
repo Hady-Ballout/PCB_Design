@@ -475,6 +475,7 @@ describe('toGerberArchive on a real routed layout', () => {
 
     expect(archive.summary.componentCount).toBe(3);
     expect(archive.summary.drillCount).toBe(6);
+    // (rcLowPass has no multi-pad-footprint part; the DIP-8 case is below.)
     const copper = archive.files.find((file) => file.name === 'rc-low-pass.GTL').data;
     // Six pads: five flash, the terminal block's keyed rect pad paints a region.
     expect(countOf(copper, /D03\*/g) + countOf(copper, /G36\*/g)).toBe(6);
@@ -483,6 +484,51 @@ describe('toGerberArchive on a real routed layout', () => {
     for (const [, y] of copper.matchAll(/Y(-?\d+)D0[123]\*/g)) {
       expect(Number(y)).toBeGreaterThanOrEqual(0);
       expect(Number(y)).toBeLessThanOrEqual(layout.board.height * 1e6);
+    }
+  });
+
+  // A DIP-8 op-amp uses five circuit nodes but has eight legs. If the fab data
+  // only carries the five wired pads, the chip physically cannot be inserted —
+  // and every gate would still call the board manufacturable.
+  const invertingAmp = {
+    title: 'Inverting amplifier',
+    components: [
+      { ref: 'XU1', kind: 'opamp', value: 'LM358', nodes: ['0', 'INV', 'OUT', 'VCC', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['IN', 'INV'] },
+      { ref: 'R2', kind: 'resistor', value: '100k', nodes: ['INV', 'OUT'] },
+      { ref: 'V1', kind: 'signal_source', value: '1Vpp', nodes: ['IN', '0'] },
+      { ref: 'V2', kind: 'voltage_source', value: '12V', nodes: ['VCC', '0'] },
+    ],
+  };
+
+  it('drills, coppers and unmasks all eight legs of a DIP-8 op-amp, not just its five wired nodes', () => {
+    const layout = buildPcbLayout(invertingAmp);
+    expect(layout.routing.complete && layout.drc.ok && layout.connectivity.ok).toBe(true);
+
+    const opamp = layout.components.find((component) => component.ref === 'XU1');
+    expect(opamp.pads).toHaveLength(8);
+    expect(opamp.pads.filter((pad) => pad.connected)).toHaveLength(5);
+
+    const archive = toGerberArchive(layout, invertingAmp);
+    const padHoles = layout.components
+      .reduce((total, component) => total + component.pads.filter((pad) => pad.drill > 0).length, 0);
+    const viaHoles = layout.vias.filter((via) => via.drill > 0).length;
+
+    expect(archive.summary.drillCount).toBe(padHoles + viaHoles);
+    const drill = fileNamed(archive, 'inverting-amplifier.DRL');
+    expect(countOf(drill, /^X-?[\d.]+Y-?[\d.]+$/gm)).toBe(padHoles + viaHoles);
+
+    // Each unwired leg gets a hole, top copper and a mask opening at its own
+    // coordinate — the three things a fab house needs to make the hole usable.
+    const size3 = (value) => value.toFixed(3);
+    const um = (value) => String(Math.round(value * 1e6));
+    const top = fileNamed(archive, 'inverting-amplifier.GTL');
+    const mask = fileNamed(archive, 'inverting-amplifier.GTS');
+    for (const pad of opamp.pads.filter((entry) => !entry.connected)) {
+      expect(drill).toContain(`X${size3(pad.x)}Y${size3(layout.board.height - pad.y)}`);
+      const at = `X${um(pad.x)}Y${um(layout.board.height - pad.y)}`;
+      expect(top).toContain(at);
+      expect(mask).toContain(at);
     }
   });
 });

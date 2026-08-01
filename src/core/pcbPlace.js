@@ -51,6 +51,16 @@ const snap = (value) => Math.round(value / GRID) * GRID;
 export const isUnconnectedTerminal = (node, ref, pin) =>
   /^NC_/i.test(String(node)) || String(node) === `${ref}_${pin}`;
 
+/**
+ * Net name for a footprint pad the circuit never wired — a physical leg with
+ * no node behind it (DIP-8 pads 5-7 under a 5-node op-amp). Deliberately in
+ * the NC_* form isUnconnectedTerminal already recognises, so every downstream
+ * stage classifies it without a new field: pcbLayout stamps `connected: false`,
+ * and pcbRoute/pcbDrc then file it under their private `#nc:` keys where it is
+ * an obstacle and a clearance participant but never a routable net.
+ */
+export const unwiredPadNet = (ref, padNumber) => `NC_${ref}_${padNumber}`;
+
 /** Rotates a footprint-local offset by a multiple of 90° (y-down). */
 export const rotateOffset = (point, rotation) => {
   switch (((rotation % 360) + 360) % 360) {
@@ -124,26 +134,49 @@ const rotatePadShape = (pad, rotation) => {
 };
 
 /**
- * Absolute pad positions for a placement, one entry per circuit node in node
- * order: `{ net, padNumber, index, pad (the footprint record pad, rotated to
- * match the placement), x, y }`.
+ * Absolute pad positions for a placement: `{ net, padNumber, index, pad (the
+ * footprint record pad, rotated to match the placement), x, y }`.
+ *
+ * One entry per circuit node first, in node order, then EVERY remaining pad of
+ * the footprint record — the legs the netlist never claimed. Those are real
+ * copper: a DIP-8 op-amp uses five nodes but the chip still has eight pins, and
+ * a board drilled for only five of them cannot physically take the part. They
+ * come back on unwiredPadNet() names so the rest of the pipeline treats them as
+ * unconnected terminals: copper, mask and a drill hit, obstacles to the router,
+ * clearance participants in the DRC, and a pad with no net node in the
+ * .kicad_pcb.
  */
 export const placementPads = (placement) => {
   const byNumber = new Map(placement.footprint.pads.map((pad) => [pad.number, pad]));
-  return (placement.part?.nodes || []).map((node, index) => {
-    const padNumber = placement.padOrder[index];
-    const rawPad = byNumber.get(padNumber) || { ...FALLBACK_PAD, number: padNumber };
-    const pad = rotatePadShape(rawPad, placement.rotation);
+  const ref = String(placement.part?.ref ?? '');
+
+  const entry = (rawPad, net, padNumber, index) => {
     const offset = rotateOffset(rawPad, placement.rotation);
     return {
-      net: node,
+      net,
       padNumber,
       index,
-      pad,
+      pad: rotatePadShape(rawPad, placement.rotation),
       x: placement.x + offset.x,
       y: placement.y + offset.y,
     };
+  };
+
+  const claimed = new Set();
+  const nodePads = (placement.part?.nodes || []).map((node, index) => {
+    const padNumber = placement.padOrder[index];
+    claimed.add(padNumber);
+    const rawPad = byNumber.get(padNumber) || { ...FALLBACK_PAD, number: padNumber };
+    return entry(rawPad, node, padNumber, index);
   });
+
+  // Record order, so the appended pads read in pad-number order the way the
+  // footprint library lists them.
+  const extraPads = placement.footprint.pads
+    .filter((pad) => !claimed.has(pad.number))
+    .map((pad, offset) => entry(pad, unwiredPadNet(ref, pad.number), pad.number, nodePads.length + offset));
+
+  return [...nodePads, ...extraPads];
 };
 
 /** Node indices that are actually wired to something outside the part. */
