@@ -32,10 +32,17 @@ export const RULES = {
    * the obstacle mask less, which is the entire mechanism. Other nets' copper
    * keeps its own real width in that mask, so nothing is bought on credit.
    *
-   * Safe at the bottom rung: JLCPCB's 2-layer minimum trace/space is 0.127 mm,
-   * so 0.25 mm is about 2x the process floor; 0.25 mm of 1 oz copper carries
-   * roughly 1 A at a 10 C rise, against the ~200 mA a small-signal BJT (the
-   * part that needs the neck) will ever pull.
+   * Safe at the bottom rung on two counts. Etchable: JLCPCB's 2-layer minimum
+   * trace/space is 0.127 mm, so 0.25 mm is about 2x the process floor.
+   * Ampacity: 0.25 mm of 1 oz copper carries roughly 1 A at a 10 C rise, which
+   * is the number that has to hold — NOT the ~200 mA of the small-signal BJT
+   * that typically forces the neck. A net's MST can chain a rail through a
+   * tight pad, so a necked segment may be carrying the aggregate current of
+   * everything downstream of it, not just the one part that needed the room.
+   * 1 A covers the boards this pipeline produces (a handful of LEDs, a relay
+   * coil, a small motor driver) with margin; if a design ever needs more, the
+   * refinement is to exempt ground/power nets from the bottom rungs rather than
+   * to raise the floor for every signal.
    */
   traceWidthLadder: [0.8, 0.5, 0.4, 0.25],
   /** Narrowest trace any stage may produce; pcbDrc enforces it independently. */

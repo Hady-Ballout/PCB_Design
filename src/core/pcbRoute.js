@@ -71,6 +71,23 @@
 // that cannot escape at the narrowest rung is reported `no_escape` rather than
 // routed into a short.
 //
+// What a rung is allowed to touch is therefore also rebuilt per rung, because
+// the mask is only half the story: the search seeds its sources directly, and
+// it force-allows pad terminal cells past the mask entirely. So at each rung
+//
+//   * the job's own two endpoints must clear it (`escape.limit >= half`),
+//   * the force-allowed terminal set holds only the pads of this job's two
+//     islands that clear it as well, and
+//   * a source cell is seeded only when the mask leaves it FREE or it is one
+//     of those admitted terminals — a rung with no seedable source falls
+//     through to the next.
+//
+// The invariant that buys is narrow but exact: every copper cell a rung may
+// occupy has been proved safe AT THAT RUNG'S WIDTH. Without it a later job
+// inherits room that only a narrower earlier job ever had — laying full-width
+// copper onto a pinched pad's terminal cell, or starting from a necked run's
+// cell that now sits inside a foreign pad's larger keep-out.
+//
 // Pad copper is shape-exact everywhere it matters — as KEEP-OUT through
 // `padCoreDistance` + the sag bound above, and as CONTAINMENT ("is this cell on
 // the pad?") through `padCopperDistance`. `padCopperRadius`'s circumscribing
@@ -639,12 +656,14 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
           if (nextCol < 0 || nextRow < 0 || nextCol >= cols || nextRow >= rows) continue;
           next = cellIndex(nextCol, nextRow) + layer * cellCount;
           // The one force-allowed exception is a pad's TERMINAL cell, and only
-          // against foreign copper: it is the pad's only way onto the grid, and
-          // `escape.limit` has already proved that a trace of this width can
-          // both sit there and leave it. It is not extended to the net's other
-          // copper cells (a job at full width joining a necked run must clear
-          // the mask at ITS width) and never to the board edge, which no
-          // exception can make safe.
+          // against foreign copper: it is the pad's only way onto the grid.
+          // `isTerminal` is rebuilt per rung and holds exactly the pads of this
+          // job's two islands whose `escape.limit` clears THIS rung's
+          // half-width, so every force-allowed cell has been proved to carry a
+          // trace of the width being laid and to let it leave. It is not
+          // extended to the net's other copper cells (a job at full width
+          // joining a necked run must clear the mask at ITS width) and never to
+          // the board edge, which no exception can make safe.
           if (blockTrace[next] !== FREE
             && (blockTrace[next] === EDGE_OWNER || !isTerminal[next])) continue;
           const vertical = direction === DOWN || direction === UP;
@@ -731,17 +750,14 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
       continue;
     }
 
-    const terminals = [];
-    for (const item of copper) {
-      if (item.netKey !== netKey || item.kind !== 'pad') continue;
-      if (item.island === fromIsland || item.island === toIsland) terminals.push(...item.cells);
-    }
-
     // The neck-down ladder. Full width first, and a narrower rung only once the
     // wide one has genuinely failed — the narrower trace's payoff is a smaller
     // obstacle mask (stampPad/stampSegment are both parameterised on `half`),
     // which is exactly what opens a pad the wide trace could not leave. Width
     // is chosen per JOB, so a two-terminal connection is one uniform width.
+    //
+    // Every rung re-derives which of the net's own copper cells it may use, so
+    // a rung never inherits room that was only ever proved for a narrower one.
     let laid = false;
     let closed = null;
     for (const width of widthLadder) {
@@ -749,7 +765,29 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
       if (!(job.from.escape?.limit >= half - EPSILON)
         || !(job.to.escape?.limit >= half - EPSILON)) continue;
       buildMasks(netKey, half);
-      const found = search(sources, goals, terminals);
+      // Terminal cells are the search's ONE exception to the obstacle mask, so
+      // the exception is rebuilt at every rung: a pad is admitted only when its
+      // own `escape.limit` proves a trace of THIS width can sit on its cell and
+      // leave it. Reaching a pad with a narrow job does not open it to a wide
+      // one — this job could otherwise land full-width copper on a cell that
+      // only a neck ever fitted.
+      const terminals = [];
+      for (const item of copper) {
+        if (item.netKey !== netKey || item.kind !== 'pad') continue;
+        if (item.island !== fromIsland && item.island !== toIsland) continue;
+        if (!(item.pad.escape?.limit >= half - EPSILON)) continue;
+        terminals.push(...item.cells);
+      }
+      // The same rule on the source side, which the search seeds directly and
+      // therefore never puts through the mask test the step rule applies. A
+      // source cell the mask blocks at this width — a narrower run's copper now
+      // sitting inside a foreign pad's larger keep-out, or a pad this rung
+      // cannot escape — is not a legal place to start, and the rung falls
+      // through to a narrower one if that leaves it with no source at all.
+      const admitted = new Set(terminals);
+      const rungSources = sources.filter((node) => blockTrace[node] === FREE || admitted.has(node));
+      if (!rungSources.length) continue;
+      const found = search(rungSources, goals, terminals);
       if (found.ok) {
         commitPath(found.node, job, fromIsland, width);
         relabel(netKey, toIsland, fromIsland);

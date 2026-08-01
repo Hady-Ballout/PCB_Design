@@ -230,6 +230,63 @@ describe('routeBoard', () => {
     expect(checkConnectivity(layout).ok).toBe(true);
   });
 
+  it('will not start a full-width job from a cell only a neck ever fitted', () => {
+    // A three-pad net whose first pad is the pinched middle pin of a TO-92.
+    // Its terminal cell is (12.7, 6.985), and `escape.limit` there is 0.2276 —
+    // room for the 0.4 mm rung and nothing wider.
+    //
+    // Job 1 (Q1.2 -> R1, the MST's short edge) necks to 0.4 and runs straight
+    // down the corridor. Job 2 (R1 -> R2) has full-width endpoints, so it is
+    // tried at 0.8 — and its source island now CONTAINS the pinched pad. The
+    // cheapest way out to R2 is the row below the TO-92, which is one step off
+    // the pinched terminal, so seeding that terminal as a source hands the wide
+    // job a free start on a cell only a 0.4 mm trace was ever cleared for.
+    //
+    // The wall column (J1, sealed to both board edges, one gap at y = 8.255)
+    // is what makes that start the cheapest one: every route to R2 has to come
+    // through that gap, and the pinched terminal sits two rows above it while
+    // R1 sits six rows below.
+    //
+    // Before the per-rung admission check the router laid
+    // `top 0.8 (12.7,6.985)->(12.7,8.255)` straight off that terminal, and DRC
+    // called it: clearance 0.174 against pad Q1.1, required 0.3. The board
+    // failed loud rather than shorting silently, but it failed.
+    const pinched = (x, y, net, extra) => pad(x, y, net, {
+      shape: 'oval', size: { w: 1.05, h: 1.5 }, diameter: 1.5, drill: 0.7, ...extra,
+    });
+    const input = {
+      board: { width: 32, height: 13.335 },
+      components: [
+        part('Q1', [
+          pinched(11.68, 6.35, 'Q1_1', { connected: false, padNumber: '1' }),
+          pinched(12.95, 6.35, 'SIG', { padNumber: '2' }),
+          pinched(14.22, 6.35, 'Q1_3', { connected: false, padNumber: '3' }),
+        ]),
+        part('R1', [pad(12.95, 11.43, 'SIG')]),
+        part('R2', [pad(26.67, 9.525, 'SIG')]),
+        part('J1', [1.27, 3.175, 5.08, 6.985, 9.525, 11.43].map((y, index) => pad(19.05, y, `J1_${index + 1}`, {
+          connected: false, diameter: 1, drill: 0.5, padNumber: String(index + 1),
+        }))),
+      ],
+    };
+
+    const routed = routeBoard(input);
+
+    expect(routed.failedNets).toEqual([]);
+    const layout = asLayout(input, routed);
+    expect(runDrc(layout).violations).toEqual([]);
+    expect(checkConnectivity(layout).ok).toBe(true);
+    // The escape out of the pinched pad is still necked, and the rest of the
+    // net is still laid at full width — the fix withholds the terminal cell,
+    // it does not punish the whole net.
+    const touchesPinchedTerminal = (trace) => [trace.from, trace.to]
+      .some((point) => Math.hypot(point.x - 12.7, point.y - 6.985) < 1e-6);
+    const escapes = routed.traces.filter(touchesPinchedTerminal);
+    expect(escapes.length).toBeGreaterThan(0);
+    for (const trace of escapes) expect(trace.width).toBeLessThanOrEqual(0.4);
+    expect(routed.traces.some((trace) => trace.width === RULES.traceWidth)).toBe(true);
+  });
+
   it('leaves every trace at full width on a board that has the room', () => {
     const routed = routeBoard({
       board: { width: 44, height: 34 },

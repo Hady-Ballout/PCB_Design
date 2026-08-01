@@ -170,6 +170,18 @@ describe('runDrc', () => {
     expect(violation.netA).toBe('A');
   });
 
+  it('still holds the trace-width floor when handed a partial rules object', () => {
+    // `rules.minTraceWidth` undefined would make every comparison NaN, i.e. a
+    // silent pass on the one check that exists to catch a runaway neck.
+    const result = runDrc(layoutOf({
+      components: [part('R1', [pad(10, 10, 'A')]), part('R2', [pad(20, 10, 'A')])],
+      traces: [{ ...trace('A', { x: 10, y: 10 }, { x: 20, y: 10 }), width: 0.05 }],
+    }), { ...RULES, minTraceWidth: undefined });
+
+    expect(result.violations.find((item) => item.type === 'trace_width'))
+      .toMatchObject({ required: RULES.minTraceWidth });
+  });
+
   it('accepts a trace laid exactly on the fabrication floor', () => {
     const result = runDrc(layoutOf({
       components: [part('R1', [pad(10, 10, 'A')]), part('R2', [pad(20, 10, 'A')])],

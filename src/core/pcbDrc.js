@@ -407,9 +407,14 @@ export const runDrc = (layout, rules = RULES) => {
   // out of a tight footprint, so something independent has to hold the floor —
   // otherwise a neck could walk below what a fab can etch and every other rule
   // here would still report the board clean.
+  //
+  // `?? RULES.minTraceWidth` because a caller may pass a partial rules object:
+  // an undefined floor would make every comparison below NaN, i.e. silently
+  // pass, which is the one failure mode this check exists to prevent.
+  const minTraceWidth = rules.minTraceWidth ?? RULES.minTraceWidth;
   for (const item of items) {
     if (item.kind !== 'trace') continue;
-    if (item.width >= rules.minTraceWidth - 1e-9) continue;
+    if (item.width >= minTraceWidth - 1e-9) continue;
     violations.push({
       type: 'trace_width',
       netA: item.net,
@@ -417,7 +422,7 @@ export const runDrc = (layout, rules = RULES) => {
       x: round3((item.geom.ax + item.geom.bx) / 2),
       y: round3((item.geom.ay + item.geom.by) / 2),
       distance: round3(item.width),
-      required: rules.minTraceWidth,
+      required: minTraceWidth,
       refs: { a: item.label, b: null },
     });
   }
