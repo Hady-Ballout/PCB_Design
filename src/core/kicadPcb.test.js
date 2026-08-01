@@ -208,9 +208,40 @@ describe('toKiCadPcb', () => {
     expect(toKiCadPcb(layout, circuit)).toMatchSnapshot();
   });
 
+  it('emits the ground pour as a KiCad-6 zone on B.Cu', () => {
+    expect(layout.pour).toBeTruthy();
+    const groundNumber = [...pcb.matchAll(/^  \(net (\d+) "([^"]*)"\)$/gm)]
+      .find((match) => match[2] === layout.pour.net)[1];
+
+    expect(pcb).toContain(`(zone (net ${groundNumber}) (net_name "${layout.pour.net}") (layer "B.Cu")`);
+    expect(pcb).toContain('(hatch edge 0.508)');
+    // `yes` is how the format spells DIRECT connect; the bare
+    // `(connect_pads (clearance …))` form means thermal reliefs, which is not
+    // what pcbPour builds, so a KiCad re-fill would disagree with our copper.
+    expect(pcb).toContain('(connect_pads yes (clearance 0.3))');
+    expect(pcb).toContain('(min_thickness 0.254)');
+    expect(pcb).toContain('(fill yes (thermal_gap 0.508) (thermal_bridge_width 0.508))');
+    expect(balancedParens(pcb)).toBe(true);
+  });
+
+  it('gives the zone the board rectangle as its outline and one filled polygon per pour rectangle', () => {
+    const { outline } = layout.board;
+    expect(pcb).toContain(
+      `(pts (xy 0 0) (xy ${outline.width} 0) (xy ${outline.width} ${outline.height}) (xy 0 ${outline.height}))`,
+    );
+
+    const filled = [...pcb.matchAll(/\(filled_polygon \(layer "B\.Cu"\) \(pts ((?:\(xy [-\d.]+ [-\d.]+\) ?)+)\)\)/g)];
+    expect(filled.length).toBe(layout.pour.polygons.length);
+    // Point for point, in the order the pour emitted them.
+    const first = layout.pour.polygons[0].map((point) => `(xy ${point.x} ${point.y})`).join(' ');
+    expect(filled[0][1]).toBe(first);
+  });
+
   it('matches the ground-free byte-for-byte snapshot recorded before the ground pour existed', () => {
     const groundFree = buildPcbLayout(groundFreeCircuit);
     expect(groundFree.nets.some((net) => /^(gnd|ground|0)$/i.test(net))).toBe(false);
+    expect(groundFree.pour).toBeNull();
+    expect(toKiCadPcb(groundFree, groundFreeCircuit)).not.toContain('(zone ');
     expect(toKiCadPcb(groundFree, groundFreeCircuit)).toMatchSnapshot();
   });
 

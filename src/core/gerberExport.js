@@ -53,14 +53,25 @@ export class PcbExportError extends Error {
 // %FSLAX46Y46*% — 4 integer digits, 6 decimal digits, leading zeros suppressed.
 // A coordinate is therefore the millimetre value scaled by 1e6 and rounded.
 const COORD_SCALE = 1e6;
-const coord = (mm) => String(Math.round(mm * COORD_SCALE) || 0);
+// Fail loudly. This module's whole posture is that a bad package is worse than
+// no package, and a non-finite coordinate used to sail through as the literal
+// text `XNaN` (the old `|| 0` only rescued the -0 case, and only on Gerbers —
+// the Excellon path had no guard at all).
+const finite = (mm, what) => {
+  if (!Number.isFinite(mm)) throw new Error(`gerberExport: non-finite ${what} (${mm})`);
+  return mm;
+};
+const coord = (mm) => String(Math.round(finite(mm, 'coordinate') * COORD_SCALE));
 /** Aperture/tool sizes are written with fixed precision so they never drift. */
-const size6 = (mm) => mm.toFixed(6);
-const size3 = (mm) => mm.toFixed(3);
+const size6 = (mm) => finite(mm, 'aperture size').toFixed(6);
+const size3 = (mm) => finite(mm, 'drill dimension').toFixed(3);
 /** Human-facing millimetres for the README (no trailing zeros). */
 const human = (mm) => String(Math.round(mm * 1000) / 1000);
 
 const GENERATION_SOFTWARE = '%TF.GenerationSoftware,PromptToPCB,pcb-pilot,dev*%';
+
+/** Placeholder aperture selected before a region, so no file has zero `%ADD`. */
+const REGION_APERTURE = 'C,0.010000';
 
 /**
  * Filesystem-safe board name, used for every file inside the archive. Exported
@@ -137,6 +148,11 @@ const gerberFile = ({ layerComment, fileFunction, boardHeight, polarity = 'Posit
      */
     region(points) {
       if (points.length < 3) return;
+      // A region ignores the current aperture, so a layer whose only graphic
+      // objects are regions would declare no %ADD at all — legal RS-274X, but
+      // enough to trip the DFM front-end of more than one low-cost vendor.
+      // Selecting a token 10 µm circle first costs one aperture and one D-code.
+      select(REGION_APERTURE);
       body.push('G36*');
       body.push(`${at(points[0][0], points[0][1])}D02*`);
       for (let index = 1; index < points.length; index += 1) {
@@ -373,6 +389,15 @@ const copperLayer = (layout, side) => {
     if (LAYER_SIDE[trace.layer] !== side) continue;
     file.stroke([[trace.from.x, trace.from.y], [trace.to.x, trace.to.y]], trace.width);
   }
+  // The ground pour goes down last, over its own net's pads and vias (direct
+  // connect — see pcbPour.js). Each of its rectangles is its own region because
+  // regions union on a positive layer, which is exactly the semantics the pour
+  // was decomposed for.
+  if (layout.pour && LAYER_SIDE[layout.pour.layer] === side) {
+    for (const polygon of layout.pour.polygons) {
+      file.region(polygon.map((point) => [point.x, point.y]));
+    }
+  }
   return file.render();
 };
 
@@ -505,8 +530,16 @@ const readmeFile = (layout, circuit, holes, names) => [
   `Drilled holes: ${holes.length}`,
   '',
   'Notes:',
-  '  - Gerbers are RS-274X, millimetres, 4.6 format, positive polarity.',
+  // Deliberately silent on polarity here: the mask files declare
+  // TF.FilePolarity,Negative, so a blanket "positive polarity" line would
+  // contradict the files themselves.
+  '  - Gerbers are RS-274X, millimetres, 4.6 format.',
   '  - Solder mask files contain the OPENINGS; vias tented (no mask opening).',
+  ...(layout.pour ? [
+    `  - Bottom copper carries a ground pour on net "${layout.pour.net}", direct connect`,
+    '    (no thermal reliefs). Hand-soldering a pin that lands in the pour needs more',
+    '    heat than the others - the plane sinks it. Reflow is unaffected.',
+  ] : []),
   '  - Electrolytic capacitor and diode polarity per silkscreen.',
   '',
 ].join('\n');

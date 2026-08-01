@@ -1674,7 +1674,9 @@ function App() {
                 <span
                   title={pcbFabricable
                     ? 'RS-274X Gerbers + Excellon drill, ready to upload to a fab house'
-                    : `Fix ${pcbGateSummary} first`}
+                    // pcbGateSummary is empty when there is no layout at all,
+                    // which would leave the tooltip reading "Fix  first".
+                    : pcbGateSummary ? `Fix ${pcbGateSummary} first` : 'Lay out the board first'}
                 >
                   <button onClick={downloadGerbers} disabled={!pcbFabricable}>
                     Download Gerbers (.zip)

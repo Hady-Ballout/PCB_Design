@@ -33,6 +33,7 @@
 // kicadPcb.test.js's "round-trips a 90-degree-rotated footprint" test and
 // the pad-angle/board-space-size test for worked numeric proofs, and the
 // Phase D report for the derivation.
+import { RULES } from './pcbDesignRules.js';
 import { recordForPlacedComponent } from './pcbFootprints.js';
 import { uuidFrom } from './deterministicUuid.js';
 
@@ -72,6 +73,52 @@ const KICAD6_LAYERS = [
 ];
 
 const COURTYARD_WIDTH = 0.05;
+
+/**
+ * Zone settings, KiCad-6 defaults except where the pour's own construction
+ * says otherwise. `connect_pads yes` is the format's spelling of DIRECT
+ * connect: the bare `(connect_pads (clearance …))` form means thermal reliefs,
+ * and pcbPour.js builds no spokes, so writing the bare form would make KiCad's
+ * own re-fill disagree with the copper in the Gerbers.
+ */
+const ZONE_HATCH_PITCH = 0.508;
+const ZONE_MIN_THICKNESS = 0.254;
+const ZONE_THERMAL_GAP = 0.508;
+const ZONE_THERMAL_BRIDGE = 0.508;
+
+const ptsList = (points) => `(pts ${points.map((point) => `(xy ${fmt(point.x)} ${fmt(point.y)})`).join(' ')})`;
+
+/**
+ * The ground pour as a KiCad zone. `polygon` is the zone's DRAWN outline (the
+ * whole board — the pour was allowed to consider every cell on it), and each
+ * `filled_polygon` is one rectangle of the computed fill. KiCanvas's ZonePainter
+ * reads the fill only, and matches it to a layer by the filled polygon's own
+ * `(layer …)`, so that node is load-bearing rather than decorative.
+ */
+const zoneBlock = (pour, board, netNumberFor, clearance) => {
+  const { outline } = board;
+  const corners = [
+    { x: outline.x, y: outline.y },
+    { x: outline.x + outline.width, y: outline.y },
+    { x: outline.x + outline.width, y: outline.y + outline.height },
+    { x: outline.x, y: outline.y + outline.height },
+  ];
+  const layer = pour.layer === 'bottom' ? 'B.Cu' : 'F.Cu';
+  const lines = [];
+  lines.push(`  (zone (net ${netNumberFor(pour.net)}) (net_name ${q(pour.net)}) (layer ${q(layer)}) (tstamp ${uuidFrom(`pcb:zone:${pour.net}:${pour.layer}`)}) (hatch edge ${ZONE_HATCH_PITCH})`);
+  lines.push(`    (connect_pads yes (clearance ${fmt(clearance)}))`);
+  lines.push(`    (min_thickness ${ZONE_MIN_THICKNESS})`);
+  lines.push('    (filled_areas_thickness no)');
+  lines.push(`    (fill yes (thermal_gap ${ZONE_THERMAL_GAP}) (thermal_bridge_width ${ZONE_THERMAL_BRIDGE}))`);
+  lines.push(`    (polygon ${ptsList(corners)})`);
+  // One line per filled polygon: a poured board carries a few hundred of them,
+  // and the s-expression reader does not care about the newlines.
+  for (const polygon of pour.polygons) {
+    lines.push(`    (filled_polygon (layer ${q(layer)}) ${ptsList(polygon)})`);
+  }
+  lines.push('  )');
+  return lines.join('\n');
+};
 
 const shapeKeyword = (shape) => (shape === 'oval' || shape === 'rect' ? shape : 'circle');
 
@@ -222,6 +269,11 @@ export const toKiCadPcb = (layout, circuit) => {
     lines.push(`  (via (at ${fmt(via.x)} ${fmt(via.y)}) (size ${fmt(via.diameter)}) (drill ${fmt(via.drill)}) (layers "F.Cu" "B.Cu") (net ${netNumberFor(via.net)}) (tstamp ${uuid}))`);
   });
   if (layout.vias.length) lines.push('');
+
+  if (layout.pour) {
+    lines.push(zoneBlock(layout.pour, layout.board, netNumberFor, RULES.clearance));
+    lines.push('');
+  }
 
   lines.push(')');
   return lines.join('\n');

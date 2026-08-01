@@ -237,6 +237,28 @@ describe('toGerberArchive copper layers', () => {
     expect(top).toContain('X6420000Y7000000D01*');
   });
 
+  it('selects an aperture before the first region, so no file ships with zero %ADD', () => {
+    // A G36 region ignores the current aperture, so a layer whose first (or
+    // only) graphic object is a region used to emit no %ADD at all — legal
+    // RS-274X, but enough to make some CAM front-ends complain.
+    const layout = fixtureLayout();
+    layout.components[0].pads[0] = {
+      ...layout.components[0].pads[0], shape: 'rect', size: { w: 3, h: 2 },
+    };
+    const top = toGerberArchive(layout, circuit).files.find((file) => file.name === 'rc-low-pass.GTL').data;
+
+    expect(top).toMatch(/%ADD\d+C,0\.010000\*%/);
+    const firstRegion = top.indexOf('G36*');
+    expect(top.slice(0, firstRegion)).toMatch(/^D\d+\*$/m);
+  });
+
+  it('throws on a non-finite coordinate instead of writing XNaN into the file', () => {
+    const layout = fixtureLayout();
+    layout.components[0].pads[0] = { ...layout.components[0].pads[0], x: Number.NaN };
+
+    expect(() => toGerberArchive(layout, circuit)).toThrow(/non-finite/i);
+  });
+
   it('strokes an elongated oval pad between its foci', () => {
     const layout = fixtureLayout();
     layout.components[0].pads[0] = {
@@ -371,6 +393,12 @@ describe('toGerberArchive README', () => {
     expect(readme).toContain('vias tented');
     expect(readme.toLowerCase()).toContain('polarity per silkscreen');
   });
+
+  it('does not claim the package is positive polarity, since the mask files are not', () => {
+    const readme = fileNamed(archiveOf(), 'PCB-README.txt');
+
+    expect(readme.toLowerCase()).not.toContain('positive polarity');
+  });
 });
 
 describe('toGerberArchive on a circuit with no ground net', () => {
@@ -403,6 +431,41 @@ describe('toGerberArchive on a real routed layout', () => {
       { ref: 'C1', kind: 'capacitor', value: '100nF', nodes: ['VOUT', '0'] },
     ],
   };
+
+  it('paints the ground pour on the bottom copper and nowhere else', () => {
+    const layout = buildPcbLayout(rcLowPass);
+    expect(layout.pour).toBeTruthy();
+
+    const archive = toGerberArchive(layout, rcLowPass);
+    const top = fileNamed(archive, 'rc-low-pass.GTL');
+    const bottom = fileNamed(archive, 'rc-low-pass.GBL');
+
+    // The pour is the only difference between the two layers' region counts:
+    // pads paint identical regions on both.
+    expect(countOf(bottom, /G36\*/g)).toBe(countOf(top, /G36\*/g) + layout.pour.polygons.length);
+    expect(countOf(bottom, /G37\*/g)).toBe(countOf(bottom, /G36\*/g));
+
+    // The first pour rectangle's own corner, y-flipped like everything else.
+    const [corner] = layout.pour.polygons[0];
+    const flipped = Math.round((layout.board.height - corner.y) * 1e6);
+    expect(bottom).toContain(`X${Math.round(corner.x * 1e6)}Y${flipped}D02*`);
+  });
+
+  it('leaves the solder mask alone: the pour is tented, not opened', () => {
+    const layout = buildPcbLayout(rcLowPass);
+    const archive = toGerberArchive(layout, rcLowPass);
+
+    expect(countOf(fileNamed(archive, 'rc-low-pass.GBS'), /G36\*/g))
+      .toBe(countOf(fileNamed(archive, 'rc-low-pass.GTS'), /G36\*/g));
+  });
+
+  it('warns in the README that a poured ground pad needs more heat', () => {
+    const readme = fileNamed(toGerberArchive(buildPcbLayout(rcLowPass), rcLowPass), 'PCB-README.txt');
+
+    expect(readme).toContain('ground pour');
+    expect(readme.toLowerCase()).toContain('direct connect');
+    expect(readme.toLowerCase()).toContain('heat');
+  });
 
   it('exports a board the pipeline actually routed', () => {
     const layout = buildPcbLayout(rcLowPass);
