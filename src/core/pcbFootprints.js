@@ -15,10 +15,18 @@ import { KICAD_FOOTPRINTS } from './kicadFootprintLibrary.js';
 
 const identity = (count) => Array.from({ length: count }, (_, index) => String(index + 1));
 
-const pinHeader = (count) => ({
-  libId: `Connector_PinHeader_2.54mm:PinHeader_1x0${count}_P2.54mm_Vertical`,
-  padOrder: identity(count),
-});
+// The vendored library zero-pads the pin count to two digits, so this template
+// only names a real footprint for count <= 9 (a 1x10 header is
+// `PinHeader_1x10_...`, not `PinHeader_1x010_...`). Every curated caller below
+// is well inside that; anything larger would miss the library and fall through
+// to synthesizedHeaderRecord, so guard loudly rather than silently degrade.
+const pinHeader = (count) => {
+  if (count > 9) throw new Error(`pinHeader: no 1x0${count} template — the vendored library only zero-pads to two digits (count <= 9)`);
+  return {
+    libId: `Connector_PinHeader_2.54mm:PinHeader_1x0${count}_P2.54mm_Vertical`,
+    padOrder: identity(count),
+  };
+};
 
 // Body classification for the 3D viewer (src/features/pcb3d/pcbScene.js),
 // keyed by libId. Anything not listed (e.g. a bare pin header) renders as a
@@ -101,8 +109,14 @@ const KIND_TO_FOOTPRINT = {
   ua741: { libId: 'Package_DIP:DIP-8_W7.62mm', padOrder: ['1', '2', '3', '4', '5', '6', '7', '8'] },
   timer_555: { libId: 'Package_DIP:DIP-8_W7.62mm', padOrder: ['1', '2', '3', '4', '5', '6', '7', '8'] },
   // PC817 is physically DIP-4 with canonical order = pins 1-4 (anode,
-  // cathode, emitter, collector); placed on the vendored DIP-8's first 4 pads.
-  optocoupler: { libId: 'Package_DIP:DIP-8_W7.62mm', padOrder: ['1', '2', '3', '4'] },
+  // cathode, emitter, collector). A DIP-4 straddles the package: pins 1/2 down
+  // one side, 3/4 directly opposite them. DIP-8 pads 1-4 are a SINGLE column
+  // (all at x = -3.8), so the DIP-4 pins map onto the DIP-8 pads that face each
+  // other across the 7.62mm body — pad 7 sits opposite pad 2, pad 8 opposite
+  // pad 1. The part still inherits DIP-8 silk and courtyard, oversized for a
+  // DIP-4 body; acceptable for v1 (the pads, holes and pin 1 marker are right,
+  // which is what makes the board buildable) until a DIP-4 record is vendored.
+  optocoupler: { libId: 'Package_DIP:DIP-8_W7.62mm', padOrder: ['1', '2', '7', '8'] },
 
   // 2-terminal sources and other simple 2-pin loads/actuators.
   voltage_source: { libId: 'TerminalBlock:TerminalBlock_bornier-2_P5.08mm', padOrder: ['1', '2'] },

@@ -38,6 +38,26 @@ describe('footprintRecordFor', () => {
     expect(pin1.y).toBeLessThan(0);
   });
 
+  it('straddles the DIP body with the optocoupler, one column per side', () => {
+    // A PC817 is a DIP-4: anode/cathode down one side, emitter/collector
+    // directly opposite. Mapping all four onto DIP-8 pads 1-4 would put every
+    // leg in a single column, which is not a package that exists.
+    const { record, padOrder } = footprintRecordFor({ ref: 'U1', kind: 'optocoupler', nodes: ['A', 'K', 'E', 'C'] });
+    const [anode, cathode, emitter, collector] = padOrder.map(
+      (number) => record.pads.find((pad) => pad.number === number),
+    );
+
+    expect(new Set(padOrder).size).toBe(4);
+    expect(new Set([anode.x, cathode.x, emitter.x, collector.x]).size).toBe(2);
+    // Emitter sits opposite the cathode, collector opposite the anode.
+    expect(emitter.y).toBeCloseTo(cathode.y, 6);
+    expect(collector.y).toBeCloseTo(anode.y, 6);
+    expect(Math.sign(emitter.x)).toBe(-Math.sign(cathode.x));
+    expect(Math.sign(collector.x)).toBe(-Math.sign(anode.x));
+    // Anode is pin 1, so it keeps the keyed (rect) pad.
+    expect(anode.shape).toBe('rect');
+  });
+
   it('maps diode anode to pad 2 and cathode to pad 1', () => {
     const { padOrder } = footprintRecordFor({ ref: 'D1', kind: 'diode', nodes: ['ANODE', 'CATHODE'] });
 
