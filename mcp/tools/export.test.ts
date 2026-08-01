@@ -5,6 +5,7 @@ import path from 'node:path';
 import { exportNetlist } from './export.js';
 import { circuitSchema } from '../schemas.js';
 import { circuitOf, rcLowPass } from '../testFixtures.js';
+import { fileSink } from '../artifactSink.js';
 
 const parse = (circuit: unknown) => circuitSchema.parse(circuit);
 
@@ -28,7 +29,7 @@ afterEach(() => {
 
 describe('exportNetlist', () => {
   it('emits a SPICE deck containing every component and a terminator', () => {
-    const result = exportNetlist({ circuit: parse(rcLowPass), format: 'spice' }, artifactDir);
+    const result = exportNetlist({ circuit: parse(rcLowPass), format: 'spice' }, fileSink(artifactDir));
 
     expect(result.content).toMatch(/^R1 /m);
     expect(result.content).toMatch(/^C1 /m);
@@ -36,43 +37,43 @@ describe('exportNetlist', () => {
   });
 
   it('injects the LM358 subcircuit when the deck references it', () => {
-    const result = exportNetlist({ circuit: opampCircuit, format: 'spice' }, artifactDir);
+    const result = exportNetlist({ circuit: opampCircuit, format: 'spice' }, fileSink(artifactDir));
 
     expect(result.content).toContain('.subckt LM358');
   });
 
   it('emits a KiCad netlist listing the components', () => {
-    const result = exportNetlist({ circuit: parse(rcLowPass), format: 'kicad_netlist' }, artifactDir);
+    const result = exportNetlist({ circuit: parse(rcLowPass), format: 'kicad_netlist' }, fileSink(artifactDir));
 
     expect(result.content).toContain('<export');
     expect(result.content).toContain('<comp ref="R1"');
   });
 
   it('emits a KiCad schematic with placed symbols', () => {
-    const result = exportNetlist({ circuit: parse(rcLowPass), format: 'kicad_schematic' }, artifactDir);
+    const result = exportNetlist({ circuit: parse(rcLowPass), format: 'kicad_schematic' }, fileSink(artifactDir));
 
     expect(result.content).toContain('kicad_sch');
   });
 
   it('writes each format to an artifact file with the right extension', () => {
-    const spice = exportNetlist({ circuit: parse(rcLowPass), format: 'spice' }, artifactDir);
-    const sch = exportNetlist({ circuit: parse(rcLowPass), format: 'kicad_schematic' }, artifactDir);
+    const spice = exportNetlist({ circuit: parse(rcLowPass), format: 'spice' }, fileSink(artifactDir));
+    const sch = exportNetlist({ circuit: parse(rcLowPass), format: 'kicad_schematic' }, fileSink(artifactDir));
 
-    expect(spice.path.endsWith('.cir')).toBe(true);
-    expect(sch.path.endsWith('.kicad_sch')).toBe(true);
-    expect(readFileSync(spice.path, 'utf8')).toBe(spice.content);
+    expect(spice.artifact.location.endsWith('.cir')).toBe(true);
+    expect(sch.artifact.location.endsWith('.kicad_sch')).toBe(true);
+    expect(readFileSync(spice.artifact.location, 'utf8')).toBe(spice.content);
   });
 
   it('names the artifact after the circuit title', () => {
-    const result = exportNetlist({ circuit: parse(rcLowPass), format: 'spice' }, artifactDir);
+    const result = exportNetlist({ circuit: parse(rcLowPass), format: 'spice' }, fileSink(artifactDir));
 
-    expect(path.basename(result.path)).toBe('rc-low-pass.cir');
+    expect(path.basename(result.artifact.location)).toBe('rc-low-pass.cir');
   });
 
   it('rejects a format it does not know', () => {
     expect(() => exportNetlist(
       { circuit: parse(rcLowPass), format: 'gerber' as never },
-      artifactDir,
+      fileSink(artifactDir),
     )).toThrow(/gerber/);
   });
 });

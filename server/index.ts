@@ -16,6 +16,8 @@ import { handleBillingStatus, handleCreateCheckout, handleCreatePortal, handleSt
 import { QuotaError, checkAndConsumeQuota } from './billing/quota.js';
 import { DailyTokenLimitError, dailyLimitMessage, enforceDailyTokenLimit, recordDailyTokens } from './billing/dailyTokens.js';
 import { trackTokenUsage } from './ai/tokenUsage.js';
+import { handleArtifactDownload, handleMcpRequest } from './mcp/httpServer.js';
+import { ArtifactStore } from '../mcp/artifactSink.js';
 import type { ChatMemory, ChatMessage, Circuit, CurrentDesign, JwtPayload, PipelineEvent, StreamState } from './types.js';
 
 loadEnv();
@@ -28,6 +30,13 @@ if (!process.env.JWT_SECRET) {
 const port = Number(process.env.PORT || process.env.API_PORT || 8787);
 const host = process.env.HOST || '127.0.0.1';
 const allowedOrigins = parseAllowedOrigins(process.env.CORS_ORIGIN);
+// The hosted MCP endpoint is off unless explicitly switched on. It is a public,
+// unauthenticated surface until the OAuth resource server lands (Phase 2 of
+// docs/superpowers/specs/2026-08-01-hosted-mcp-connector-design.md), so it must
+// never come up by default on a deployed instance.
+const mcpEnabled = process.env.MCP_HTTP_ENABLED === '1';
+const mcpArtifacts = new ArtifactStore();
+
 const aiProviderName = (): string => process.env.AI_PROVIDER || 'ollama';
 const aiModelName = (): string => (
   process.env.AI_PROVIDER && process.env.AI_PROVIDER !== 'ollama'
@@ -237,6 +246,30 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
     } catch (error) {
       sendJson(response, statusFor(error), { error: (error as Error).message });
     }
+    return;
+  }
+
+  // The MCP endpoint is registered ABOVE the JWT gate on purpose. MCP clients
+  // authenticate as OAuth clients against their own authorization server, not with
+  // this app's session JWT — a Claude connector has no way to obtain one. Moving
+  // this below the gate makes every MCP call 401, which is exactly what happened
+  // the first time it was mounted at the bottom of the router.
+  //
+  // It carries its own authorization instead (Phase 2 of
+  // docs/superpowers/specs/2026-08-01-hosted-mcp-connector-design.md); until that
+  // lands, `MCP_HTTP_ENABLED` keeps it off by default.
+  if (mcpEnabled && request.url?.startsWith('/api/mcp')) {
+    // Interim identity: the app's own JWT when one happens to be present, so
+    // artifacts are still scoped per user during local development. `anonymous` is
+    // a shared bucket, tolerable only because the endpoint is dev-gated.
+    const mcpUser = getUser(request);
+    const subject = mcpUser ? `user:${mcpUser.id}` : 'anonymous';
+
+    if (request.url.startsWith('/api/mcp/artifacts/')) {
+      handleArtifactDownload(request, response, { store: mcpArtifacts, subject });
+      return;
+    }
+    await handleMcpRequest(request, response, { store: mcpArtifacts, subject });
     return;
   }
 

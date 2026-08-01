@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSimulationDeck, chooseWaveformNodes, parseWaveformData } from './simulator.js';
+import { buildSimulationDeck, chooseWaveformNodes, parseWaveformData, runProcess } from './simulator.js';
 import type { Circuit } from '../types.js';
 
 const circuit: Partial<Circuit> = {
@@ -65,5 +65,40 @@ describe('ngspice simulator helpers', () => {
       { name: 'VIN', points: [{ x: 0, y: 5 }, { x: 0.001, y: 5 }] },
       { name: 'VOUT', points: [{ x: 0, y: 0 }, { x: 0.001, y: 3.2 }] },
     ]);
+  });
+});
+
+describe('runProcess timeout', () => {
+  // Uses node itself as the child so the test is real (an actual spawned process
+  // that outlives its deadline) without depending on ngspice or platform shells.
+  const sleeper = (ms: number) => [process.execPath, ['-e', `setTimeout(() => {}, ${ms})`]] as const;
+
+  it('returns normally when the process finishes inside the deadline', async () => {
+    const [command, args] = sleeper(10);
+
+    const result = await runProcess(command, [...args], {}, 10_000);
+
+    expect(result.timedOut).toBe(false);
+    expect(result.code).toBe(0);
+  });
+
+  it('kills a process that outlives its deadline and says so', async () => {
+    const [command, args] = sleeper(60_000);
+    const startedAt = Date.now();
+
+    const result = await runProcess(command, [...args], {}, 300);
+
+    expect(result.timedOut).toBe(true);
+    expect(result.code).not.toBe(0);
+    // Proves the deadline fired rather than the child exiting on its own.
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+  });
+
+  it('reports the timeout in stderr so the caller can explain it', async () => {
+    const [command, args] = sleeper(60_000);
+
+    const result = await runProcess(command, [...args], {}, 300);
+
+    expect(result.stderr).toMatch(/timed out/i);
   });
 });

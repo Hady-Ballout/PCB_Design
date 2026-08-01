@@ -5,7 +5,8 @@
 // landed, and how much copper it took.
 
 import { buildPcbLayout } from '../../src/core/pcbLayout.js';
-import { slugify, writeArtifact } from '../artifacts.js';
+import { slugify } from '../artifacts.js';
+import type { ArtifactSink } from '../artifactSink.js';
 import type { ParsedCircuit } from '../schemas.js';
 
 export interface LayoutArgs {
@@ -24,20 +25,19 @@ interface RawLayout {
   nets: string[];
 }
 
-export const pcbLayoutTool = ({ circuit }: LayoutArgs, artifactDir: string) => {
+export const pcbLayoutTool = ({ circuit }: LayoutArgs, sink: ArtifactSink) => {
   const layout = buildPcbLayout(circuit) as RawLayout | null;
   if (!layout) {
     throw new Error('Cannot lay out a circuit with no components.');
   }
 
-  const file = writeArtifact(
-    artifactDir,
+  const artifact = sink.put(
     `${slugify(circuit.title)}-layout.json`,
     JSON.stringify(layout, null, 2),
   );
 
   return {
-    path: file,
+    artifact,
     board: layout.board,
     layers: 2,
     components: layout.components.map(({ ref, kind, value, body, x, y, width, height }) => ({

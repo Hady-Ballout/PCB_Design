@@ -16,13 +16,46 @@ interface ProcessResult {
   code: number | null;
   stdout: string;
   stderr: string;
+  timedOut: boolean;
 }
 
-const runProcess = (command: string, args: string[], options: Record<string, unknown> = {}): Promise<ProcessResult> =>
+// A pathological deck (or a hostile one on the hosted MCP endpoint) can make
+// ngspice iterate essentially forever. Without a deadline that pins a CPU on the
+// container until the process is restarted.
+const DEFAULT_TIMEOUT_MS = Number(process.env.NGSPICE_TIMEOUT_MS || 30_000);
+
+export const runProcess = (
+  command: string,
+  args: string[],
+  options: Record<string, unknown> = {},
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<ProcessResult> =>
   new Promise((resolve) => {
     const child = spawn(command, args, options);
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
+    let settled = false;
+
+    const finish = (result: ProcessResult): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+      // Resolve on the child's `close`, so the kill is observed rather than
+      // assumed — but if the process somehow never closes, don't hang forever.
+      setTimeout(() => finish({
+        code: -1,
+        stdout,
+        stderr: `${stderr}\nSimulation timed out after ${timeoutMs}ms and could not be killed.`,
+        timedOut: true,
+      }), 1_000);
+    }, timeoutMs);
 
     child.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString();
@@ -31,10 +64,17 @@ const runProcess = (command: string, args: string[], options: Record<string, unk
       stderr += chunk.toString();
     });
     child.on('error', (error: Error) => {
-      resolve({ code: -1, stdout, stderr: error.message });
+      finish({ code: -1, stdout, stderr: error.message, timedOut });
     });
     child.on('close', (code: number | null) => {
-      resolve({ code, stdout, stderr });
+      finish({
+        code: timedOut ? -1 : code,
+        stdout,
+        stderr: timedOut
+          ? `${stderr}\nSimulation timed out after ${timeoutMs}ms and was stopped.`
+          : stderr,
+        timedOut,
+      });
     });
   });
 
@@ -147,9 +187,13 @@ export async function runNgspiceSimulation({ circuit, spice }: { circuit: Circui
       const diagnosis = diagnoseNgspiceFailure(rawOutput);
       return {
         ok: false,
-        errors: [missing
-          ? `Ngspice was not found. Install Ngspice and make sure ${command} is available on PATH.`
-          : diagnosis || 'Ngspice failed to simulate this circuit.'],
+        errors: [result.timedOut
+          ? 'The simulation ran too long and was stopped. This usually means the circuit '
+            + 'has no DC path to ground, an oscillation the solver cannot settle, or a .tran '
+            + 'span far longer than the circuit needs.'
+          : missing
+            ? `Ngspice was not found. Install Ngspice and make sure ${command} is available on PATH.`
+            : diagnosis || 'Ngspice failed to simulate this circuit.'],
         warnings: [],
         rawOutput,
         waveform: { xLabel: 'Time (s)', yLabel: 'Voltage (V)', series: [] },

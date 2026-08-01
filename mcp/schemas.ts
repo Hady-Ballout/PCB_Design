@@ -49,12 +49,21 @@ const schematicHintsSchema = z.object({
   componentRoles: z.array(z.object({ ref: z.string(), role: z.string() })).optional(),
 }).passthrough();
 
+/**
+ * Upper bound on circuit size. Comfortably above any real design the engine is
+ * meant for, and low enough that a hostile caller can't drive the layout router
+ * or ngspice into a pathological run on the hosted endpoint.
+ */
+export const MAX_COMPONENTS = 200;
+
 export const circuitSchema = z.object({
   title: z.string().min(1).describe('Short human-readable name for the design.'),
   type: z.string().default('ai_generated'),
   supplyVoltage: z.number().default(5),
   nodes: z.array(z.string()).optional(),
-  components: z.array(componentSchema).min(1),
+  components: z.array(componentSchema)
+    .min(1)
+    .max(MAX_COMPONENTS, `A circuit may contain at most ${MAX_COMPONENTS} components.`),
   notes: z.array(z.string()).default([]),
   schematic: schematicHintsSchema.optional(),
 }).transform((circuit) => ({

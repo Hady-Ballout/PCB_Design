@@ -6,7 +6,8 @@
 
 import { addMissingSpiceModels, toKiCadNetlist, toSpice } from '../../src/core/pcbGenerator.js';
 import { toKiCadSchematic } from '../../src/core/kicadSchematic.js';
-import { slugify, writeArtifact } from '../artifacts.js';
+import { slugify } from '../artifacts.js';
+import type { ArtifactSink } from '../artifactSink.js';
 import type { ParsedCircuit } from '../schemas.js';
 import { diagramFor } from './diagram.js';
 
@@ -23,7 +24,7 @@ const EXTENSIONS: Record<NetlistFormat, string> = {
   kicad_schematic: '.kicad_sch',
 };
 
-export const exportNetlist = ({ circuit, format }: ExportArgs, artifactDir: string) => {
+export const exportNetlist = ({ circuit, format }: ExportArgs, sink: ArtifactSink) => {
   const extension = EXTENSIONS[format];
   if (!extension) {
     throw new Error(
@@ -40,11 +41,11 @@ export const exportNetlist = ({ circuit, format }: ExportArgs, artifactDir: stri
     content = toKiCadSchematic(circuit, diagramFor(circuit));
   }
 
-  const file = writeArtifact(artifactDir, `${slugify(circuit.title)}${extension}`, content);
+  const artifact = sink.put(`${slugify(circuit.title)}${extension}`, content);
 
   return {
     format,
-    path: file,
+    artifact,
     lines: content.split('\n').length,
     content,
   };
