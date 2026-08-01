@@ -13,12 +13,13 @@
 // produces byte-identical placements.
 //
 // All dimensions are millimetres, y-down (same convention as pcbLayout.js).
+import { RULES } from './pcbDesignRules.js';
 import { footprintRecordFor } from './pcbFootprints.js';
 
 /** Courtyard-to-courtyard clearance between neighbouring parts (mm). */
-export const PLACEMENT_GAP = 2.0;
+export const PLACEMENT_GAP = RULES.placementGap;
 /** Clearance from the outermost courtyard to the board edge (mm). */
-export const BOARD_MARGIN = 4;
+export const BOARD_MARGIN = RULES.boardMargin;
 
 /** Candidate centres sit on a 0.05" grid — the classic THT placement pitch. */
 const GRID = 1.27;
