@@ -15,6 +15,13 @@
 //           point inflated by d/2. This is EXACT.
 // * via   — circle of `diameter / 2` on BOTH layers.
 // * trace — capsule (segment inflated by `width / 2`) on its own layer.
+// * pour  — one convex polygon per ground-pour rectangle (r = 0) on the pour's
+//           layer. pcbPour.js emits the pour as disjoint axis-aligned
+//           rectangles precisely so this stays exact: a filled convex polygon's
+//           nearest point to anything outside it lies on its boundary, so
+//           edge-to-edge measurement IS the copper gap, with no hole to hide a
+//           short in. The pour's own construction already guarantees the
+//           clearance; this is the independent second opinion that says so.
 //
 // Pads additionally carry `geom`, the circumscribing circle of
 // `padCopperRadius(pad)`. That circle contains the pad but is bigger than it
@@ -202,7 +209,7 @@ const itemBounds = (item) => {
 
 /**
  * Every piece of copper on the board, in a stable order: pads (component
- * order, pad order), then vias, then traces.
+ * order, pad order), then vias, then traces, then ground-pour polygons.
  *
  * Pads that are not wired to anything still exist physically, so they take
  * part in clearance checks under a private net key (they can never be
@@ -285,6 +292,36 @@ export const copperItems = (layout) => {
       inflate: half,
       inscribed: half,
       exact: true,
+    });
+  }
+
+  const pour = layout?.pour;
+  for (const polygon of pour?.polygons || []) {
+    const xs = polygon.map((point) => point.x);
+    const ys = polygon.map((point) => point.y);
+    const x = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const y = (Math.min(...ys) + Math.max(...ys)) / 2;
+    push({
+      kind: 'pour',
+      net: pour.net,
+      netKey: pour.net,
+      // The pour is a consequence of the net's copper, not a member of it: the
+      // flood fill only keeps cells that already sit on a ground pad or via, so
+      // letting it join the connectivity union-find could only ever paper over
+      // a net that routing had actually left split.
+      routable: false,
+      owner: null,
+      label: `pour ${pour.layer} @${round3(x)},${round3(y)}`,
+      drill: 0,
+      annularRing: 0,
+      layers: layerMask(pour.layer),
+      // Circumscribing circle: over-approximates, so it is safe as the
+      // clearance check's cheap reject and never decides a violation.
+      geom: { type: 'circle', x, y, r: Math.max(...polygon.map((point) => Math.hypot(point.x - x, point.y - y))) },
+      core: polygon.map((point) => [point.x, point.y]),
+      inflate: 0,
+      inscribed: 0,
+      exact: false,
     });
   }
 

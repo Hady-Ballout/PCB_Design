@@ -1,11 +1,12 @@
 // Procedural PCB layout: the orchestrator that turns a circuit into a
 // manufacturable two-layer board, with no KiCad install required.
 //
-// The pipeline is four independent stages:
+// The pipeline is five independent stages:
 //   1. pcbFootprints.js — real vendored KiCad footprint geometry per part
 //   2. pcbPlace.js      — netlist-aware placement with courtyard clearance
 //   3. pcbRoute.js      — clearance-aware two-layer A* maze routing
-//   4. pcbDrc.js        — an independent measurement of the finished copper
+//   4. pcbPour.js       — bottom-copper ground pour over what routing left
+//   5. pcbDrc.js        — an independent measurement of the finished copper
 //
 // If routing leaves nets unfinished, the board is re-placed on a roomier
 // outline (the expansion ladder below) and routed again from scratch, mirroring
@@ -23,6 +24,7 @@ import {
   placementBounds,
   placementPads,
 } from './pcbPlace.js';
+import { buildGroundPour } from './pcbPour.js';
 import { routeBoard } from './pcbRoute.js';
 
 /**
@@ -134,6 +136,10 @@ const layoutAttempt = (parts, expandFactor) => {
     nets: [...netPads.keys()],
     routing: { complete: routed.failedNets.length === 0, failedNets: routed.failedNets },
   };
+  // The pour fills what routing left over, so it can only be computed once the
+  // copper is final — and it goes in BEFORE the DRC, so the checker measures the
+  // finished board rather than the board minus its largest piece of copper.
+  layout.pour = buildGroundPour(layout);
   layout.drc = runDrc(layout);
   layout.connectivity = checkConnectivity(layout);
   return layout;
@@ -148,6 +154,7 @@ const layoutAttempt = (parts, expandFactor) => {
  *   of it.
  * @returns {null | { board: object, components: Array<object>, traces: Array<object>,
  *   vias: Array<object>, nets: string[],
+ *   pour: null | ReturnType<typeof import('./pcbPour.js').buildGroundPour>,
  *   routing: { complete: boolean, failedNets: Array<object> },
  *   drc: { ok: boolean, violations: Array<object> },
  *   connectivity: { ok: boolean, incompleteNets: Array<object> } }}
