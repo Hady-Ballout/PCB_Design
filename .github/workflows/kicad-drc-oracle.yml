@@ -1,0 +1,51 @@
+# Optional, NON-GATING: runs KiCad's own DRC over boards this pipeline produced.
+#
+# src/core/pcbDrc.js is an independent check of our geometry, but it is still
+# our check — same design rules, same pad model, same conventions. kicad-cli
+# shares none of that, so a disagreement is genuinely informative. It is also
+# not the same contract: KiCad has rules of its own (courtyard overlaps,
+# unconnected items) that this pipeline never claimed to satisfy. So the job
+# reports and never blocks — `continue-on-error` sits on the JOB, not a step,
+# so a failed install is as harmless as a failed check.
+name: KiCad DRC oracle (optional)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/core/pcb*.js'
+      - 'src/core/kicad*.js'
+      - 'src/core/gerberExport.js'
+      - 'scripts/kicad-drc-oracle.mjs'
+      - '.github/workflows/kicad-drc-oracle.yml'
+
+jobs:
+  kicad-drc:
+    name: kicad-cli pcb drc (optional, non-gating)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install kicad-cli
+        # `kicad-cli pcb drc` arrived in KiCad 7; Ubuntu's own package is newer
+        # than that. --no-install-recommends keeps the footprint/symbol
+        # libraries out — the boards carry their own geometry.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends kicad
+          kicad-cli version
+
+      - name: Run the oracle
+        run: node scripts/kicad-drc-oracle.mjs
