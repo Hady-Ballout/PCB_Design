@@ -62,6 +62,19 @@ describe('footprintRecordFor', () => {
     expect(padOrder).toEqual(['2', '1']);
   });
 
+  it('applies the electrolytic-resolved polarity padOrder when an electrolytic capacitor exact-matches the CP_Radial footprint', () => {
+    const part = {
+      ref: 'C1',
+      kind: 'capacitor',
+      value: '100uF',
+      footprint: 'Capacitor_THT:CP_Radial_D5.0mm_P2.50mm',
+      nodes: ['POS', 'NEG'],
+    };
+    const { padOrder } = footprintRecordFor(part);
+
+    expect(padOrder).toEqual(['2', '1']);
+  });
+
   it('round-trips an exact part.footprint string to its vendored record', () => {
     const part = { ref: 'U1', kind: 'opamp', footprint: 'Package_DIP:DIP-8_W7.62mm', nodes: ['1', '2', '3', '4', '5', '6', '7', '8'] };
     const { libId, record } = footprintRecordFor(part);

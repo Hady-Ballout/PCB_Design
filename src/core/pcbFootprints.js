@@ -222,11 +222,13 @@ export const footprintRecordFor = (part) => {
   if (part?.footprint && KICAD_FOOTPRINTS[part.footprint]) {
     const record = KICAD_FOOTPRINTS[part.footprint];
     if (record.pads.length >= nodeCount) {
-      // If the exactly-matched libId is the same one the kind's curated
+      // If the exactly-matched libId is the same one the kind's resolved
       // default would pick, reuse its polarity-aware padOrder instead of
       // identity (an exact footprint match shouldn't silently drop the
-      // diode/LED/electrolytic-cap pad remap).
-      const kindDefault = KIND_TO_FOOTPRINT[part?.kind];
+      // diode/LED/electrolytic-cap pad remap). Uses footprintForKind (not
+      // the static KIND_TO_FOOTPRINT table directly) so the electrolytic
+      // capacitor override still applies here.
+      const kindDefault = footprintForKind(part);
       const padOrder = kindDefault && kindDefault.libId === part.footprint && kindDefault.padOrder.length === nodeCount
         ? kindDefault.padOrder
         : identity(nodeCount);
