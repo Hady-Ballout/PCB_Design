@@ -42,10 +42,15 @@ The same circuit model also becomes a real two-layer PCB, with no KiCad install 
 the path:
 
 ```text
-circuit -> footprints -> placement -> two-layer A* routing -> ground pour -> DRC
-        -> .kicad_pcb   (3D PCB view's Board mode, downloadable)
+circuit -> footprints -> placement -> routing -> ground pour -> DRC
+        -> .kicad_pcb   (downloadable from the 3D PCB window)
         -> Gerber + Excellon zip  (gated: refuses a board that isn't fabricable)
 ```
+
+Routing is **manual-first in the app**: the Board mode is an interactive editor — hover a
+pad to see its net, click to lock it, click waypoints to draw the trace (both layers,
+vias) — with an Auto-route button that hands the whole board to the two-layer A* maze
+router instead. The MCP tools always auto-route.
 
 Every stage is deterministic — the same circuit gives byte-identical files, so an order can
 be checksummed against what was reviewed. The Gerber export is the one exporter that

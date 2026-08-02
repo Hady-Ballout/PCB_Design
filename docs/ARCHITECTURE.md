@@ -131,10 +131,16 @@ pcbDrc.js          an INDEPENDENT measurement of the finished copper +
                          clean, because a Gerber package is an order
 ```
 
-`pcbLayout.js` is the orchestrator: it runs the ladder (re-place and re-route on a roomier
-board when routing fails) and keeps the best attempt by a DRC-first ranking. The same
-result object drives the 3D viewer, the Board view, the download buttons and the MCP
-`pcb_layout` / `export_netlist` tools, so all four agree by construction.
+`pcbLayout.js` is the orchestrator, with two entry points. `buildPcbLayout` runs the
+ladder (re-place and re-route on a roomier board when routing fails) and keeps the best
+attempt by a DRC-first ranking — the MCP `pcb_layout` / `export_netlist` tools use it.
+The app's Board window instead uses `buildManualPcbLayout`: **manual-first routing** — a
+roomier (1.35×, no ladder) placed-but-unrouted board whose traces/vias come from the
+user's hand-drawn `manualRouting` value (`features/pcbEditor/`), guarded by a placement
+signature so stored copper can never apply to a re-placed board; the router only runs
+from the editor's Auto-route button (`autoRouteLayout`). Both entry points end in the
+same pour → DRC → connectivity stages, and one result object drives the 3D viewer, the
+Board editor and the download buttons, so all surfaces agree by construction.
 `scripts/kicad-drc-oracle.mjs` (and its optional, non-gating CI job) is the outside
 opinion: KiCad's own DRC over boards this pipeline produced.
 

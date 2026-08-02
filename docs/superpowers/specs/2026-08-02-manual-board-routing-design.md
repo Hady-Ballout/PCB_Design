@@ -14,9 +14,14 @@ Gerber export stays hard-gated on a clean board.
 ## Decisions (settled with the user)
 
 1. **Manual-first hybrid.** Boards open placed but unrouted. An **Auto-route**
-   button runs the existing A* router on the still-unconnected nets and writes
-   the result into the same manual-traces store, so auto traces are ordinary
-   editable traces.
+   button runs the existing A* router on the manual placement and writes the
+   result into the same manual-traces store, so auto traces are ordinary
+   editable traces (tagged per net — deleting one auto trace frees that whole
+   net for hand-routing). *As built:* Auto-route routes the whole board from
+   scratch and **replaces** drawn traces (the router cannot treat foreign
+   hand-drawn copper as obstacles yet); the button's tooltip says so.
+   Partial completion — auto-routing only the still-unconnected nets around
+   existing hand copper — is future work.
 2. **The editor replaces the KiCanvas Board mode.** KiCanvas cannot be made
    interactive; the Board mode inside the `pcb3d` window becomes our own SVG
    editor. Downloads (`.kicad_pcb`, Gerbers) stay and export what was routed.
@@ -37,8 +42,12 @@ Gerber export stays hard-gated on a clean board.
   traces/vias come from the caller. Pour, DRC, connectivity, and the exporters
   run unchanged on the assembled layout — they cannot tell traces were drawn by
   hand, so the fab gate logic needs no changes.
-- When the circuit changes, a reconciliation helper drops manual traces/vias
-  whose nets no longer exist; the rest survive.
+- When the circuit changes, stored copper is invalidated by a **placement
+  signature** (`placementSignature`: board size + every ref@x,y,rotation):
+  any re-placement moves pads in absolute coordinates, so surviving traces
+  would be garbage — the stored value simply stops applying (inert, not
+  deleted; reverting the circuit revives it). Nets that no longer exist are
+  additionally filtered out.
 
 ### Editor
 
