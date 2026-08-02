@@ -500,15 +500,18 @@ function App() {
   );
 
   // Regenerated on every diagram edit so the KiCanvas view tracks the canvas
-  // (and the downloadable .kicad_sch) in real time.
+  // (and the downloadable .kicad_sch) in real time. Gated on the (retired)
+  // Schematic window actually being open, same as pcbLayout below — nobody
+  // pays for a schematic they can't see.
+  const canvasWindowOpen = openEditorViews.includes('canvas');
   const kicadSchematicSource = useMemo(() => {
-    if (!result?.circuit || isGenerating) return '';
+    if (!canvasWindowOpen || !result?.circuit || isGenerating) return '';
     try {
       return toKiCadSchematic(result.circuit, editedDiagram || result.diagram);
     } catch {
       return '';
     }
-  }, [result?.circuit, result?.diagram, editedDiagram, isGenerating]);
+  }, [canvasWindowOpen, result?.circuit, result?.diagram, editedDiagram, isGenerating]);
 
   // Shared by the 3D viewer, the Board routing editor and the downloads so
   // every PCB surface agrees on the same placed board.
