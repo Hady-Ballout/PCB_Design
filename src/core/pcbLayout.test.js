@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { TRACE_WIDTH, buildPcbLayout, isBetterAttempt } from './pcbLayout.js';
+import {
+  MANUAL_EXPANSION,
+  TRACE_WIDTH,
+  autoRouteLayout,
+  buildManualPcbLayout,
+  buildPcbLayout,
+  isBetterAttempt,
+} from './pcbLayout.js';
 import { RULES } from './pcbDesignRules.js';
 import { footprintRecordFor } from './pcbFootprints.js';
 import { placeComponents } from './pcbPlace.js';
@@ -335,6 +342,77 @@ describe('buildPcbLayout on a TO-92 transistor circuit', () => {
 
   it('is byte-for-byte deterministic', () => {
     expect(JSON.stringify(buildPcbLayout(ledDriver))).toBe(JSON.stringify(buildPcbLayout(ledDriver)));
+  });
+});
+
+describe('buildManualPcbLayout', () => {
+  const layout = buildManualPcbLayout(rcLowPass);
+
+  it('returns null for empty circuits', () => {
+    expect(buildManualPcbLayout({ components: [] })).toBeNull();
+    expect(buildManualPcbLayout(null)).toBeNull();
+  });
+
+  it('places but does not route: no copper beyond the pads, gate honestly closed', () => {
+    expect(layout.components).toHaveLength(3);
+    expect(layout.traces).toEqual([]);
+    expect(layout.vias).toEqual([]);
+    // No router ran, so nothing "failed"; the incomplete nets are the
+    // connectivity checker's finding, and they are what keeps the gate shut.
+    expect(layout.routing).toEqual({ complete: true, failedNets: [] });
+    expect(layout.connectivity.ok).toBe(false);
+    expect(layout.connectivity.incompleteNets.length).toBeGreaterThan(0);
+    // Placement alone is clean copper.
+    expect(layout.drc).toEqual({ ok: true, violations: [] });
+    expect(layout.manual).toBe(true);
+  });
+
+  it('starts roomier than the tight auto-routed board', () => {
+    const tight = placeComponents(rcLowPass.components, { expandFactor: 1 }).board;
+    expect(layout.board.width * layout.board.height)
+      .toBeGreaterThan(tight.width * tight.height);
+    expect(MANUAL_EXPANSION).toBeGreaterThan(1);
+  });
+
+  it('adopts stored traces and vias that match the placement signature', () => {
+    const routed = autoRouteLayout(layout);
+    expect(routed.failedNets).toEqual([]);
+    const rebuilt = buildManualPcbLayout(rcLowPass, {
+      placement: layout.placement,
+      traces: routed.traces,
+      vias: routed.vias,
+    });
+    expect(rebuilt.traces).toEqual(routed.traces);
+    expect(rebuilt.connectivity).toEqual({ ok: true, incompleteNets: [] });
+    expect(rebuilt.drc).toEqual({ ok: true, violations: [] });
+  });
+
+  it('ignores stored copper from a different placement', () => {
+    const routed = autoRouteLayout(layout);
+    const rebuilt = buildManualPcbLayout(rcLowPass, {
+      placement: 'some-other-board',
+      traces: routed.traces,
+      vias: routed.vias,
+    });
+    expect(rebuilt.traces).toEqual([]);
+    expect(rebuilt.vias).toEqual([]);
+  });
+
+  it('drops traces and vias on nets the circuit no longer has', () => {
+    const routed = autoRouteLayout(layout);
+    const ghost = { ...routed.traces[0], net: 'REMOVED_NET' };
+    const rebuilt = buildManualPcbLayout(rcLowPass, {
+      placement: layout.placement,
+      traces: [...routed.traces, ghost],
+      vias: [{ x: 1, y: 1, net: 'REMOVED_NET', diameter: 1.2, drill: 0.6 }],
+    });
+    expect(rebuilt.traces).toEqual(routed.traces);
+    expect(rebuilt.vias).toEqual([]);
+  });
+
+  it('is byte-for-byte deterministic', () => {
+    expect(JSON.stringify(buildManualPcbLayout(rcLowPass)))
+      .toBe(JSON.stringify(buildManualPcbLayout(rcLowPass)));
   });
 });
 

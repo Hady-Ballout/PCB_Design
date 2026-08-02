@@ -74,8 +74,8 @@ const EXPANSION_LADDER = [1, 1.15, 1.35, 1.6];
 
 const round = (value) => Math.round(value * 100) / 100;
 
-/** One placement + routing pass at a given expansion factor. */
-const layoutAttempt = (parts, expandFactor) => {
+/** Placement only: parts on a board, every footprint pad emitted, no copper. */
+const placedBoard = (parts, expandFactor) => {
   const { placements, board } = placeComponents(parts, { expandFactor });
 
   const components = placements.map((placement) => {
@@ -118,15 +118,26 @@ const layoutAttempt = (parts, expandFactor) => {
     };
   });
 
-  // Nets, in pad order, so the list reads the way the circuit does.
-  const netPads = new Map();
+  return { components, board };
+};
+
+/** Net names in pad order, so the list reads the way the circuit does. */
+const netNamesOf = (components) => {
+  const nets = [];
+  const seen = new Set();
   for (const component of components) {
     for (const pad of component.pads) {
-      if (!pad.connected) continue;
-      if (!netPads.has(pad.net)) netPads.set(pad.net, []);
-      netPads.get(pad.net).push(pad);
+      if (!pad.connected || seen.has(pad.net)) continue;
+      seen.add(pad.net);
+      nets.push(pad.net);
     }
   }
+  return nets;
+};
+
+/** One placement + routing pass at a given expansion factor. */
+const layoutAttempt = (parts, expandFactor) => {
+  const { components, board } = placedBoard(parts, expandFactor);
 
   const routed = routeBoard({ components, board });
 
@@ -140,7 +151,7 @@ const layoutAttempt = (parts, expandFactor) => {
     components,
     traces: routed.traces,
     vias: routed.vias,
-    nets: [...netPads.keys()],
+    nets: netNamesOf(components),
     routing: { complete: routed.failedNets.length === 0, failedNets: routed.failedNets },
   };
   // The pour fills what routing left over, so it can only be computed once the
@@ -179,3 +190,86 @@ export const buildPcbLayout = (circuit, options = {}) => {
   }
   return best;
 };
+
+/**
+ * How much roomier a manually-routed board starts than the tight auto board.
+ * Compactness only pays when a machine does the routing; a human wants obvious
+ * channels between footprints, and the expansion ladder never runs here (the
+ * board must not re-place under the user's feet).
+ */
+export const MANUAL_EXPANSION = 1.35;
+
+/**
+ * Identity of a placement, so stored manual copper can refuse to apply to a
+ * board it was not drawn on. Any change to the part set, the placer, or the
+ * board size moves pads in absolute coordinates and turns stored traces into
+ * garbage; comparing this string is how that garbage is kept off the board.
+ */
+export const placementSignature = (components, board) =>
+  `${board.width}x${board.height}|`
+  + components.map((item) => `${item.ref}@${item.x},${item.y},${item.rotation}`).join(';');
+
+/**
+ * Places a circuit WITHOUT routing it: the traces and vias come from the
+ * caller (the manual routing editor), and the pipeline's own pour, DRC and
+ * connectivity stages measure the result exactly as they would a routed board
+ * — the exporters and the fab gate cannot tell the difference.
+ *
+ * `routing` reports `{ complete: true, failedNets: [] }` — no router ran, so
+ * nothing "failed"; unfinished nets are the connectivity checker's verdict and
+ * they keep the gate shut on their own.
+ *
+ * @param {object} circuit
+ * @param {null | { placement: string,
+ *   traces: Array<{ layer: string, net: string, from: {x:number,y:number},
+ *     to: {x:number,y:number}, width: number }>,
+ *   vias: Array<{ x: number, y: number, net: string, diameter: number, drill: number }> }}
+ *   [manualRouting] copper drawn by the user; applied only when its
+ *   `placement` matches this build's placement signature, and filtered to
+ *   nets the circuit still has.
+ * @param {{ expandFactor?: number }} [options]
+ * @returns {null | object} same shape as `buildPcbLayout`, plus
+ *   `manual: true` and `placement` (the signature stored copper must carry).
+ */
+export const buildManualPcbLayout = (circuit, manualRouting = null, options = {}) => {
+  const parts = (circuit?.components || []).filter((part) => part.kind !== 'ground');
+  if (!parts.length) return null;
+
+  const { components, board } = placedBoard(parts, (options.expandFactor ?? 1) * MANUAL_EXPANSION);
+  const nets = netNamesOf(components);
+  const netSet = new Set(nets);
+  const placement = placementSignature(components, board);
+  const stored = manualRouting && manualRouting.placement === placement ? manualRouting : null;
+
+  const layout = {
+    board: {
+      width: board.width,
+      height: board.height,
+      thickness: BOARD_THICKNESS,
+      outline: { x: 0, y: 0, width: board.width, height: board.height },
+    },
+    components,
+    traces: (stored?.traces || []).filter((trace) => netSet.has(trace.net)),
+    vias: (stored?.vias || []).filter((via) => netSet.has(via.net)),
+    nets,
+    manual: true,
+    placement,
+    routing: { complete: true, failedNets: [] },
+  };
+  layout.pour = buildGroundPour(layout);
+  layout.drc = runDrc(layout);
+  layout.connectivity = checkConnectivity(layout);
+  return layout;
+};
+
+/**
+ * The Auto-route button: the ordinary A* maze router run on a manual layout's
+ * placement, so the result lands on exactly the pads the user sees. Routes the
+ * whole board from scratch — it does not know about copper already drawn, so
+ * the caller replaces the stored traces/vias with what comes back.
+ *
+ * @param {{ components: Array<object>, board: { width: number, height: number } }} layout
+ * @returns {ReturnType<typeof routeBoard>}
+ */
+export const autoRouteLayout = (layout) =>
+  routeBoard({ components: layout.components, board: { width: layout.board.width, height: layout.board.height } });
