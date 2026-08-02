@@ -31,9 +31,9 @@ describe('currentDay', () => {
 });
 
 describe('dailyTokenLimit', () => {
-  it('defaults to 50000', () => {
+  it('defaults to 100000', () => {
     expect(dailyTokenLimit()).toBe(DEFAULT_DAILY_TOKEN_LIMIT);
-    expect(DEFAULT_DAILY_TOKEN_LIMIT).toBe(50000);
+    expect(DEFAULT_DAILY_TOKEN_LIMIT).toBe(100000);
   });
 
   it('reads a positive DAILY_TOKEN_LIMIT override', () => {
@@ -43,9 +43,9 @@ describe('dailyTokenLimit', () => {
 
   it('ignores non-positive / non-numeric overrides', () => {
     process.env.DAILY_TOKEN_LIMIT = '0';
-    expect(dailyTokenLimit()).toBe(50000);
+    expect(dailyTokenLimit()).toBe(100000);
     process.env.DAILY_TOKEN_LIMIT = 'lots';
-    expect(dailyTokenLimit()).toBe(50000);
+    expect(dailyTokenLimit()).toBe(100000);
   });
 });
 
@@ -59,18 +59,18 @@ describe('recordDailyTokens + enforceDailyTokenLimit', () => {
   });
 
   it('allows requests under the limit and blocks once the allowance is spent', async () => {
-    await setDailyTokens(1, { tokens: 49999, day: currentDay() });
+    await setDailyTokens(1, { tokens: 99999, day: currentDay() });
     await expect(enforceDailyTokenLimit(1)).resolves.toBeUndefined();
 
-    await setDailyTokens(1, { tokens: 50000, day: currentDay() });
+    await setDailyTokens(1, { tokens: 100000, day: currentDay() });
     const rejection = await enforceDailyTokenLimit(1).catch((error) => error);
     expect(rejection).toBeInstanceOf(DailyTokenLimitError);
-    expect(rejection.limit).toBe(50000);
-    expect(rejection.usage).toBe(50000);
+    expect(rejection.limit).toBe(100000);
+    expect(rejection.usage).toBe(100000);
   });
 
   it('resets the counter when the stored day is stale', async () => {
-    await setDailyTokens(1, { tokens: 50000, day: '2000-01-01' });
+    await setDailyTokens(1, { tokens: 100000, day: '2000-01-01' });
     // A stale day means today starts fresh, so enforcement passes...
     await expect(enforceDailyTokenLimit(1)).resolves.toBeUndefined();
     // ...and a new charge starts from zero, not from yesterday's total.
@@ -82,7 +82,7 @@ describe('recordDailyTokens + enforceDailyTokenLimit', () => {
 
   it('is enforced even when billing is disabled (no STRIPE_SECRET_KEY)', async () => {
     expect(process.env.STRIPE_SECRET_KEY).toBeUndefined();
-    await setDailyTokens(1, { tokens: 50000, day: currentDay() });
+    await setDailyTokens(1, { tokens: 100000, day: currentDay() });
     await expect(enforceDailyTokenLimit(1)).rejects.toBeInstanceOf(DailyTokenLimitError);
   });
 
@@ -116,32 +116,32 @@ describe('getDailyTokenStatus', () => {
     const status = await getDailyTokenStatus(1, new Date('2026-07-30T10:00:00Z'));
     expect(status).toEqual({
       used: 0,
-      limit: 50000,
-      remaining: 50000,
+      limit: 100000,
+      remaining: 100000,
       percentUsed: 0,
       resetsAt: '2026-07-31T00:00:00.000Z',
     });
   });
 
   it('reflects today\'s spend as a rounded percentage', async () => {
-    await setDailyTokens(1, { tokens: 12500, day: currentDay() });
+    await setDailyTokens(1, { tokens: 25000, day: currentDay() });
     const status = await getDailyTokenStatus(1);
-    expect(status.used).toBe(12500);
-    expect(status.remaining).toBe(37500);
+    expect(status.used).toBe(25000);
+    expect(status.remaining).toBe(75000);
     expect(status.percentUsed).toBe(25);
   });
 
   it('treats a stale day as zero used', async () => {
-    await setDailyTokens(1, { tokens: 50000, day: '2000-01-01' });
+    await setDailyTokens(1, { tokens: 100000, day: '2000-01-01' });
     const status = await getDailyTokenStatus(1);
     expect(status.used).toBe(0);
     expect(status.percentUsed).toBe(0);
   });
 
   it('clamps the percentage to 100 on overshoot', async () => {
-    await setDailyTokens(1, { tokens: 60000, day: currentDay() });
+    await setDailyTokens(1, { tokens: 120000, day: currentDay() });
     const status = await getDailyTokenStatus(1);
-    expect(status.used).toBe(60000);
+    expect(status.used).toBe(120000);
     expect(status.remaining).toBe(0);
     expect(status.percentUsed).toBe(100);
   });

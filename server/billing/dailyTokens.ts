@@ -9,7 +9,7 @@
 // that report nothing (local Ollama) simply never advance the meter.
 import { getBillingUser, setDailyTokens } from './store.js';
 
-export const DEFAULT_DAILY_TOKEN_LIMIT = 50000;
+export const DEFAULT_DAILY_TOKEN_LIMIT = 100000;
 
 export function dailyTokenLimit(): number {
   const value = Number(process.env.DAILY_TOKEN_LIMIT);
