@@ -1811,6 +1811,25 @@ pre {
   padding: 0 10px;
 }
 
+/* Compact square icon buttons for editor-window toolbars (view-mode toggles,
+   downloads, board-editor tools). The words live in each button's title
+   tooltip and aria-label, not in the button. */
+button.tool-icon-button,
+.diagram-editbar button.tool-icon-button {
+  align-items: center;
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  min-height: 28px;
+  min-width: 28px;
+  padding: 0;
+  width: 28px;
+}
+
+.tool-icon-button svg {
+  display: block;
+}
+
 .diagram-editbar .component-symbol-button {
   align-items: center;
   display: inline-flex;

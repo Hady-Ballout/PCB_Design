@@ -207,28 +207,47 @@ export function PcbBoardEditor({ layout, onRoutingChange }) {
       <div className="pcb-editor-toolbar">
         <button
           type="button"
-          className="pcb-layer-toggle"
+          className="pcb-layer-toggle tool-icon-button"
           onClick={toggleLayer}
           style={{ color: LAYER_COLORS[activeLayer] }}
-          title={stroke ? 'Switch layer through a via (V)' : 'Layer new traces start on'}
+          title={`${activeLayer === 'top' ? 'Top' : 'Bottom'} layer — ${stroke ? 'switch layer through a via (V)' : 'layer new traces start on'}`}
+          aria-label={`Active layer: ${activeLayer}. Toggle layer`}
         >
-          {activeLayer === 'top' ? 'Top layer' : 'Bottom layer'}
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+            <path d="M8 2.5 14 6 8 9.5 2 6Z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+            <path d="M2 9.5 8 13l6-3.5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+          </svg>
         </button>
         <button
           type="button"
+          className="tool-icon-button"
           onClick={handleAutoRoute}
-          title="Route every net with the auto-router (replaces drawn traces)"
+          title="Auto-route — route every net with the auto-router (replaces drawn traces)"
+          aria-label="Auto-route"
         >
-          Auto-route
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+            <path d="M2 13h3.2l3.3-3.3h2.3L13.5 7" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+            <path d="M10.8 4.5h3v3" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="2.8" cy="13" r="1.1" fill="currentColor" />
+          </svg>
         </button>
-        <button
-          type="button"
-          onClick={handleClear}
-          disabled={!layout.traces.length && !layout.vias.length}
-          title="Remove every trace and via"
-        >
-          Clear
-        </button>
+        {/* Wrapper carries the tooltip: a disabled button gets no mouse
+            events, so the browser would never show its title. */}
+        <span title="Clear — remove every trace and via">
+          <button
+            type="button"
+            className="tool-icon-button"
+            onClick={handleClear}
+            disabled={!layout.traces.length && !layout.vias.length}
+            aria-label="Clear all traces and vias"
+          >
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+              <path d="M3 4.3h10M6.4 4.3V2.8h3.2v1.5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M4.4 4.3l.7 9.2h5.8l.7-9.2" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+              <path d="M6.7 7v4M9.3 7v4" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+            </svg>
+          </button>
+        </span>
         <span className="pcb-editor-progress" aria-live="polite">{progressSummary(layout)}</span>
         <span className="pcb-editor-hint">
           {stroke

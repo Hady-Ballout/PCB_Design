@@ -132,10 +132,31 @@ export function Pcb3DViewer({ circuit, layout, windowControls }) {
           &nbsp;&middot;&nbsp; {layout.nets.length} nets
         </span>
         <div className="button-row">
-          <button onClick={() => setShowLabels((current) => !current)} type="button">
-            {showLabels ? 'Hide labels' : 'Show labels'}
+          <button
+            className="tool-icon-button"
+            onClick={() => setShowLabels((current) => !current)}
+            type="button"
+            aria-pressed={showLabels}
+            title={showLabels ? 'Hide part reference labels' : 'Show part reference labels'}
+            aria-label={showLabels ? 'Hide part labels' : 'Show part labels'}
+          >
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+              <path d="M2 2.8h4.6L14 10.2 10.2 14 2.8 6.6Z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+              <circle cx="4.9" cy="4.9" r="0.9" fill="currentColor" />
+            </svg>
           </button>
-          <button onClick={downloadGlb} type="button">Download GLB</button>
+          <button
+            className="tool-icon-button"
+            onClick={downloadGlb}
+            type="button"
+            title="Download the 3D model (.glb)"
+            aria-label="Download 3D model"
+          >
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+              <path d="M8 1.5 13 4.2v4.1M3 4.2 8 1.5M3 4.2v5.6L8 12.5M3 4.2l5 2.7 5-2.7M8 6.9v2.6" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+              <path d="M12.5 10v4M10.8 12.3l1.7 1.7 1.7-1.7" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
           {windowControls}
         </div>
       </div>

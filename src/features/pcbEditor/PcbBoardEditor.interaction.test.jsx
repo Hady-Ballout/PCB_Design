@@ -212,8 +212,7 @@ describe('editing existing copper', () => {
   it('auto-routes the whole board from the toolbar', () => {
     const onRoutingChange = vi.fn();
     mount({ onRoutingChange });
-    const autoButton = [...container.querySelectorAll('button')]
-      .find((button) => button.textContent === 'Auto-route');
+    const autoButton = container.querySelector('button[aria-label="Auto-route"]');
     click(autoButton);
     const value = onRoutingChange.mock.calls[0][0];
     expect(value.placement).toBe(layout.placement);

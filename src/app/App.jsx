@@ -1661,54 +1661,89 @@ function App() {
           <div className="canvas-window-toolbar">
             <div className="diagram-editbar canvas-mode-toggle" aria-label="PCB view mode">
               <button
-                className={pcbViewMode === '3d' ? 'active-tool' : ''}
+                className={`tool-icon-button ${pcbViewMode === '3d' ? 'active-tool' : ''}`}
                 onClick={() => setPcbViewMode('3d')}
                 type="button"
+                title="3D view — the assembled board rendered in 3D"
+                aria-label="3D view"
               >
-                3D
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+                  <path d="M8 1.8 14 5v6L8 14.2 2 11V5Z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+                  <path d="M2 5l6 3 6-3M8 8v6" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+                </svg>
               </button>
               <button
-                className={pcbViewMode === 'board' ? 'active-tool' : ''}
+                className={`tool-icon-button ${pcbViewMode === 'board' ? 'active-tool' : ''}`}
                 onClick={() => setPcbViewMode('board')}
                 type="button"
+                title="Board editor — draw and edit copper traces by hand"
+                aria-label="Board editor"
               >
-                Board
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+                  <circle cx="3.5" cy="12.5" r="1.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
+                  <circle cx="12.5" cy="4.5" r="1.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
+                  <path d="M4.8 11.2l2.2-2.2h3.4l1.3-1.3" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+                </svg>
               </button>
               {/* Read-only KiCanvas render of the exact .kicad_pcb the
                   downloads produce — the pixel-faithful KiCad look the
                   interactive editor gave up. */}
               <button
-                className={pcbViewMode === 'preview' ? 'active-tool' : ''}
+                className={`tool-icon-button ${pcbViewMode === 'preview' ? 'active-tool' : ''}`}
                 onClick={() => setPcbViewMode('preview')}
                 type="button"
+                title="Preview — pixel-faithful KiCad render of the exported board"
+                aria-label="KiCad preview"
               >
-                Preview
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+                  <path d="M1.8 8s2.2-3.8 6.2-3.8S14.2 8 14.2 8 12 11.8 8 11.8 1.8 8 1.8 8Z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+                  <circle cx="8" cy="8" r="1.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
+                </svg>
               </button>
             </div>
             {pcbViewMode !== '3d' && (
               <div className="button-row">
                 {/* fabricationSlug is the same slug the Gerber archive and the
                     files inside it carry, so the whole fabrication set for a
-                    board shares one name. */}
-                <button
-                  onClick={() => downloadText(`${fabricationSlug(result.circuit?.title)}.kicad_pcb`, kicadPcbSource)}
-                  disabled={!kicadPcbSource}
+                    board shares one name. Titles live on the wrapper spans, not
+                    the buttons: a disabled control gets no mouse events, so
+                    Chrome never shows its own tooltip — and the disabled state
+                    is exactly when the reason needs explaining. */}
+                <span
+                  title={kicadPcbSource
+                    ? 'Download the KiCad board file (.kicad_pcb)'
+                    : 'Lay out the board first'}
                 >
-                  Download .kicad_pcb
-                </button>
-                {/* The title lives on the wrapper, not the button: a disabled
-                    control gets no mouse events, so Chrome never shows its own
-                    tooltip — and the disabled state is exactly when the reason
-                    needs explaining. */}
+                  <button
+                    className="tool-icon-button"
+                    onClick={() => downloadText(`${fabricationSlug(result.circuit?.title)}.kicad_pcb`, kicadPcbSource)}
+                    disabled={!kicadPcbSource}
+                    aria-label="Download KiCad board file"
+                  >
+                    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+                      <path d="M4 1.5h5.2L12 4.3v10.2H4Z" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+                      <path d="M8 6.2v4.6M6.2 9l1.8 1.8L9.8 9" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                </span>
                 <span
                   title={pcbFabricable
-                    ? 'RS-274X Gerbers + Excellon drill, ready to upload to a fab house'
+                    ? 'Download Gerbers (.zip) — RS-274X + Excellon drill, ready to upload to a fab house'
                     // pcbGateSummary is empty when there is no layout at all,
                     // which would leave the tooltip reading "Fix  first".
                     : pcbGateSummary ? `Fix ${pcbGateSummary} first` : 'Lay out the board first'}
                 >
-                  <button onClick={downloadGerbers} disabled={!pcbFabricable}>
-                    Download Gerbers (.zip)
+                  <button
+                    className="tool-icon-button"
+                    onClick={downloadGerbers}
+                    disabled={!pcbFabricable}
+                    aria-label="Download Gerbers"
+                  >
+                    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+                      <rect x="2.2" y="2" width="11.6" height="3.2" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.3" />
+                      <path d="M3.2 5.2v8a1 1 0 0 0 1 1h7.6a1 1 0 0 0 1-1v-8" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+                      <path d="M8 7v4M6.4 9.4 8 11l1.6-1.6" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
                   </button>
                 </span>
                 {renderWindowControls('pcb3d')}
