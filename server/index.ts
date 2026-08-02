@@ -14,7 +14,7 @@ import { initDb } from './auth/db.js';
 import { handleSignup, handleLogin, handleVerifyEmail, handleMe, verifyJwt } from './auth/auth.js';
 import { handleBillingStatus, handleCreateCheckout, handleCreatePortal, handleStripeWebhook } from './billing/billing.js';
 import { QuotaError, checkAndConsumeQuota } from './billing/quota.js';
-import { DailyTokenLimitError, dailyLimitMessage, enforceDailyTokenLimit, recordDailyTokens } from './billing/dailyTokens.js';
+import { DailyTokenLimitError, dailyLimitMessage, enforceDailyTokenLimit, getDailyTokenStatus, recordDailyTokens } from './billing/dailyTokens.js';
 import { trackTokenUsage } from './ai/tokenUsage.js';
 import type { ChatMemory, ChatMessage, Circuit, CurrentDesign, JwtPayload, PipelineEvent, StreamState } from './types.js';
 
@@ -245,6 +245,15 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
   const user = getUser(request);
   if (!user) {
     sendJson(response, 401, { error: 'Authentication required.' });
+    return;
+  }
+
+  if (request.url === '/api/usage/daily' && request.method === 'GET') {
+    try {
+      sendJson(response, 200, await getDailyTokenStatus(user.id));
+    } catch (error) {
+      sendJson(response, statusFor(error), { error: (error as Error).message });
+    }
     return;
   }
 

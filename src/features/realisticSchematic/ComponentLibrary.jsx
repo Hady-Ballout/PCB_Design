@@ -6,20 +6,12 @@
 // omitted (read-only view) the popover is browse-only and items are inert.
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ALLOWED_KINDS,
-  MCU_KINDS,
-  WIRING_ONLY_KINDS,
+  COMPONENT_CATEGORIES,
+  KINDS_BY_CATEGORY,
   kindLabel,
+  kindMatchesQuery,
 } from '../../core/componentKinds.js';
 import { PartThumbnail } from './parts.jsx';
-
-// Browse groups (registry order is preserved within each). Boards are checked
-// before wiring-only so an MCU board never falls into "Sensors & modules".
-const GROUPS = [
-  { id: 'basic', title: 'Basic components', match: (kind) => !MCU_KINDS.has(kind) && !WIRING_ONLY_KINDS.has(kind) },
-  { id: 'modules', title: 'Sensors & modules', match: (kind) => WIRING_ONLY_KINDS.has(kind) && !MCU_KINDS.has(kind) },
-  { id: 'boards', title: 'Boards', match: (kind) => MCU_KINDS.has(kind) },
-];
 
 const POPOVER_WIDTH = 288;
 const VIEWPORT_MARGIN = 12;
@@ -36,12 +28,16 @@ export function ComponentLibrary({ position, onClose, onSelect }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // One section per category (registry order preserved within each). Search
+  // matches on label, slug, aliases, and keywords via kindMatchesQuery, so
+  // "op-amp", "pot", or "ldr" find their kind even when the label differs.
   const groups = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    const matches = (kind) =>
-      !needle || kindLabel(kind).toLowerCase().includes(needle) || kind.includes(needle);
-    return GROUPS
-      .map((group) => ({ ...group, kinds: ALLOWED_KINDS.filter((kind) => group.match(kind) && matches(kind)) }))
+    return COMPONENT_CATEGORIES
+      .map((category) => ({
+        id: category.id,
+        title: category.title,
+        kinds: KINDS_BY_CATEGORY[category.id].filter((kind) => kindMatchesQuery(kind, query)),
+      }))
       .filter((group) => group.kinds.length > 0);
   }, [query]);
 
