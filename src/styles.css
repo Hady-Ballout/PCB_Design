@@ -423,21 +423,12 @@ h3 {
 
 /* ── Chat panel ── */
 
-.chat-sidebar-header,
 .chat-section-label,
 .chat-message-meta {
   align-items: center;
   display: flex;
   justify-content: space-between;
   gap: 12px;
-}
-
-.chat-sidebar-header {
-  align-items: flex-start;
-}
-
-.chat-sidebar-header h1 {
-  font-size: 22px;
 }
 
 .chat-conversation-header {

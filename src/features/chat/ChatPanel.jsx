@@ -150,13 +150,6 @@ export function ChatPanel({
     <aside className={`side-panel chat-panel-${chatPanelView}`}>
       {chatPanelView === 'history' ? (
         <>
-          <header className="chat-sidebar-header chat-history-header">
-            <div>
-              <p className="eyebrow">Prompt-to-PCB MVP</p>
-              <h1>Previous chats</h1>
-            </div>
-          </header>
-
           <form
             className="chat-composer new-chat-composer"
             onSubmit={(event) => { event.preventDefault(); startChatFromHistory(); }}
@@ -184,7 +177,7 @@ export function ChatPanel({
             </div>
           </form>
 
-          <section className="chat-history chat-history-page" aria-label="Previous chats">
+          <section className="chat-history chat-history-page" aria-label="Chat history">
             <div className="chat-section-label">
               <span>All conversations</span>
               <span>{chatStore.chats.length}</span>
@@ -214,8 +207,8 @@ export function ChatPanel({
               className="chat-back-button"
               onClick={() => setChatPanelView('history')}
               type="button"
-              aria-label="Open previous chats"
-              title="Previous chats"
+              aria-label="Open chat history"
+              title="Chat history"
             >
               <span aria-hidden="true">&larr;</span>
             </button>
