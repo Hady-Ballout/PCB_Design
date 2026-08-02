@@ -1673,8 +1673,18 @@ function App() {
               >
                 Board
               </button>
+              {/* Read-only KiCanvas render of the exact .kicad_pcb the
+                  downloads produce — the pixel-faithful KiCad look the
+                  interactive editor gave up. */}
+              <button
+                className={pcbViewMode === 'preview' ? 'active-tool' : ''}
+                onClick={() => setPcbViewMode('preview')}
+                type="button"
+              >
+                Preview
+              </button>
             </div>
-            {pcbViewMode === 'board' && (
+            {pcbViewMode !== '3d' && (
               <div className="button-row">
                 {/* fabricationSlug is the same slug the Gerber archive and the
                     files inside it carry, so the whole fabrication set for a
@@ -1715,6 +1725,15 @@ function App() {
               <div className="editor-window-empty">
                 <strong>Board not ready</strong>
                 <p>The board appears here once a layout is available.</p>
+              </div>
+            )
+          ) : pcbViewMode === 'preview' ? (
+            kicadPcbSource ? (
+              <KiCanvasEmbed source={kicadPcbSource} focus="board" />
+            ) : (
+              <div className="editor-window-empty">
+                <strong>Preview not ready</strong>
+                <p>The KiCad render appears here once a layout is available.</p>
               </div>
             )
           ) : (
