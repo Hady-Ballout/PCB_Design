@@ -92,6 +92,7 @@ function App() {
   const [thinkingState, setThinkingState] = useState(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [theme, setTheme] = useState(loadTheme);
+  const [userBarOpen, setUserBarOpen] = useState(false);
   // Bumped after each AI call so the daily-usage ring re-fetches its status.
   const [usageRefreshKey, setUsageRefreshKey] = useState(0);
   const refreshUsage = () => setUsageRefreshKey((key) => key + 1);
@@ -1977,17 +1978,32 @@ function App() {
 
   return (
     <main className="app-shell">
-      <div className="user-bar app-user-bar">
-        <ThemeToggle theme={theme} onToggle={toggleTheme} />
-        <UsageMeter refreshKey={usageRefreshKey} />
+      <div className={`user-bar app-user-bar ${userBarOpen ? 'is-open' : ''}`}>
         <button
           type="button"
-          onClick={() => { window.location.hash = 'connect'; setPage('connect'); }}
+          className="user-bar-toggle"
+          onClick={() => setUserBarOpen((open) => !open)}
+          aria-expanded={userBarOpen}
+          aria-label={userBarOpen ? 'Close account menu' : 'Open account menu'}
+          title="Account"
         >
-          Connect to Claude
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <circle cx="12" cy="8" r="4" fill="currentColor" />
+            <path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" fill="currentColor" />
+          </svg>
         </button>
-        <span>{user.email}</span>
-        <button type="button" onClick={logout}>Log out</button>
+        <div className="user-bar-items" aria-hidden={!userBarOpen}>
+          <ThemeToggle theme={theme} onToggle={toggleTheme} />
+          <UsageMeter refreshKey={usageRefreshKey} />
+          <button
+            type="button"
+            onClick={() => { window.location.hash = 'connect'; setPage('connect'); }}
+          >
+            Connect to Claude
+          </button>
+          <span>{user.email}</span>
+          <button type="button" onClick={logout}>Log out</button>
+        </div>
       </div>
       <section className="workspace">
         <ChatPanel
