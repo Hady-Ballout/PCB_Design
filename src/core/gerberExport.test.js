@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PcbExportError, fabricationSlug, toGerberArchive } from './gerberExport.js';
+import { PcbExportError, fabricationSlug, placedSilkStrokes, toGerberArchive } from './gerberExport.js';
 import { KICAD_FOOTPRINTS } from './kicadFootprintLibrary.js';
 import { buildPcbLayout } from './pcbLayout.js';
 import { RULES } from './pcbDesignRules.js';
@@ -340,6 +340,31 @@ describe('toGerberArchive silkscreen', () => {
     expect(back).toContain('%FSLAX46Y46*%');
     expect(back.trimEnd().endsWith('M02*')).toBe(true);
     expect(countOf(back, /D0[123]\*/g)).toBe(0);
+  });
+});
+
+describe('placedSilkStrokes', () => {
+  const component = {
+    ref: 'R1', kind: 'resistor', value: '1k', libId: RESISTOR, x: 10, y: 4, rotation: 0, pads: [],
+  };
+
+  it('returns the footprint silk as board-space polylines with real widths', () => {
+    const strokes = placedSilkStrokes(component);
+    // The vendored resistor silk is six 0.12mm lines.
+    expect(strokes).toHaveLength(6);
+    for (const stroke of strokes) {
+      expect(stroke.width).toBe(0.12);
+      expect(stroke.points.length).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('applies the placement rotation (180° mirrors every point through the centre)', () => {
+    const flat = placedSilkStrokes(component);
+    const turned = placedSilkStrokes({ ...component, rotation: 180 });
+    const [x0, y0] = flat[0].points[0];
+    const [x180, y180] = turned[0].points[0];
+    expect(x180).toBeCloseTo(2 * component.x - x0, 9);
+    expect(y180).toBeCloseTo(2 * component.y - y0, 9);
   });
 });
 

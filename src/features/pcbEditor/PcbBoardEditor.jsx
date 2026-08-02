@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
+import { placedSilkStrokes } from '../../core/gerberExport.js';
 import {
   addWaypoint,
   autoRoutedManual,
@@ -52,6 +53,12 @@ export function PcbBoardEditor({ layout, onRoutingChange }) {
     vias: layout.vias,
   };
   const ratsnest = useMemo(() => ratsnestFor(layout), [layout]);
+  // The real footprint silkscreen — the same polylines the silk Gerber gets —
+  // so a DIP looks like a DIP here, not a cluster of pads.
+  const silk = useMemo(
+    () => layout.components.map((component) => placedSilkStrokes(component)),
+    [layout.components],
+  );
   const activeNet = stroke?.net || hoverNet;
 
   const boardPoint = (event) => {
@@ -279,6 +286,18 @@ export function PcbBoardEditor({ layout, onRoutingChange }) {
             <g key={`via-${index}`} className={dimmed(via.net) ? 'pcb-dimmed' : ''}>
               <circle cx={via.x} cy={via.y} r={(via.diameter || 1.2) / 2} className="pcb-via" />
               <circle cx={via.x} cy={via.y} r={(via.drill || 0.6) / 2} className="pcb-hole" />
+            </g>
+          ))}
+          {layout.components.map((component, componentIndex) => (
+            <g key={`silk-${component.ref}`} className="pcb-silk-group">
+              {silk[componentIndex].map((stroke, strokeIndex) => (
+                <polyline
+                  key={strokeIndex}
+                  points={stroke.points.map(([x, y]) => `${x},${y}`).join(' ')}
+                  strokeWidth={stroke.width}
+                  className="pcb-silk"
+                />
+              ))}
             </g>
           ))}
           {layout.components.map((component) => (

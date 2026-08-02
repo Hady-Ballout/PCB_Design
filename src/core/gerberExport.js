@@ -370,6 +370,26 @@ const REF_TEXT_WIDTH = 0.15;
 const REF_TEXT_GAP = 0.8;
 const OUTLINE_WIDTH = 0.1;
 
+/**
+ * A placed component's silkscreen artwork as board-space polylines (mm,
+ * y-down): the vendored footprint's F.SilkS primitives tessellated and
+ * rotated/translated exactly the way the silk Gerber paints them. One answer
+ * to "what does this part look like" for every on-screen board render — the
+ * silk layer below strokes these same polylines, so the editor and the
+ * fabricated board cannot drift.
+ *
+ * @param {{ x: number, y: number, rotation: number, libId?: string,
+ *   kind?: string, value?: string, pads?: unknown[] }} component
+ * @returns {Array<{ width: number, points: Array<[number, number]> }>}
+ */
+export const placedSilkStrokes = (component) => {
+  const record = recordForPlacedComponent(component);
+  return (record.silk || []).map((primitive) => ({
+    width: primitive.width || RULES.silkWidth,
+    points: primitivePoints(primitive).map((point) => placedPoint(point, component)),
+  }));
+};
+
 /* ----------------------------------------------------------------- layers -- */
 
 const LAYER_SIDE = { top: 'top', bottom: 'bottom' };
@@ -429,12 +449,11 @@ const silkLayer = (layout, side) => {
   if (side !== 'top') return file.render();
 
   const records = layout.components.map((component) => recordForPlacedComponent(component));
-  layout.components.forEach((component, index) => {
-    for (const primitive of records[index].silk || []) {
-      const points = primitivePoints(primitive).map((point) => placedPoint(point, component));
-      file.stroke(points, primitive.width || RULES.silkWidth);
+  for (const component of layout.components) {
+    for (const stroke of placedSilkStrokes(component)) {
+      file.stroke(stroke.points, stroke.width);
     }
-  });
+  }
   layout.components.forEach((component, index) => {
     const baselineY = courtyardTop(component, records[index]) - REF_TEXT_GAP;
     for (const stroke of textStrokes(component.ref, { x: component.x, baselineY, height: REF_TEXT_HEIGHT })) {

@@ -102,6 +102,14 @@
   pointer-events: none;
 }
 
+.pcb-silk {
+  fill: none;
+  stroke: #e9edd8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
 .pcb-silk-ref {
   fill: #e8eef7;
   font-size: 1.4px;

@@ -88,6 +88,14 @@ describe('net highlighting', () => {
     mount();
     expect(container.querySelectorAll('.pcb-ratsnest').length).toBeGreaterThan(0);
   });
+
+  it('draws the real footprint silkscreen so parts read as parts', () => {
+    mount();
+    // Every component in this circuit has vendored silk artwork (axial
+    // resistor outline, capacitor body, header frame).
+    expect(container.querySelectorAll('.pcb-silk-group')).toHaveLength(3);
+    expect(container.querySelectorAll('.pcb-silk').length).toBeGreaterThan(3);
+  });
 });
 
 describe('drawing a trace', () => {
