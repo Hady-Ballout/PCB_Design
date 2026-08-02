@@ -22,10 +22,13 @@ import {
 } from '../core/circuitSync.js';
 import { toDiagramSvg } from '../core/pcbGenerator.js';
 import { toKiCadSchematic } from '../core/kicadSchematic.js';
+import { buildPcbLayout } from '../core/pcbLayout.js';
+import { toKiCadPcb } from '../core/kicadPcb.js';
+import { fabricationSlug, toGerberArchive } from '../core/gerberExport.js';
 import { changedLineIndexes } from '../core/lineDiff.js';
 import { layoutCircuitDiagram } from '../core/schematicLayout.js';
 import { API_BASE } from '../core/config.js';
-import { downloadText } from '../core/download.js';
+import { downloadBlob, downloadText } from '../core/download.js';
 import { AUTH_PAGES, PUBLIC_PAGES, pageFromHash } from './routing.js';
 import { markSpiceAsProvisional, readGenerationStream } from './generationStream.js';
 import { messageId } from '../features/chat/chatFormat.js';
@@ -53,6 +56,7 @@ import {
 } from '../features/schematic/geometry.js';
 import { AuthProvider, useAuth, HomePage, LoginPage, SignupPage, VerifyPage } from '../features/auth/auth.jsx';
 import { UsageMeter } from '../features/usage/UsageMeter.jsx';
+import ConnectPanel from '../features/connect/ConnectPanel.jsx';
 import { applyTheme, loadTheme, saveTheme } from './theme.js';
 import { ThemeToggle } from './ThemeToggle.jsx';
 import '../features/auth/auth.css';
@@ -66,6 +70,7 @@ function App() {
   const [chatStore, setChatStore] = useState(loadChatStore);
   const [diagramTool, setDiagramTool] = useState('select');
   const [canvasMode, setCanvasMode] = useState('kicad');
+  const [pcbViewMode, setPcbViewMode] = useState('3d');
   const [diagramSelection, setDiagramSelection] = useState(null);
   const [pendingTerminal, setPendingTerminal] = useState(null);
   const [openEditorViews, setOpenEditorViews] = useState(['realisticSchematic']);
@@ -503,6 +508,33 @@ function App() {
       return '';
     }
   }, [result?.circuit, result?.diagram, editedDiagram, isGenerating]);
+
+  // Shared by the 3D viewer and the Board (.kicad_pcb) view so both windows
+  // always agree on the same placed/routed layout.
+  //
+  // Gated on the PCB window actually being open. buildPcbLayout is the
+  // heaviest thing in the app — up to four expansion attempts of A* routing,
+  // ground pour and DRC, all synchronous on the main thread — and both PCB
+  // surfaces live inside the one 'pcb3d' window. Computing it for every chat
+  // generation would freeze the UI for a board nobody asked to see.
+  const pcbWindowOpen = openEditorViews.includes('pcb3d');
+  const pcbLayout = useMemo(() => {
+    if (!pcbWindowOpen || !result?.circuit) return null;
+    try {
+      return buildPcbLayout(result.circuit);
+    } catch {
+      return null;
+    }
+  }, [pcbWindowOpen, result?.circuit]);
+
+  const kicadPcbSource = useMemo(() => {
+    if (!pcbLayout || !result?.circuit) return '';
+    try {
+      return toKiCadPcb(pcbLayout, result.circuit);
+    } catch {
+      return '';
+    }
+  }, [pcbLayout, result?.circuit]);
 
   const openEditorView = (view) => {
     setOpenEditorViews((current) => {
@@ -1589,6 +1621,28 @@ function App() {
     ...(generation?.validation?.warnings || []).map((message) => ({ id: 'erc', severity: 'warning', message, fix: '' })),
   ];
 
+  // The three conditions toGerberArchive gates on, phrased once so the warning
+  // line, the button's disabled state and its tooltip can never disagree with
+  // what the export actually does.
+  const pcbFabricable = Boolean(
+    pcbLayout && pcbLayout.routing.complete && pcbLayout.drc.ok && pcbLayout.connectivity.ok,
+  );
+  const pcbGateSummary = pcbLayout
+    ? `${pcbLayout.routing.failedNets.length} unrouted nets / `
+      + `${pcbLayout.drc.violations.length} DRC violations / `
+      + `${pcbLayout.connectivity.incompleteNets.length} split nets`
+    : '';
+  const pcbLayoutWarning = pcbLayout && !pcbFabricable
+    ? `Layout incomplete: ${pcbGateSummary} — Gerber export will refuse.`
+    : '';
+
+  const downloadGerbers = () => {
+    if (!pcbFabricable || !result?.circuit) return;
+    // Same slug the files inside the archive carry, so the two agree.
+    const slug = fabricationSlug(result.circuit.title);
+    downloadBlob(`${slug}-gerbers.zip`, toGerberArchive(pcbLayout, result.circuit).zip, 'application/zip');
+  };
+
   const renderPcb3dView = () => (
     <div className="editor-window-body canvas-window-body">
       {!result ? (
@@ -1600,9 +1654,74 @@ function App() {
           </div>
         </>
       ) : (
-        <React.Suspense fallback={<div className="editor-window-empty"><p>Loading 3D viewer...</p></div>}>
-          <Pcb3DViewer circuit={result.circuit} windowControls={renderWindowControls('pcb3d')} />
-        </React.Suspense>
+        <>
+          <div className="canvas-window-toolbar">
+            <div className="diagram-editbar canvas-mode-toggle" aria-label="PCB view mode">
+              <button
+                className={pcbViewMode === '3d' ? 'active-tool' : ''}
+                onClick={() => setPcbViewMode('3d')}
+                type="button"
+              >
+                3D
+              </button>
+              <button
+                className={pcbViewMode === 'board' ? 'active-tool' : ''}
+                onClick={() => setPcbViewMode('board')}
+                type="button"
+              >
+                Board
+              </button>
+            </div>
+            {pcbViewMode === 'board' && (
+              <div className="button-row">
+                {/* fabricationSlug is the same slug the Gerber archive and the
+                    files inside it carry, so the whole fabrication set for a
+                    board shares one name. */}
+                <button
+                  onClick={() => downloadText(`${fabricationSlug(result.circuit?.title)}.kicad_pcb`, kicadPcbSource)}
+                  disabled={!kicadPcbSource}
+                >
+                  Download .kicad_pcb
+                </button>
+                {/* The title lives on the wrapper, not the button: a disabled
+                    control gets no mouse events, so Chrome never shows its own
+                    tooltip — and the disabled state is exactly when the reason
+                    needs explaining. */}
+                <span
+                  title={pcbFabricable
+                    ? 'RS-274X Gerbers + Excellon drill, ready to upload to a fab house'
+                    // pcbGateSummary is empty when there is no layout at all,
+                    // which would leave the tooltip reading "Fix  first".
+                    : pcbGateSummary ? `Fix ${pcbGateSummary} first` : 'Lay out the board first'}
+                >
+                  <button onClick={downloadGerbers} disabled={!pcbFabricable}>
+                    Download Gerbers (.zip)
+                  </button>
+                </span>
+                {renderWindowControls('pcb3d')}
+              </div>
+            )}
+          </div>
+          {pcbLayoutWarning && <p className="inline-error simulation-message">{pcbLayoutWarning}</p>}
+          {pcbViewMode === 'board' ? (
+            kicadPcbSource ? (
+              <KiCanvasEmbed source={kicadPcbSource} />
+            ) : (
+              <div className="editor-window-empty">
+                <strong>Board not ready</strong>
+                <p>The KiCad board appears here once a layout is available.</p>
+              </div>
+            )
+          ) : (
+            <React.Suspense fallback={<div className="editor-window-empty"><p>Loading 3D viewer...</p></div>}>
+              <Pcb3DViewer
+                circuit={result.circuit}
+                layout={pcbLayout}
+                windowControls={renderWindowControls('pcb3d')}
+              />
+            </React.Suspense>
+          )}
+        </>
       )}
     </div>
   );
@@ -1786,6 +1905,10 @@ function App() {
   if (visiblePage === 'signup') return withFloatingThemeToggle(<SignupPage />);
   if (visiblePage === 'verify') return withFloatingThemeToggle(<VerifyPage />);
 
+  if (visiblePage === 'connect') {
+    return withFloatingThemeToggle(<ConnectPanel onBack={showWorkspace} />);
+  }
+
   if (visiblePage === 'waveform') {
     return withFloatingThemeToggle(
       <main className="app-shell waveform-page-shell">
@@ -1833,6 +1956,12 @@ function App() {
       <div className="user-bar app-user-bar">
         <ThemeToggle theme={theme} onToggle={toggleTheme} />
         <UsageMeter refreshKey={usageRefreshKey} />
+        <button
+          type="button"
+          onClick={() => { window.location.hash = 'connect'; setPage('connect'); }}
+        >
+          Connect to Claude
+        </button>
         <span>{user.email}</span>
         <button type="button" onClick={logout}>Log out</button>
       </div>

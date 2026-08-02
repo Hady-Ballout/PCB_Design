@@ -5,6 +5,7 @@ import path from 'node:path';
 import { simulateCircuitTool, summarizeSeries } from './simulate.js';
 import { circuitSchema } from '../schemas.js';
 import { rcLowPass } from '../testFixtures.js';
+import { fileSink } from '../artifactSink.js';
 
 const parse = (circuit: unknown) => circuitSchema.parse(circuit);
 
@@ -57,7 +58,7 @@ describe('summarizeSeries', () => {
 
 describe('simulateCircuitTool', () => {
   it('runs the RC low-pass through ngspice and summarizes each node', async () => {
-    const result = await simulateCircuitTool({ circuit: parse(rcLowPass) }, artifactDir);
+    const result = await simulateCircuitTool({ circuit: parse(rcLowPass) }, fileSink(artifactDir));
 
     expect(result.ok).toBe(true);
     const vout = result.series.find((entry) => entry.name.toUpperCase() === 'VOUT');
@@ -67,10 +68,10 @@ describe('simulateCircuitTool', () => {
   });
 
   it('writes the full sample set to a CSV artifact instead of inlining it', async () => {
-    const result = await simulateCircuitTool({ circuit: parse(rcLowPass), maxPoints: 20 }, artifactDir);
+    const result = await simulateCircuitTool({ circuit: parse(rcLowPass), maxPoints: 20 }, fileSink(artifactDir));
 
-    expect(result.csvPath.endsWith('.csv')).toBe(true);
-    const csv = readFileSync(result.csvPath, 'utf8');
+    expect(result.waveformCsv.location.endsWith('.csv')).toBe(true);
+    const csv = readFileSync(result.waveformCsv.location, 'utf8');
     expect(csv.split('\n').length).toBeGreaterThan(20);
     for (const series of result.series) {
       expect(series.points.length).toBeLessThanOrEqual(20);
@@ -78,15 +79,15 @@ describe('simulateCircuitTool', () => {
   });
 
   it('puts the time column first in the CSV header', async () => {
-    const result = await simulateCircuitTool({ circuit: parse(rcLowPass) }, artifactDir);
+    const result = await simulateCircuitTool({ circuit: parse(rcLowPass) }, fileSink(artifactDir));
 
-    expect(readFileSync(result.csvPath, 'utf8').split('\n')[0]).toMatch(/^time,/);
+    expect(readFileSync(result.waveformCsv.location, 'utf8').split('\n')[0]).toMatch(/^time,/);
   });
 
   it('reports a missing ngspice binary as an actionable error, not a crash', async () => {
     process.env.NGSPICE_BINARY = 'ngspice-that-does-not-exist';
 
-    const result = await simulateCircuitTool({ circuit: parse(rcLowPass) }, artifactDir);
+    const result = await simulateCircuitTool({ circuit: parse(rcLowPass) }, fileSink(artifactDir));
 
     expect(result.ok).toBe(false);
     expect(result.errors.join(' ')).toMatch(/not found|PATH/i);

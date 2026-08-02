@@ -6,6 +6,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import type { ArtifactContent } from './artifactSink.js';
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 /**
@@ -26,7 +28,7 @@ export const resolveArtifactDir = (
  * name never controls the directory: `..` is rejected outright and any nested
  * path is collapsed to its basename, so an artifact cannot land outside `dir`.
  */
-export const writeArtifact = (dir: string, filename: string, content: string): string => {
+export const writeArtifact = (dir: string, filename: string, content: ArtifactContent): string => {
   const segments = String(filename).split(/[\\/]+/);
   if (segments.some((segment) => segment === '..')) {
     // Flattening this quietly would hide the bug that produced it.
@@ -41,7 +43,10 @@ export const writeArtifact = (dir: string, filename: string, content: string): s
   const absoluteDir = path.resolve(dir);
   mkdirSync(absoluteDir, { recursive: true });
   const target = path.join(absoluteDir, base);
-  writeFileSync(target, content, 'utf8');
+  // No encoding argument: strings still land as UTF-8, and a Uint8Array (the
+  // zipped Gerber package) is written verbatim rather than round-tripped
+  // through a text decode that would corrupt every byte above 0x7f.
+  writeFileSync(target, content);
   return target;
 };
 

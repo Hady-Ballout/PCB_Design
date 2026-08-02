@@ -5,6 +5,7 @@ import path from 'node:path';
 import { renderSchematic } from './render.js';
 import { circuitSchema } from '../schemas.js';
 import { rcLowPass } from '../testFixtures.js';
+import { fileSink } from '../artifactSink.js';
 
 const parse = (circuit: unknown) => circuitSchema.parse(circuit);
 
@@ -20,14 +21,14 @@ afterEach(() => {
 
 describe('renderSchematic', () => {
   it('writes an SVG artifact named after the circuit', () => {
-    const result = renderSchematic({ circuit: parse(rcLowPass) }, artifactDir);
+    const result = renderSchematic({ circuit: parse(rcLowPass) }, fileSink(artifactDir));
 
-    expect(path.basename(result.path)).toBe('rc-low-pass.svg');
-    expect(readFileSync(result.path, 'utf8')).toContain('<svg');
+    expect(path.basename(result.artifact.location)).toBe('rc-low-pass.svg');
+    expect(readFileSync(result.artifact.location, 'utf8')).toContain('<svg');
   });
 
   it('returns the drawing size and what was placed, not the markup', () => {
-    const result = renderSchematic({ circuit: parse(rcLowPass) }, artifactDir);
+    const result = renderSchematic({ circuit: parse(rcLowPass) }, fileSink(artifactDir));
 
     expect(result.components).toBe(3);
     expect(result.nets).toBeGreaterThan(0);
@@ -37,7 +38,7 @@ describe('renderSchematic', () => {
   });
 
   it('labels every component it placed so the caller can cross-check refs', () => {
-    const result = renderSchematic({ circuit: parse(rcLowPass) }, artifactDir);
+    const result = renderSchematic({ circuit: parse(rcLowPass) }, fileSink(artifactDir));
 
     expect(result.placed.sort()).toEqual(['C1', 'R1', 'V1']);
   });

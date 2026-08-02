@@ -3,6 +3,7 @@
 // component stays thin and the scene is reusable for GLB export.
 import * as THREE from 'three';
 import { BOARD_THICKNESS, PAD_DIAMETER, VIA_DIAMETER } from '../../core/pcbLayout.js';
+import { rotateOffset } from '../../core/pcbPlace.js';
 
 const TRACE_HEIGHT = 0.06;
 const BOARD_TOP = BOARD_THICKNESS / 2;
@@ -60,17 +61,19 @@ export const buildPcbScene = (layout) => {
     group.add(mesh);
   }
 
-  const padGeometry = new THREE.CylinderGeometry(PAD_DIAMETER / 2, PAD_DIAMETER / 2, board.thickness + 0.16, 20);
-  const viaGeometry = new THREE.CylinderGeometry(VIA_DIAMETER / 2, VIA_DIAMETER / 2, board.thickness + 0.14, 14);
   for (const component of layout.components) {
     for (const pad of component.pads) {
-      const mesh = new THREE.Mesh(padGeometry, mats.pad);
+      const diameter = pad.diameter ?? PAD_DIAMETER;
+      const geometry = new THREE.CylinderGeometry(diameter / 2, diameter / 2, board.thickness + 0.16, 20);
+      const mesh = new THREE.Mesh(geometry, mats.pad);
       mesh.position.set(toX(pad.x), 0, toZ(pad.y));
       group.add(mesh);
     }
   }
   for (const via of layout.vias) {
-    const mesh = new THREE.Mesh(viaGeometry, mats.via);
+    const diameter = via.diameter ?? VIA_DIAMETER;
+    const geometry = new THREE.CylinderGeometry(diameter / 2, diameter / 2, board.thickness + 0.14, 14);
+    const mesh = new THREE.Mesh(geometry, mats.via);
     mesh.position.set(toX(via.x), 0, toZ(via.y));
     group.add(mesh);
   }
@@ -97,29 +100,53 @@ const componentMesh = (component, mats, toX, toZ) => {
   const body = component.body;
 
   if (body === 'axial') {
+    // Barrel/bands/arms are along X by default; a rotated part's pads may
+    // instead differ mostly in Z (board y), so orient this body's whole
+    // local subgroup along whichever axis its own two pads actually sit on
+    // — derived from the pad coordinates themselves, not component.rotation,
+    // so it is correct regardless of any internal rotation sign convention.
     const bodyY = BOARD_TOP + 1.5;
     const length = component.width * 0.72;
+    const [padA, padB] = padPoints;
+    const horizontal = !padB || Math.abs(padB.x - padA.x) >= Math.abs(padB.z - padA.z);
+
+    const inner = new THREE.Group();
+    inner.name = 'axial-inner';
+    inner.position.set(x, 0, z);
+    if (!horizontal) inner.rotation.y = Math.PI / 2;
+    holder.add(inner);
+
     const barrel = new THREE.Mesh(new THREE.CylinderGeometry(1.15, 1.15, length, 18), mats.resistorBody);
+    barrel.name = 'barrel';
     barrel.rotation.z = Math.PI / 2;
-    barrel.position.set(x, bodyY, z);
-    holder.add(barrel);
+    barrel.position.set(0, bodyY, 0);
+    inner.add(barrel);
     [-0.28, -0.12, 0.04, 0.3].forEach((offset, index) => {
       const band = new THREE.Mesh(
         new THREE.CylinderGeometry(1.22, 1.22, 0.5, 18),
         new THREE.MeshStandardMaterial({ color: bandColor(index), roughness: 0.6 }),
       );
+      band.name = 'band';
       band.rotation.z = Math.PI / 2;
-      band.position.set(x + offset * length, bodyY, z);
-      holder.add(band);
+      band.position.set(offset * length, bodyY, 0);
+      inner.add(band);
     });
     for (const point of padPoints) {
       holder.add(lead(point.x, point.z, bodyY, mats));
-      // Horizontal lead run from the vertical post to the body end.
-      const run = Math.abs(point.x - x) - length / 2;
+      // Lead run from the vertical post to the body end, along the same
+      // axis as the barrel.
+      const along = horizontal ? point.x - x : point.z - z;
+      const run = Math.abs(along) - length / 2;
       if (run > 0.2) {
         const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, run, 10), mats.lead);
-        arm.rotation.z = Math.PI / 2;
-        arm.position.set(point.x > x ? point.x - run / 2 : point.x + run / 2, bodyY, point.z);
+        arm.name = 'axial-arm';
+        if (horizontal) {
+          arm.rotation.z = Math.PI / 2;
+          arm.position.set(point.x > x ? point.x - run / 2 : point.x + run / 2, bodyY, point.z);
+        } else {
+          arm.rotation.x = Math.PI / 2;
+          arm.position.set(point.x, bodyY, point.z > z ? point.z - run / 2 : point.z + run / 2);
+        }
         holder.add(arm);
       }
     }
@@ -171,10 +198,37 @@ const componentMesh = (component, mats, toX, toZ) => {
       can.position.set(x, BOARD_TOP, z);
       holder.add(can);
     } else {
-      const bodyMesh = new THREE.Mesh(new THREE.BoxGeometry(component.width, 4.4, 3), mats.blackPlastic);
-      bodyMesh.position.set(x, BOARD_TOP + 2.2, z - 0.8);
-      const tab = new THREE.Mesh(new THREE.BoxGeometry(component.width, tall - 4.4, 1.2), mats.silver);
-      tab.position.set(x, BOARD_TOP + 4.4 + (tall - 4.4) / 2, z - 1.7);
+      // component.width/height are already board-space (swapped for a
+      // rotated placement), so the lead-row span is whichever one actually
+      // covers the pads; the body/tab sit offset from the leads along the
+      // perpendicular board axis.
+      const spanX = Math.max(...padPoints.map((p) => p.x)) - Math.min(...padPoints.map((p) => p.x));
+      const spanZ = Math.max(...padPoints.map((p) => p.z)) - Math.min(...padPoints.map((p) => p.z));
+      const horizontal = spanX >= spanZ;
+      const along = horizontal ? component.width : component.height;
+      const bodyMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(horizontal ? along : 3, 4.4, horizontal ? 3 : along),
+        mats.blackPlastic,
+      );
+      bodyMesh.name = 'to220-body';
+      const tab = new THREE.Mesh(
+        new THREE.BoxGeometry(horizontal ? along : 1.2, tall - 4.4, horizontal ? 1.2 : along),
+        mats.silver,
+      );
+      tab.name = 'to220-tab';
+      // The body/tab sit offset from the lead row along the footprint's
+      // local perpendicular axis (local (0, -1), i.e. "north" of the pins
+      // in unrotated footprint space). `horizontal` only tells us which
+      // board axis the pins ended up on, which is symmetric between 90 and
+      // 270 (and between 0 and 180) — it can't tell which SIDE the tab goes
+      // on. Rotate the local offset by the component's actual rotation
+      // (same convention as pcbPlace.js's rotateOffset, which produced this
+      // component's own placement) to get that sign right for every
+      // rotation, not just axis.
+      const bodyOffset = rotateOffset({ x: 0, y: -0.8 }, component.rotation);
+      const tabOffset = rotateOffset({ x: 0, y: -1.7 }, component.rotation);
+      bodyMesh.position.set(x + bodyOffset.x, BOARD_TOP + 2.2, z + bodyOffset.y);
+      tab.position.set(x + tabOffset.x, BOARD_TOP + 4.4 + (tall - 4.4) / 2, z + tabOffset.y);
       holder.add(bodyMesh, tab);
     }
     for (const point of padPoints) holder.add(lead(point.x, point.z, BOARD_TOP + 1.2, mats));
@@ -205,21 +259,41 @@ const componentMesh = (component, mats, toX, toZ) => {
     const usb = new THREE.Mesh(new THREE.BoxGeometry(component.width * 0.16, 1.6, component.height * 0.22), mats.silver);
     usb.position.set(x - component.width / 2 + component.width * 0.09, BOARD_TOP + 5, z);
     holder.add(usb);
-    // Header strips standing between the module and the host board.
+    // Header strips standing between the module and the host board, grouped
+    // along whichever axis the pin rows actually run on: at rotation 0 that
+    // is horizontal rows distinguished by Z, but a 90-degree-rotated module
+    // has vertical rows distinguished by X instead — pick by which
+    // coordinate has the wider spread across all the module's pads.
+    const spanX = Math.max(...padPoints.map((p) => p.x)) - Math.min(...padPoints.map((p) => p.x));
+    const spanZ = Math.max(...padPoints.map((p) => p.z)) - Math.min(...padPoints.map((p) => p.z));
+    const rowsRunAlongX = spanX >= spanZ;
     const rows = new Map();
     for (const point of padPoints) {
-      const rowKey = Math.round(point.z * 10);
+      const rowKey = rowsRunAlongX ? Math.round(point.z * 10) : Math.round(point.x * 10);
       if (!rows.has(rowKey)) rows.set(rowKey, []);
       rows.get(rowKey).push(point);
     }
     for (const points of rows.values()) {
-      const minX = Math.min(...points.map((p) => p.x));
-      const maxX = Math.max(...points.map((p) => p.x));
       const header = new THREE.Mesh(
-        new THREE.BoxGeometry(maxX - minX + 2.54, 2.8, 2.54),
+        rowsRunAlongX
+          ? new THREE.BoxGeometry(
+            Math.max(...points.map((p) => p.x)) - Math.min(...points.map((p) => p.x)) + 2.54, 2.8, 2.54,
+          )
+          : new THREE.BoxGeometry(
+            2.54, 2.8, Math.max(...points.map((p) => p.z)) - Math.min(...points.map((p) => p.z)) + 2.54,
+          ),
         mats.blackPlastic,
       );
-      header.position.set((minX + maxX) / 2, BOARD_TOP + 1.4, points[0].z);
+      header.name = 'header-strip';
+      if (rowsRunAlongX) {
+        const minX = Math.min(...points.map((p) => p.x));
+        const maxX = Math.max(...points.map((p) => p.x));
+        header.position.set((minX + maxX) / 2, BOARD_TOP + 1.4, points[0].z);
+      } else {
+        const minZ = Math.min(...points.map((p) => p.z));
+        const maxZ = Math.max(...points.map((p) => p.z));
+        header.position.set(points[0].x, BOARD_TOP + 1.4, (minZ + maxZ) / 2);
+      }
       holder.add(header);
     }
     for (const point of padPoints) holder.add(lead(point.x, point.z, BOARD_TOP + 3.5, mats));

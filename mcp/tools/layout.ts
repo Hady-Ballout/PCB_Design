@@ -1,11 +1,14 @@
-// pcb_layout — single-board placement and L-shaped two-layer routing.
+// pcb_layout — single-board placement and clearance-aware two-layer routing.
 //
 // The full geometry (every pad coordinate, every trace segment) goes to a JSON
 // artifact; what returns inline is the board envelope, where each footprint
-// landed, and how much copper it took.
+// landed, how much copper it took, and — so a caller can never mistake a
+// half-routed board for a finished one — the router's and the design rule
+// checker's own verdict on it.
 
 import { buildPcbLayout } from '../../src/core/pcbLayout.js';
-import { slugify, writeArtifact } from '../artifacts.js';
+import { slugify } from '../artifacts.js';
+import type { ArtifactSink } from '../artifactSink.js';
 import type { ParsedCircuit } from '../schemas.js';
 
 export interface LayoutArgs {
@@ -21,23 +24,26 @@ interface RawLayout {
   }>;
   traces: unknown[];
   vias: unknown[];
+  pour: unknown;
   nets: string[];
+  routing: { complete: boolean; failedNets: Array<{ net: string; reason: string }> };
+  drc: { ok: boolean; violations: Array<{ type: string; netA: string; netB: string | null }> };
+  connectivity: { ok: boolean; incompleteNets: Array<{ net: string; islands: number }> };
 }
 
-export const pcbLayoutTool = ({ circuit }: LayoutArgs, artifactDir: string) => {
+export const pcbLayoutTool = ({ circuit }: LayoutArgs, sink: ArtifactSink) => {
   const layout = buildPcbLayout(circuit) as RawLayout | null;
   if (!layout) {
     throw new Error('Cannot lay out a circuit with no components.');
   }
 
-  const file = writeArtifact(
-    artifactDir,
+  const artifact = sink.put(
     `${slugify(circuit.title)}-layout.json`,
     JSON.stringify(layout, null, 2),
   );
 
   return {
-    path: file,
+    artifact,
     board: layout.board,
     layers: 2,
     components: layout.components.map(({ ref, kind, value, body, x, y, width, height }) => ({
@@ -46,5 +52,15 @@ export const pcbLayoutTool = ({ circuit }: LayoutArgs, artifactDir: string) => {
     traceCount: layout.traces.length,
     viaCount: layout.vias.length,
     nets: layout.nets,
+    manufacturable: layout.routing.complete && layout.drc.ok && layout.connectivity.ok,
+    routing: {
+      complete: layout.routing.complete,
+      failedNets: layout.routing.failedNets.map(({ net, reason }) => ({ net, reason })),
+    },
+    drc: {
+      ok: layout.drc.ok,
+      violations: layout.drc.violations.map(({ type, netA, netB }) => ({ type, netA, netB })),
+    },
+    connectivity: layout.connectivity,
   };
 };

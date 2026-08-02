@@ -5,7 +5,8 @@
 // is and what ended up on it.
 
 import { toDiagramSvg } from '../../src/core/pcbGenerator.js';
-import { slugify, writeArtifact } from '../artifacts.js';
+import { slugify } from '../artifacts.js';
+import type { ArtifactSink } from '../artifactSink.js';
 import type { ParsedCircuit } from '../schemas.js';
 import { diagramFor } from './diagram.js';
 
@@ -13,13 +14,13 @@ export interface RenderArgs {
   circuit: ParsedCircuit;
 }
 
-export const renderSchematic = ({ circuit }: RenderArgs, artifactDir: string) => {
+export const renderSchematic = ({ circuit }: RenderArgs, sink: ArtifactSink) => {
   const diagram = diagramFor(circuit);
   const svg = toDiagramSvg(diagram);
-  const file = writeArtifact(artifactDir, `${slugify(circuit.title)}.svg`, svg);
+  const artifact = sink.put(`${slugify(circuit.title)}.svg`, svg);
 
   return {
-    path: file,
+    artifact,
     width: diagram.width,
     height: diagram.height,
     components: diagram.components.length,

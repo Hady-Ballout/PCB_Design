@@ -5,6 +5,7 @@ import path from 'node:path';
 import { pcbLayoutTool } from './layout.js';
 import { circuitSchema } from '../schemas.js';
 import { rcLowPass } from '../testFixtures.js';
+import { fileSink } from '../artifactSink.js';
 
 const parse = (circuit: unknown) => circuitSchema.parse(circuit);
 
@@ -20,7 +21,7 @@ afterEach(() => {
 
 describe('pcbLayoutTool', () => {
   it('reports the board envelope in millimetres', () => {
-    const result = pcbLayoutTool({ circuit: parse(rcLowPass) }, artifactDir);
+    const result = pcbLayoutTool({ circuit: parse(rcLowPass) }, fileSink(artifactDir));
 
     expect(result.board.width).toBeGreaterThan(0);
     expect(result.board.height).toBeGreaterThan(0);
@@ -28,7 +29,7 @@ describe('pcbLayoutTool', () => {
   });
 
   it('summarizes each placed footprint without dumping its pads', () => {
-    const result = pcbLayoutTool({ circuit: parse(rcLowPass) }, artifactDir);
+    const result = pcbLayoutTool({ circuit: parse(rcLowPass) }, fileSink(artifactDir));
 
     expect(result.components).toHaveLength(3);
     const r1 = result.components.find((part) => part.ref === 'R1');
@@ -37,17 +38,26 @@ describe('pcbLayoutTool', () => {
   });
 
   it('counts routed copper and lists the nets it routed', () => {
-    const result = pcbLayoutTool({ circuit: parse(rcLowPass) }, artifactDir);
+    const result = pcbLayoutTool({ circuit: parse(rcLowPass) }, fileSink(artifactDir));
 
     expect(result.traceCount).toBeGreaterThan(0);
     expect(result.nets).toContain('VOUT');
   });
 
-  it('writes the full geometry to a JSON artifact', () => {
-    const result = pcbLayoutTool({ circuit: parse(rcLowPass) }, artifactDir);
+  it('reports whether the board is actually manufacturable', () => {
+    const result = pcbLayoutTool({ circuit: parse(rcLowPass) }, fileSink(artifactDir));
 
-    expect(path.basename(result.path)).toBe('rc-low-pass-layout.json');
-    const geometry = JSON.parse(readFileSync(result.path, 'utf8'));
+    expect(result.manufacturable).toBe(true);
+    expect(result.routing).toEqual({ complete: true, failedNets: [] });
+    expect(result.drc).toEqual({ ok: true, violations: [] });
+    expect(result.connectivity).toEqual({ ok: true, incompleteNets: [] });
+  });
+
+  it('writes the full geometry to a JSON artifact', () => {
+    const result = pcbLayoutTool({ circuit: parse(rcLowPass) }, fileSink(artifactDir));
+
+    expect(path.basename(result.artifact.location)).toBe('rc-low-pass-layout.json');
+    const geometry = JSON.parse(readFileSync(result.artifact.location, 'utf8'));
     expect(geometry.components[0].pads.length).toBeGreaterThan(0);
     expect(geometry.traces.length).toBe(result.traceCount);
   });
@@ -55,6 +65,6 @@ describe('pcbLayoutTool', () => {
   it('explains itself when a circuit has nothing to place', () => {
     const empty = { ...parse(rcLowPass), components: [] };
 
-    expect(() => pcbLayoutTool({ circuit: empty }, artifactDir)).toThrow(/no components/i);
+    expect(() => pcbLayoutTool({ circuit: empty }, fileSink(artifactDir))).toThrow(/no components/i);
   });
 });

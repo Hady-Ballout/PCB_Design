@@ -36,6 +36,24 @@ The AI's only job is to produce a structured circuit model (+ matching SPICE). E
 else — validation, diagram layout, SPICE/KiCad export, simulation, waveform parsing — is
 deterministic code in `src/core` and `server/`.
 
+## From circuit to manufacturable board
+
+The same circuit model also becomes a real two-layer PCB, with no KiCad install anywhere in
+the path:
+
+```text
+circuit -> footprints -> placement -> two-layer A* routing -> ground pour -> DRC
+        -> .kicad_pcb   (3D PCB view's Board mode, downloadable)
+        -> Gerber + Excellon zip  (gated: refuses a board that isn't fabricable)
+```
+
+Every stage is deterministic — the same circuit gives byte-identical files, so an order can
+be checksummed against what was reviewed. The Gerber export is the one exporter that
+**refuses**: unless routing is complete, the independent DRC passes and every net is a
+single connected island, it throws instead of shipping a board that cannot work. See
+`docs/ARCHITECTURE.md` for the stage-by-stage picture and `docs/FRONTEND.md` for each
+module.
+
 ## Run it
 
 ```bash
@@ -51,11 +69,22 @@ for simulation to work.
 
 ## Use it from Claude (MCP)
 
-`mcp/` is an MCP stdio server that exposes the deterministic engine — validation, the
-topology rule engine, SPICE/KiCad export, Ngspice simulation, schematic SVG and PCB
-layout — as tools for Claude Desktop or Claude Code. There is no AI in that path: Claude
-authors the circuit JSON itself and the tools check/run/export it, calling `src/core`
-directly with no HTTP hop and no provider. See `mcp/README.md` for the install snippet.
+The deterministic engine — validation, the topology rule engine, SPICE/KiCad export,
+Ngspice simulation, schematic SVG and PCB layout — is exposed as MCP tools. There is no
+AI in that path: Claude authors the circuit JSON itself and the tools check/run/export
+it, calling `src/core` directly with no HTTP hop and no provider.
+
+Two transports, one tool surface (`mcp/registerTools.ts`):
+
+| | Runs as | For | Auth |
+|---|---|---|---|
+| **Local** (`mcp/server.ts`) | stdio subprocess | a developer on this repo | none needed |
+| **Hosted** (`server/mcp/`) | `/api/mcp` on the API server | any user, via a copy-paste URL | OAuth 2.1 |
+
+The local server is ready to use — see `mcp/README.md`. The hosted one is behind
+`MCP_HTTP_ENABLED=1` and needs an authorization server configured before it can be
+exposed; see `docs/superpowers/specs/2026-08-01-hosted-mcp-connector-design.md`. The
+in-app "Connect to Claude" page (`#connect`) hands users the URL.
 
 ## Where to look next
 

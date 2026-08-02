@@ -1,7 +1,9 @@
 # Hosted MCP connector — design
 
 **Date:** 2026-08-01
-**Status:** Design approved, not yet implemented
+**Status:** Phases 1, 2, 4 implemented on `feat/hosted-mcp-connector`. Phase 3
+(WorkOS tenant setup) is the remaining work and requires account access — the
+server-side code it needs is already in place and configured by env var.
 **Supersedes nothing.** Extends the local stdio MCP server in `mcp/` (see `mcp/README.md`).
 
 ## Goal
@@ -162,14 +164,28 @@ scope here**.
 
 Each phase is independently shippable and testable.
 
-1. **Remote transport, no auth.** `/api/mcp` mounted, six tools reachable over HTTP,
-   artifact delivery reworked. Gated to non-production by env var. Proves the tools
-   work over the wire before any auth exists.
-2. **Resource server.** RFC 9728 metadata, 401/403 challenges, JWKS verification,
-   audience binding. Testable with a hand-minted AuthKit token.
-3. **Authorization.** WorkOS AuthKit tenant, resource indicator registered, DCR
-   enabled, end-to-end connect from a real Claude client.
-4. **UI.** ConnectPanel, copy buttons, install instructions.
+1. ✅ **Remote transport, no auth.** `/api/mcp` mounted, six tools reachable over
+   HTTP, artifact delivery reworked. Gated by `MCP_HTTP_ENABLED`.
+2. ✅ **Resource server.** RFC 9728 metadata, 401/403 challenges, JWKS verification,
+   audience binding — `server/mcp/resourceServer.ts`.
+3. ⬜ **Authorization.** WorkOS AuthKit tenant, resource indicator registered, DCR
+   enabled, end-to-end connect from a real Claude client. **Needs account access;
+   this is the only remaining step.** Once the tenant exists it is configuration,
+   not code: set `MCP_RESOURCE_URI`, `MCP_OAUTH_ISSUER`, `MCP_OAUTH_JWKS_URI`.
+4. ✅ **UI.** ConnectPanel at `#connect`, copy buttons, install instructions.
+
+### What Phase 3 actually involves
+
+1. Create a WorkOS account and an AuthKit environment.
+2. Register `https://<host>/api/mcp` as a **Resource Indicator**, so issued tokens
+   carry it as `aud` — `server/mcp/resourceServer.ts` rejects tokens without it.
+3. Define the `circuits:use` scope.
+4. Enable **Dynamic Client Registration** so Claude can self-register. The MCP spec
+   has deprecated DCR in favour of Client ID Metadata Documents, but claude.ai's
+   connector flow still uses it; AuthKit supports both, so enable DCR and let CIMD
+   work where clients prefer it.
+5. Set the env vars from `docs/OPERATIONS.md` and turn on `MCP_HTTP_ENABLED=1`.
+6. Connect from a real Claude client and confirm the round trip.
 
 ## Testing
 

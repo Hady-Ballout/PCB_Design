@@ -1,0 +1,253 @@
+import { describe, expect, it } from 'vitest';
+import { buildPcbLayout } from './pcbLayout.js';
+import { toKiCadPcb } from './kicadPcb.js';
+
+// A circuit small enough to place deterministically but rich enough to
+// exercise a rotated footprint (C2 lands at rotation 90, R2 at rotation 180)
+// and a mix of pad shapes (circle/oval/rect) and footprint families
+// (TO-220, capacitor, resistor, LED).
+const rotationCircuit = {
+  title: 'KiCad PCB export test',
+  components: [
+    { ref: 'U1', kind: 'regulator', value: '7805', nodes: ['VIN', '0', 'VOUT'] },
+    { ref: 'Q1', kind: 'bjt_npn', value: '2N2222', nodes: ['VOUT', 'A', '0'] },
+    { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VOUT', 'A'] },
+    { ref: 'R2', kind: 'resistor', value: '1k', nodes: ['A', '0'] },
+    { ref: 'C1', kind: 'capacitor', value: '100nF', nodes: ['VIN', '0'] },
+    { ref: 'C2', kind: 'capacitor', value: '100nF', nodes: ['VOUT', '0'] },
+    { ref: 'D1', kind: 'led', value: 'red', nodes: ['A', '0'] },
+  ],
+};
+
+// A circuit with no ground net at all — nothing here matches the router's
+// GROUND_NET_RE. Snapshotted so the bottom-copper ground pour can be proved
+// ADDITIVE: these bytes were recorded before the pour existed and must not move
+// when it lands.
+const groundFreeCircuit = {
+  title: 'Ground-free divider',
+  components: [
+    { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['A', 'B'] },
+    { ref: 'R2', kind: 'resistor', value: '2k2', nodes: ['B', 'C'] },
+  ],
+};
+
+const balancedParens = (text) => {
+  let depth = 0;
+  let inString = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (char === '\\') index += 1;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === '(') depth += 1;
+    else if (char === ')') {
+      depth -= 1;
+      if (depth < 0) return false;
+    }
+  }
+  return depth === 0 && !inString;
+};
+
+describe('toKiCadPcb', () => {
+  const circuit = rotationCircuit;
+  const layout = buildPcbLayout(circuit);
+  const pcb = toKiCadPcb(layout, circuit);
+
+  it('emits a balanced KiCad 6 s-expression document with the right header', () => {
+    expect(pcb.startsWith('(kicad_pcb (version 20211014) (generator prompt_to_pcb)')).toBe(true);
+    expect(balancedParens(pcb)).toBe(true);
+    expect(pcb).toContain('(general\n    (thickness 1.6)\n  )');
+    expect(pcb).toContain('(paper "A4")');
+    expect(pcb).toContain('(pad_to_mask_clearance 0.05)');
+  });
+
+  it('emits the standard KiCad-6 layer table', () => {
+    expect(pcb).toContain('(0 "F.Cu" signal)');
+    expect(pcb).toContain('(31 "B.Cu" signal)');
+    expect(pcb).toContain('(44 "Edge.Cuts" user)');
+    expect(pcb).toContain('(49 "F.Fab" user)');
+  });
+
+  it('emits net 0 plus one net per layout net, sorted by name', () => {
+    const netLines = [...pcb.matchAll(/^  \(net (\d+) "([^"]*)"\)$/gm)];
+    expect(netLines[0][1]).toBe('0');
+    expect(netLines[0][2]).toBe('');
+    const names = netLines.slice(1).map((match) => match[2]);
+    expect(names).toEqual([...layout.nets].sort());
+    expect(names.length).toBe(layout.nets.length);
+  });
+
+  it('emits one footprint per component, each with its libId and a tstamp', () => {
+    for (const component of layout.components) {
+      expect(pcb).toContain(`(footprint "${component.libId}" (layer "F.Cu")`);
+    }
+    const footprintCount = [...pcb.matchAll(/\(footprint "/g)].length;
+    expect(footprintCount).toBe(layout.components.length);
+  });
+
+  it('binds a (net ...) node to every connected pad and none to unconnected pads', () => {
+    const totalPads = layout.components.reduce((sum, component) => sum + component.pads.length, 0);
+    const connectedPads = layout.components.reduce(
+      (sum, component) => sum + component.pads.filter((pad) => pad.connected).length,
+      0,
+    );
+    const padBlocks = [...pcb.matchAll(/\(pad "[^"]+" thru_hole [a-z]+[\s\S]*?\(tstamp [0-9a-f-]+\)\s*\)/g)];
+    expect(padBlocks.length).toBe(totalPads);
+    const padsWithNet = padBlocks.filter((match) => /\(net \d+ "/.test(match[0]));
+    expect(padsWithNet.length).toBe(connectedPads);
+  });
+
+  it('emits one segment per trace and preserves each trace\'s own width', () => {
+    const segmentLines = [...pcb.matchAll(/\(segment \(start[^)]*\) \(end[^)]*\) \(width ([\d.]+)\) \(layer "([^"]+)"\)/g)];
+    expect(segmentLines.length).toBe(layout.traces.length);
+    const widths = new Set(segmentLines.map((match) => match[1]));
+    // The neck-down ladder means this fixture uses more than one trace width.
+    expect(widths.size).toBeGreaterThan(1);
+    for (const trace of layout.traces) {
+      expect(pcb).toContain(`(width ${trace.width})`);
+    }
+  });
+
+  it('maps trace layer names to KiCad copper layers', () => {
+    expect(layout.traces.some((trace) => trace.layer === 'top')).toBe(true);
+    expect(layout.traces.some((trace) => trace.layer === 'bottom')).toBe(true);
+    expect(pcb).toContain('(layer "F.Cu")');
+    expect(pcb).toContain('(layer "B.Cu")');
+  });
+
+  it('emits one via per layout via, on both copper layers', () => {
+    const viaLines = [...pcb.matchAll(/\(via \(at[^)]*\)[\s\S]*?\(layers "F\.Cu" "B\.Cu"\)/g)];
+    expect(viaLines.length).toBe(layout.vias.length);
+  });
+
+  it('emits 4 board-outline edges on Edge.Cuts', () => {
+    const edgeLines = [...pcb.matchAll(/\(gr_line \(start[^)]*\) \(end[^)]*\) \(layer "Edge\.Cuts"\)/g)];
+    expect(edgeLines.length).toBe(4);
+  });
+
+  it('is deterministic: two calls on the same layout are byte-identical', () => {
+    expect(toKiCadPcb(layout, circuit)).toBe(toKiCadPcb(layout, circuit));
+  });
+
+  it('round-trips a 90-degree-rotated footprint back to its real absolute pad positions', () => {
+    // KiCad's own RotatePoint(angle) is a CCW-visual rotation on a y-down
+    // board (positive angle: the R hotkey's default rotate direction). This
+    // is independent of pcbPlace.js's rotateOffset (which is CW-visual for
+    // the same positive value) — see the report for the derivation.
+    const kicadRotate = (point, angleDeg) => {
+      const rad = (angleDeg * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      return { x: point.x * cos + point.y * sin, y: -point.x * sin + point.y * cos };
+    };
+
+    const rotated = layout.components.find((component) => component.rotation === 90);
+    expect(rotated).toBeTruthy();
+
+    // Footprints can share a libId (two capacitors), so locate the block by
+    // its unique reference designator, not by libId.
+    const refIndex = pcb.indexOf(`(fp_text reference "${rotated.ref}"`);
+    const blockStart = pcb.lastIndexOf('\n  (footprint "', refIndex);
+    const blockEnd = pcb.indexOf('\n  (footprint "', refIndex);
+    const footprintBlock = pcb.slice(blockStart, blockEnd === -1 ? undefined : blockEnd);
+    const [, fx, fy, fangle] = footprintBlock.match(/\(at ([-\d.]+) ([-\d.]+) ([-\d.]+)\)/);
+    expect(Number(fangle)).toBe(270); // (360 - 90) % 360
+
+    for (const pad of rotated.pads) {
+      const padMatch = footprintBlock.match(
+        new RegExp(`\\(pad "${pad.padNumber}" thru_hole \\w+ \\(at ([-\\d.]+) ([-\\d.]+)(?: [-\\d.]+)?\\)`),
+      );
+      const local = { x: Number(padMatch[1]), y: Number(padMatch[2]) };
+      const absolute = kicadRotate(local, Number(fangle));
+      // pcbLayout quantizes every board coordinate to 0.01mm; round the
+      // reconstruction the same way before the exact comparison.
+      const round2 = (value) => Math.round(value * 100) / 100;
+      expect(round2(Number(fx) + absolute.x)).toBe(pad.x);
+      expect(round2(Number(fy) + absolute.y)).toBe(pad.y);
+    }
+  });
+
+  it('emits an absolute pad angle so a non-square pad on a rotated footprint keeps its board-space size', () => {
+    // KiCanvas's PadPainter cancels the parent footprint's rotation and then
+    // applies the pad's own (at x y angle) angle, which the .kicad_pcb
+    // format defines as ABSOLUTE (not relative to the footprint). Every
+    // vendored pad is local angle 0, so the pad's absolute angle must equal
+    // the footprint's own kicadAngle for the pad to land at the footprint's
+    // orientation. Without that, a non-square pad (e.g. TO-220 2mm x
+    // 1.905mm) renders using its raw local (unrotated) size instead of the
+    // rotated board-space size the layout computed.
+    for (const component of layout.components) {
+      const refIndex = pcb.indexOf(`(fp_text reference "${component.ref}"`);
+      const blockStart = pcb.lastIndexOf('\n  (footprint "', refIndex);
+      const nextIndex = pcb.indexOf('\n  (footprint "', refIndex);
+      const block = pcb.slice(blockStart, nextIndex === -1 ? undefined : nextIndex);
+
+      for (const pad of component.pads) {
+        const padMatch = block.match(
+          new RegExp(`\\(pad "${pad.padNumber}" thru_hole \\w+ \\(at ([-\\d.]+) ([-\\d.]+)(?: ([-\\d.]+))?\\) \\(size ([\\d.]+) ([\\d.]+)\\)`),
+        );
+        expect(padMatch).toBeTruthy();
+        const padAngle = Number(padMatch[3] ?? 0);
+        const localW = Number(padMatch[4]);
+        const localH = Number(padMatch[5]);
+        // KiCad swaps the rendered footprint of a rect/oval pad's (w,h) at
+        // a 90/270 absolute angle, same as pcbPlace.js's rotatePadShape.
+        const swapped = (((Math.round(padAngle) % 180) + 180) % 180) === 90;
+        const boardW = swapped ? localH : localW;
+        const boardH = swapped ? localW : localH;
+        expect(boardW).toBe(pad.size.w);
+        expect(boardH).toBe(pad.size.h);
+      }
+    }
+  });
+
+  it('matches the committed byte-for-byte snapshot (cross-commit stability guard)', () => {
+    expect(toKiCadPcb(layout, circuit)).toMatchSnapshot();
+  });
+
+  it('emits the ground pour as a KiCad-6 zone on B.Cu', () => {
+    expect(layout.pour).toBeTruthy();
+    const groundNumber = [...pcb.matchAll(/^  \(net (\d+) "([^"]*)"\)$/gm)]
+      .find((match) => match[2] === layout.pour.net)[1];
+
+    expect(pcb).toContain(`(zone (net ${groundNumber}) (net_name "${layout.pour.net}") (layer "B.Cu")`);
+    expect(pcb).toContain('(hatch edge 0.508)');
+    // `yes` is how the format spells DIRECT connect; the bare
+    // `(connect_pads (clearance …))` form means thermal reliefs, which is not
+    // what pcbPour builds, so a KiCad re-fill would disagree with our copper.
+    expect(pcb).toContain('(connect_pads yes (clearance 0.3))');
+    expect(pcb).toContain('(min_thickness 0.254)');
+    expect(pcb).toContain('(fill yes (thermal_gap 0.508) (thermal_bridge_width 0.508))');
+    expect(balancedParens(pcb)).toBe(true);
+  });
+
+  it('gives the zone the board rectangle as its outline and one filled polygon per pour rectangle', () => {
+    const { outline } = layout.board;
+    expect(pcb).toContain(
+      `(pts (xy 0 0) (xy ${outline.width} 0) (xy ${outline.width} ${outline.height}) (xy 0 ${outline.height}))`,
+    );
+
+    const filled = [...pcb.matchAll(/\(filled_polygon \(layer "B\.Cu"\) \(pts ((?:\(xy [-\d.]+ [-\d.]+\) ?)+)\)\)/g)];
+    expect(filled.length).toBe(layout.pour.polygons.length);
+    // Point for point, in the order the pour emitted them.
+    const first = layout.pour.polygons[0].map((point) => `(xy ${point.x} ${point.y})`).join(' ');
+    expect(filled[0][1]).toBe(first);
+  });
+
+  it('matches the ground-free byte-for-byte snapshot recorded before the ground pour existed', () => {
+    const groundFree = buildPcbLayout(groundFreeCircuit);
+    expect(groundFree.nets.some((net) => /^(gnd|ground|0)$/i.test(net))).toBe(false);
+    expect(groundFree.pour).toBeNull();
+    expect(toKiCadPcb(groundFree, groundFreeCircuit)).not.toContain('(zone ');
+    expect(toKiCadPcb(groundFree, groundFreeCircuit)).toMatchSnapshot();
+  });
+
+  it('writes a board even when routing/DRC are not clean', () => {
+    const dirtyLayout = { ...layout, routing: { complete: false, failedNets: [{ net: 'X' }] }, drc: { ok: false, violations: [{}] } };
+    expect(() => toKiCadPcb(dirtyLayout, circuit)).not.toThrow();
+    expect(toKiCadPcb(dirtyLayout, circuit).startsWith('(kicad_pcb')).toBe(true);
+  });
+});

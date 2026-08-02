@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -94,10 +94,23 @@ describe('PCB Pilot MCP server', () => {
   it('turns a failure inside the engine into a tool error with the reason', async () => {
     const result = await client.callTool({
       name: 'export_netlist',
-      arguments: { circuit: rcLowPass, format: 'gerber' },
+      arguments: { circuit: rcLowPass, format: 'pdf' },
     });
 
     expect((result as { isError?: boolean }).isError).toBe(true);
     expect(textOf(result).toLowerCase()).toContain('format');
+  });
+
+  it('exports a zipped Gerber package over the wire', async () => {
+    const result = await client.callTool({
+      name: 'export_netlist',
+      arguments: { circuit: rcLowPass, format: 'gerber' },
+    });
+
+    const payload = jsonOf(result);
+    expect(payload.artifact.location.endsWith('-gerbers.zip')).toBe(true);
+    expect(payload.files).toContain('rc-low-pass.DRL');
+    expect([...readFileSync(payload.artifact.location).subarray(0, 4)])
+      .toEqual([0x50, 0x4b, 0x03, 0x04]);
   });
 });

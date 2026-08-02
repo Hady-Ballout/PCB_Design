@@ -1,0 +1,197 @@
+/* ══════════════════════════════════════════════════════════════════
+   Connect to Claude — MCP connection page.
+   Follows the Neo Brutalism language of the entry pages: flat paper,
+   3px ink borders, hard offset shadows.
+   ══════════════════════════════════════════════════════════════════ */
+
+.connect-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin: 0 auto;
+  max-width: 900px;
+  padding: 32px 24px 56px;
+}
+
+.connect-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+}
+
+.connect-header h1 {
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+  font-weight: 400;
+  margin: 4px 0 12px;
+}
+
+.connect-lede {
+  color: var(--color-ink);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  margin: 0;
+  max-width: 62ch;
+  opacity: 0.85;
+}
+
+.connect-card {
+  background: var(--color-chip);
+  border: 3px solid var(--color-ink);
+  border-radius: 16px;
+  box-shadow: 8px 8px 0 var(--color-shadow);
+  padding: 24px 26px;
+}
+
+/* The URL is the point of the page — give it the accent treatment. */
+.connect-card-primary {
+  background: var(--nb-yellow, var(--color-chip));
+}
+
+.connect-card h2 {
+  color: var(--color-ink);
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 400;
+  margin: 0 0 14px;
+}
+
+.connect-card-lede {
+  color: var(--color-ink);
+  font-size: 0.9rem;
+  margin: 0 0 10px;
+  opacity: 0.8;
+}
+
+/* flex-start, not stretch: a wrapped multi-line command would otherwise drag the
+   copy button to match its height. */
+.connect-url-row {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+}
+
+.connect-url {
+  background: var(--color-surface, #fff);
+  border: 2px solid var(--color-ink);
+  border-radius: 8px;
+  color: var(--color-ink);
+  flex: 1;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.9rem;
+  /* Long URLs and commands must wrap rather than widen the page. */
+  overflow-wrap: anywhere;
+  padding: 12px 14px;
+  user-select: all;
+}
+
+.connect-url-command {
+  font-size: 0.82rem;
+}
+
+.connect-copy {
+  border: 2px solid var(--color-ink);
+  border-radius: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-weight: 700;
+  min-width: 96px;
+  padding: 12px 16px;
+}
+
+.connect-note {
+  color: var(--color-ink);
+  font-size: 0.85rem;
+  line-height: 1.55;
+  margin: 14px 0 0;
+  opacity: 0.8;
+}
+
+.connect-columns {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.connect-steps,
+.connect-prompts {
+  color: var(--color-ink);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.connect-steps li {
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.connect-prompts {
+  list-style: none;
+  padding-left: 0;
+}
+
+.connect-quote {
+  border-left: 3px solid var(--color-ink);
+  display: block;
+  font-size: 0.9rem;
+  font-style: italic;
+  line-height: 1.5;
+  opacity: 0.9;
+  padding-left: 12px;
+}
+
+/* ── Accent card: fixed colours in both themes ──────────────────────
+   The primary card's yellow does not change between light and dark, so nothing
+   inside it may use a theme-flipping token. --color-ink goes light in dark mode,
+   which would put pale text on yellow; --color-surface goes dark, which would put
+   the URL in dark-on-dark. Both are pinned here.
+   Declared after the generic .connect-card rules so equal-specificity selectors
+   like `.connect-card h2` cannot win on source order. */
+.connect-card.connect-card-primary,
+.connect-card.connect-card-primary h2,
+.connect-card.connect-card-primary .connect-note {
+  color: var(--color-on-accent);
+}
+
+.connect-card.connect-card-primary .connect-url {
+  background: #fffdf7;
+  border-color: var(--color-on-accent);
+  color: var(--color-on-accent);
+}
+
+@media (max-width: 760px) {
+  .connect-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .connect-header {
+    flex-direction: column;
+  }
+
+  .connect-url-row {
+    flex-direction: column;
+  }
+
+  .connect-copy {
+    width: 100%;
+  }
+}
+
+/* Shown when the endpoint is not a public https URL — Claude rejects those, so
+   the page says so rather than letting the user find out in another product. */
+.connect-card.connect-card-primary .connect-warning {
+  background: #fffdf7;
+  border: 2px solid var(--color-on-accent);
+  border-radius: 8px;
+  color: var(--color-on-accent);
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.55;
+  margin: 14px 0 0;
+  padding: 10px 12px;
+}

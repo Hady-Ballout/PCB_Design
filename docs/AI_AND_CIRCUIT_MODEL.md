@@ -96,6 +96,15 @@ code can go stale until the next AI generation (known limitation). The
 }
 ```
 
+A component's `footprint` is no longer decorative. `footprintRecordFor` (in
+`src/core/pcbFootprints.js`) resolves the real geometry in this order: (1) an exact
+`part.footprint` match against the vendored KiCad THT library, (2) the curated
+footprint for the part's `kind`, (3) a synthesized 1xN/2xN 2.54 mm header. So a
+`"footprint": "Package_DIP:DIP-8_W7.62mm"` that the library actually ships now decides the
+pads, silkscreen and courtyard the board is built from — and one it does not ship falls
+through silently to the kind default rather than failing. Polarity remaps (diodes, LEDs,
+electrolytics) survive an exact match when the named footprint is also the kind's default.
+
 Allowed `kind` values are the single source of truth in `src/core/componentKinds.js`
 (`ALLOWED_KINDS`). The AI schema `enum` and the "Allowed component kinds" / fixed-pin
 guidance in the system prompt (`server/ai/ollamaProvider.ts`) are **generated from it**, so
@@ -652,7 +661,19 @@ codebase's suffix conventions: bare `m` is MEG for resistances but milli inside 
 
 - The SPICE parser handles only this app's generated syntax, not arbitrary SPICE dialects.
 - MOSFET and general subcircuit parsing from hand-edited SPICE/KiCad is not implemented.
-- KiCad export is an XML netlist, not a full `.kicad_sch`/PCB project.
+- KiCad export covers an XML netlist, a full `.kicad_sch` schematic (`core/kicadSchematic.js`,
+  real library symbols), and a full `.kicad_pcb` board (`core/kicadPcb.js`, placed/routed
+  footprints on the vendored KiCad THT library, plus a `B.Cu` ground-pour zone) — not a
+  `.kicad_pro` project file tying them together. Fabrication output
+  (`core/gerberExport.js`: RS-274X Gerbers + Excellon drill, zipped) is separate and
+  **gated** — it refuses any board whose routing, DRC or connectivity verdict isn't clean,
+  and it assumes a 2-layer through-hole stack with every part top-side (the bottom
+  silkscreen is emitted as a valid but empty file).
+- The board is poured on the bottom layer only, on the ground net alone, with **direct**
+  pad connections and no thermal reliefs — so hand-soldering a ground pin needs more heat
+  than the others (the fabrication README says so). A circuit with no ground net simply
+  gets no pour. Copper the pour cannot reach from a ground pad is dropped rather than left
+  floating, so an enclosed pocket of a dense board may stay bare.
 - Ngspice validates that the deck *runs*, not that the circuit is electrically correct;
   functional correctness is checked by the topology rule engine above, whose rules are
   heuristics — a clean report is strong evidence, not proof, of a working circuit.

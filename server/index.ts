@@ -16,6 +16,9 @@ import { handleBillingStatus, handleCreateCheckout, handleCreatePortal, handleSt
 import { QuotaError, checkAndConsumeQuota } from './billing/quota.js';
 import { DailyTokenLimitError, dailyLimitMessage, enforceDailyTokenLimit, getDailyTokenStatus, recordDailyTokens } from './billing/dailyTokens.js';
 import { trackTokenUsage } from './ai/tokenUsage.js';
+import { handleArtifactDownload, handleMcpRequest } from './mcp/httpServer.js';
+import { authorizeMcpRequest, mcpAuthConfigFromEnv, protectedResourceMetadata } from './mcp/resourceServer.js';
+import { ArtifactStore } from '../mcp/artifactSink.js';
 import type { ChatMemory, ChatMessage, Circuit, CurrentDesign, JwtPayload, PipelineEvent, StreamState } from './types.js';
 
 loadEnv();
@@ -28,6 +31,33 @@ if (!process.env.JWT_SECRET) {
 const port = Number(process.env.PORT || process.env.API_PORT || 8787);
 const host = process.env.HOST || '127.0.0.1';
 const allowedOrigins = parseAllowedOrigins(process.env.CORS_ORIGIN);
+// The hosted MCP endpoint is off unless explicitly switched on.
+const mcpEnabled = process.env.MCP_HTTP_ENABLED === '1';
+const mcpArtifacts = new ArtifactStore();
+
+// OAuth config comes from the environment. Without it the endpoint would be
+// unauthenticated, which is only tolerable locally.
+const mcpAuth = mcpAuthConfigFromEnv();
+
+// In production, misconfiguration disables the MCP endpoint rather than killing the
+// process. Exiting would fail closed too — but it would also take generation,
+// simulation, and auth down with it, so a typo in an optional feature's env var
+// becomes a full outage. Disabling just this feature keeps the same security
+// property (the tools are never exposed unauthenticated) at feature-sized cost.
+const mcpUnauthenticatedInProduction = mcpEnabled && !mcpAuth && process.env.NODE_ENV === 'production';
+const mcpServingEnabled = mcpEnabled && !mcpUnauthenticatedInProduction;
+
+if (mcpUnauthenticatedInProduction) {
+  console.error(
+    '[mcp] MCP_HTTP_ENABLED=1 but MCP_RESOURCE_URI/MCP_OAUTH_ISSUER are unset. '
+    + 'Serving the MCP endpoint would expose the tools without authorization, so it '
+    + 'is DISABLED. The rest of the API is unaffected. Set the OAuth variables to '
+    + 'enable it (see docs/OPERATIONS.md).',
+  );
+} else if (mcpEnabled && !mcpAuth) {
+  console.warn('[mcp] Running WITHOUT authorization — local development only.');
+}
+
 const aiProviderName = (): string => process.env.AI_PROVIDER || 'ollama';
 const aiModelName = (): string => (
   process.env.AI_PROVIDER && process.env.AI_PROVIDER !== 'ollama'
@@ -237,6 +267,44 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
     } catch (error) {
       sendJson(response, statusFor(error), { error: (error as Error).message });
     }
+    return;
+  }
+
+  // The MCP endpoint is registered ABOVE the JWT gate on purpose. MCP clients
+  // authenticate as OAuth clients against their own authorization server, not with
+  // this app's session JWT — a Claude connector has no way to obtain one. Moving
+  // this below the gate makes every MCP call 401, which is exactly what happened
+  // the first time it was mounted at the bottom of the router.
+  //
+  // It carries its own authorization instead (Phase 2 of
+  // docs/superpowers/specs/2026-08-01-hosted-mcp-connector-design.md); until that
+  // lands, `MCP_HTTP_ENABLED` keeps it off by default.
+  // RFC 9728 discovery. Unauthenticated by design — it is how a client finds out
+  // where to authenticate, so gating it would deadlock the flow.
+  if (mcpServingEnabled && mcpAuth && request.url === '/.well-known/oauth-protected-resource') {
+    sendJson(response, 200, protectedResourceMetadata(mcpAuth));
+    return;
+  }
+
+  if (mcpServingEnabled && request.url?.startsWith('/api/mcp')) {
+    let subject: string;
+
+    if (mcpAuth) {
+      // authorizeMcpRequest writes the 401/403 challenge itself when it fails.
+      const outcome = await authorizeMcpRequest(request, response, mcpAuth);
+      if (!outcome.ok) return;
+      subject = outcome.subject;
+    } else {
+      // Unauthenticated local development only — guarded at startup above.
+      const mcpUser = getUser(request);
+      subject = mcpUser ? `user:${mcpUser.id}` : 'anonymous';
+    }
+
+    if (request.url.startsWith('/api/mcp/artifacts/')) {
+      handleArtifactDownload(request, response, { store: mcpArtifacts, subject });
+      return;
+    }
+    await handleMcpRequest(request, response, { store: mcpArtifacts, subject });
     return;
   }
 

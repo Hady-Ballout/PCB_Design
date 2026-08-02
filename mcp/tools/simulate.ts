@@ -7,7 +7,8 @@
 import { addMissingSpiceModels, toSpice } from '../../src/core/pcbGenerator.js';
 import { runNgspiceSimulation } from '../../server/simulation/simulator.js';
 import type { Circuit, WaveformSeries } from '../../server/types.js';
-import { slugify, writeArtifact } from '../artifacts.js';
+import { slugify } from '../artifacts.js';
+import type { ArtifactSink } from '../artifactSink.js';
 import type { ParsedCircuit } from '../schemas.js';
 
 export interface SimulateArgs {
@@ -64,14 +65,13 @@ const toCsv = (series: WaveformSeries[]): string => {
 
 export const simulateCircuitTool = async (
   { circuit, spice, maxPoints = DEFAULT_MAX_POINTS }: SimulateArgs,
-  artifactDir: string,
+  sink: ArtifactSink,
 ) => {
   const deck = spice?.trim() || addMissingSpiceModels(toSpice(circuit), circuit);
   const result = await runNgspiceSimulation({ circuit: circuit as unknown as Circuit, spice: deck });
 
   const series = result.waveform.series.map((entry) => summarizeSeries(entry, maxPoints));
-  const csvPath = writeArtifact(
-    artifactDir,
+  const waveformCsv = sink.put(
     `${slugify(circuit.title)}-waveform.csv`,
     toCsv(result.waveform.series),
   );
@@ -83,7 +83,7 @@ export const simulateCircuitTool = async (
     xLabel: result.waveform.xLabel,
     yLabel: result.waveform.yLabel,
     series,
-    csvPath,
+    waveformCsv,
     // The ngspice log is only useful when something went wrong.
     ...(result.ok ? {} : { rawOutput: result.rawOutput.slice(-4000) }),
   };
