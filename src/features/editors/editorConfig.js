@@ -5,7 +5,7 @@
 // viewer.
 export const EDITOR_VIEW_LABELS = {
   code: 'Code',
-  realisticSchematic: 'Realistic schematic',
+  realisticSchematic: 'Breadboard',
   pcb3d: '3D PCB',
 };
 

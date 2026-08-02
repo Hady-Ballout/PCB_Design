@@ -2041,7 +2041,7 @@ function App() {
           {openEditorViews.length === 0 ? (
             <section className="workbench-empty">
               <h3>All editor windows are closed</h3>
-              <p>Open Code or Realistic schematic from the bar above.</p>
+              <p>Open Code or Breadboard from the bar above.</p>
             </section>
           ) : (
             renderEditorLayout()
