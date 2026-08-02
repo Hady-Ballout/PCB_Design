@@ -542,13 +542,10 @@ function App() {
   }, [pcbLayout, result?.circuit]);
 
   const openEditorView = (view) => {
-    setOpenEditorViews((current) => {
-      if (current.includes(view)) return current;
-      const next = [...current, view];
-      // The layout renders at most three windows; evict the oldest so a fourth
-      // never becomes an active tab with no visible window.
-      return next.length > 3 ? next.slice(next.length - 3) : next;
-    });
+    // Single-window mode: selecting a tab replaces the open window instead of
+    // adding a split pane. The 2/3-window split layouts in renderEditorLayout
+    // (and the split-resize plumbing) are unreachable but restorable.
+    setOpenEditorViews((current) => (current.length === 1 && current[0] === view ? current : [view]));
     setActiveEditorView(view);
     // While one window is maximized, selecting a tab swaps the full-screen view (browser-tab behavior).
     setMaximizedEditorView((current) => (current ? view : current));
