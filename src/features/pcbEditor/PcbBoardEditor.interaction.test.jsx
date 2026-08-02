@@ -169,6 +169,22 @@ describe('drawing a trace', () => {
   });
 });
 
+describe('wheel zoom', () => {
+  it('zooms the view and consumes the wheel event so the page does not scroll', () => {
+    const svg = mount();
+    const transformOf = () => svg.querySelector('g').getAttribute('transform');
+    const before = transformOf();
+    const event = new WheelEvent('wheel', {
+      bubbles: true, cancelable: true, deltaY: -120, clientX: 10, clientY: 10,
+    });
+    act(() => {
+      svg.dispatchEvent(event);
+    });
+    expect(transformOf()).not.toBe(before);
+    expect(event.defaultPrevented).toBe(true);
+  });
+});
+
 describe('editing existing copper', () => {
   const routedLayout = buildManualPcbLayout(circuit, autoRoutedManual(layout));
 

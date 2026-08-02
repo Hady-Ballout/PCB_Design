@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { placedSilkStrokes } from '../../core/gerberExport.js';
 import {
   addWaypoint,
@@ -129,19 +129,34 @@ export function PcbBoardEditor({ layout, onRoutingChange }) {
     if (drag?.moved) event.stopPropagation();
   };
 
-  const handleWheel = (event) => {
-    const factor = event.deltaY < 0 ? 1.2 : 1 / 1.2;
-    setView((current) => {
-      const next = Math.min(10, Math.max(0.4, current.s * factor));
-      const at = clientToBoard(svgRef.current, event.clientX, event.clientY, viewBox);
-      // Keep the board point under the cursor fixed while the scale changes.
-      return {
-        s: next,
-        tx: at.x - ((at.x - current.tx) / current.s) * next,
-        ty: at.y - ((at.y - current.ty) / current.s) * next,
-      };
-    });
-  };
+  // Wheel needs a native non-passive listener so preventDefault stops the page
+  // from scrolling underneath the zoom (React's onWheel can't guarantee that).
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return undefined;
+    const box = {
+      x: -MARGIN,
+      y: -MARGIN,
+      width: layout.board.width + 2 * MARGIN,
+      height: layout.board.height + 2 * MARGIN,
+    };
+    const handleWheel = (event) => {
+      event.preventDefault();
+      const factor = event.deltaY < 0 ? 1.2 : 1 / 1.2;
+      setView((current) => {
+        const next = Math.min(10, Math.max(0.4, current.s * factor));
+        const at = clientToBoard(svg, event.clientX, event.clientY, box);
+        // Keep the board point under the cursor fixed while the scale changes.
+        return {
+          s: next,
+          tx: at.x - ((at.x - current.tx) / current.s) * next,
+          ty: at.y - ((at.y - current.ty) / current.s) * next,
+        };
+      });
+    };
+    svg.addEventListener('wheel', handleWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', handleWheel);
+  }, [layout.board.width, layout.board.height]);
 
   const handleKeyDown = (event) => {
     if (event.key === 'Escape') {
@@ -230,7 +245,6 @@ export function PcbBoardEditor({ layout, onRoutingChange }) {
         onPointerDown={handlePointerDown}
         onPointerMove={handleMove}
         onPointerUp={handlePointerUp}
-        onWheel={handleWheel}
         data-testid="pcb-editor-svg"
       >
         <g transform={`translate(${view.tx} ${view.ty}) scale(${view.s})`}>
