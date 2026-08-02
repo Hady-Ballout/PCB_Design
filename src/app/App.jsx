@@ -22,7 +22,7 @@ import {
 } from '../core/circuitSync.js';
 import { toDiagramSvg } from '../core/pcbGenerator.js';
 import { toKiCadSchematic } from '../core/kicadSchematic.js';
-import { buildPcbLayout } from '../core/pcbLayout.js';
+import { buildManualPcbLayout } from '../core/pcbLayout.js';
 import { toKiCadPcb } from '../core/kicadPcb.js';
 import { fabricationSlug, toGerberArchive } from '../core/gerberExport.js';
 import { changedLineIndexes } from '../core/lineDiff.js';
@@ -38,6 +38,7 @@ import { firmwareTargetForCircuit } from '../features/editors/firmwareInfo.js';
 import { WaveformChart } from '../features/waveform/WaveformChart.jsx';
 import { CircuitDiagram } from '../features/schematic/CircuitDiagram.jsx';
 import { KiCanvasEmbed } from '../features/kicanvas/KiCanvasEmbed.jsx';
+import { PcbBoardEditor } from '../features/pcbEditor/PcbBoardEditor.jsx';
 
 // three.js is heavy; load the 3D board viewer only when its window opens.
 const Pcb3DViewer = React.lazy(() =>
@@ -509,23 +510,24 @@ function App() {
     }
   }, [result?.circuit, result?.diagram, editedDiagram, isGenerating]);
 
-  // Shared by the 3D viewer and the Board (.kicad_pcb) view so both windows
-  // always agree on the same placed/routed layout.
+  // Shared by the 3D viewer, the Board routing editor and the downloads so
+  // every PCB surface agrees on the same placed board.
   //
-  // Gated on the PCB window actually being open. buildPcbLayout is the
-  // heaviest thing in the app — up to four expansion attempts of A* routing,
-  // ground pour and DRC, all synchronous on the main thread — and both PCB
-  // surfaces live inside the one 'pcb3d' window. Computing it for every chat
-  // generation would freeze the UI for a board nobody asked to see.
+  // Manual-first: the board arrives placed but unrouted, and the traces/vias
+  // come from the chat's hand-drawn (or Auto-routed) `manualRouting` value.
+  // Still gated on the PCB window being open — placement, pour and DRC are
+  // synchronous on the main thread, and nobody pays for a board they can't
+  // see. (The A* router only ever runs from the editor's Auto-route button.)
   const pcbWindowOpen = openEditorViews.includes('pcb3d');
+  const manualRouting = activeChat?.manualRouting || null;
   const pcbLayout = useMemo(() => {
     if (!pcbWindowOpen || !result?.circuit) return null;
     try {
-      return buildPcbLayout(result.circuit);
+      return buildManualPcbLayout(result.circuit, manualRouting);
     } catch {
       return null;
     }
-  }, [pcbWindowOpen, result?.circuit]);
+  }, [pcbWindowOpen, result?.circuit, manualRouting]);
 
   const kicadPcbSource = useMemo(() => {
     if (!pcbLayout || !result?.circuit) return '';
@@ -1704,12 +1706,15 @@ function App() {
           </div>
           {pcbLayoutWarning && <p className="inline-error simulation-message">{pcbLayoutWarning}</p>}
           {pcbViewMode === 'board' ? (
-            kicadPcbSource ? (
-              <KiCanvasEmbed source={kicadPcbSource} focus="board" />
+            pcbLayout ? (
+              <PcbBoardEditor
+                layout={pcbLayout}
+                onRoutingChange={(value) => setChatField('manualRouting', value)}
+              />
             ) : (
               <div className="editor-window-empty">
                 <strong>Board not ready</strong>
-                <p>The KiCad board appears here once a layout is available.</p>
+                <p>The board appears here once a layout is available.</p>
               </div>
             )
           ) : (

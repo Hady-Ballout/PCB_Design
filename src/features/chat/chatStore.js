@@ -46,6 +46,7 @@ export const createChat = ({ id = createId(), now = Date.now() } = {}) => ({
   pendingCodeChange: null,
   editedDiagram: null,
   editedBreadboard: null,
+  manualRouting: null,
   simulationRun: null,
   error: '',
   simulationError: '',
@@ -213,6 +214,11 @@ const normalizeChat = (chat) => {
       : null,
     editedBreadboard: chat.editedBreadboard && typeof chat.editedBreadboard === 'object'
       ? chat.editedBreadboard
+      : null,
+    // Hand-drawn board copper; buildManualPcbLayout ignores it unless its
+    // placement signature still matches, so stale values are inert not wrong.
+    manualRouting: chat.manualRouting && typeof chat.manualRouting === 'object'
+      ? chat.manualRouting
       : null,
     simulationRun: null,
     error: '',
