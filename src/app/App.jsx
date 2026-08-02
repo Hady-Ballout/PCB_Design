@@ -1705,7 +1705,7 @@ function App() {
           {pcbLayoutWarning && <p className="inline-error simulation-message">{pcbLayoutWarning}</p>}
           {pcbViewMode === 'board' ? (
             kicadPcbSource ? (
-              <KiCanvasEmbed source={kicadPcbSource} />
+              <KiCanvasEmbed source={kicadPcbSource} focus="board" />
             ) : (
               <div className="editor-window-empty">
                 <strong>Board not ready</strong>
