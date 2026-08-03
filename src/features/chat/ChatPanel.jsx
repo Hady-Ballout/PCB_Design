@@ -122,6 +122,7 @@ export function ChatPanel({
   newChatPrompt,
   setNewChatPrompt,
   startChatFromHistory,
+  openImportCircuit,
   handleNewChatComposerKeyDown,
   chatStore,
   sortedChats,
@@ -177,6 +178,25 @@ export function ChatPanel({
             </div>
           </form>
 
+          <button
+            type="button"
+            className="import-circuit-trigger"
+            onClick={openImportCircuit}
+            title="Import a circuit from JSON instead of generating one"
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <path
+                d="M12 3v11m0 0l-4-4m4 4l4-4M4 17v3h16v-3"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Import JSON
+          </button>
+
           <section className="chat-history chat-history-page" aria-label="Chat history">
             <div className="chat-section-label">
               <span>All conversations</span>
@@ -224,6 +244,24 @@ export function ChatPanel({
                 <div className="chat-welcome">
                   <strong>What would you like to build?</strong>
                   <p>Describe a circuit, then continue refining it with follow-up messages.</p>
+                  <button
+                    type="button"
+                    className="import-circuit-trigger"
+                    onClick={openImportCircuit}
+                    title="Import a circuit from JSON instead of generating one"
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                      <path
+                        d="M12 3v11m0 0l-4-4m4 4l4-4M4 17v3h16v-3"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                    Import JSON
+                  </button>
                 </div>
               )}
               {activeChat?.messages.map((message) => (

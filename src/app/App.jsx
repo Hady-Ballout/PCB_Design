@@ -33,6 +33,8 @@ import { AUTH_PAGES, PUBLIC_PAGES, pageFromHash } from './routing.js';
 import { markSpiceAsProvisional, readGenerationStream } from './generationStream.js';
 import { messageId } from '../features/chat/chatFormat.js';
 import { ChatPanel } from '../features/chat/ChatPanel.jsx';
+import { ImportCircuitDialog } from '../features/importCircuit/ImportCircuitDialog.jsx';
+import { createImportedChat } from '../features/importCircuit/importCircuit.js';
 import { EDITOR_SPLIT_STORAGE_KEY, EDITOR_VIEW_LABELS, loadEditorSplit } from '../features/editors/editorConfig.js';
 import { firmwareTargetForCircuit } from '../features/editors/firmwareInfo.js';
 import { WaveformChart } from '../features/waveform/WaveformChart.jsx';
@@ -81,6 +83,7 @@ function App() {
   const [resizingAxis, setResizingAxis] = useState(null);
   const [chatPanelView, setChatPanelView] = useState('conversation');
   const [newChatPrompt, setNewChatPrompt] = useState('');
+  const [importOpen, setImportOpen] = useState(false);
   const [page, setPage] = useState(pageFromHash);
   const [generatingChatId, setGeneratingChatId] = useState(null);
   const [generationStage, setGenerationStage] = useState(null);
@@ -1192,6 +1195,30 @@ function App() {
     await beginPrompt(chat, submittedPrompt);
   };
 
+  // Imported circuits get their own chat carrying a fully built result package,
+  // so every downstream view (schematic, breadboard, board, 3D, exports) reads
+  // exactly what it would after a generation — no AI call involved.
+  const importCircuit = (circuit, sourceLabel) => {
+    let chat;
+    try {
+      chat = createImportedChat(circuit, { sourceLabel });
+    } catch (importError) {
+      // Valid JSON can still fail to lay out; report it in the dialog rather
+      // than on a chat that may not exist yet.
+      return `Could not build that circuit: ${importError.message}`;
+    }
+    setChatStore((current) => ({
+      chats: [chat, ...current.chats],
+      activeChatId: chat.id,
+    }));
+    setImportOpen(false);
+    setChatPanelView('conversation');
+    openEditorView('realisticSchematic');
+    window.location.hash = 'app';
+    setPage('workspace');
+    return null;
+  };
+
   const handleComposerKeyDown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -2040,6 +2067,11 @@ function App() {
           <button type="button" onClick={logout}>Log out</button>
         </div>
       </div>
+      <ImportCircuitDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImport={importCircuit}
+      />
       <section className="workspace">
         <ChatPanel
           chatPanelView={chatPanelView}
@@ -2047,6 +2079,7 @@ function App() {
           newChatPrompt={newChatPrompt}
           setNewChatPrompt={setNewChatPrompt}
           startChatFromHistory={startChatFromHistory}
+          openImportCircuit={() => setImportOpen(true)}
           handleNewChatComposerKeyDown={handleNewChatComposerKeyDown}
           chatStore={chatStore}
           sortedChats={sortedChats}
