@@ -1,10 +1,10 @@
-// Importing a circuit straight into the workspace, with no AI round trip.
+// Importing a circuit straight into the workspace.
 //
-// The generated path builds its result package on the server
-// (server/circuit/circuitResponse.ts); this builds the same package in the
-// browser from pasted or uploaded JSON, so an imported circuit is
-// indistinguishable from a generated one everywhere downstream — schematic,
-// breadboard, board editor, 3D view, SPICE, Gerber, KiCad export.
+// Circuit generation has been removed, so this is currently the only way a
+// circuit enters the app. It builds the complete result package in the browser
+// from pasted or uploaded JSON — schematic, breadboard, board editor, 3D view,
+// SPICE, Gerber and KiCad export all read what this produces. Whatever
+// generates circuits next should produce the same package.
 import { parseCircuitJson, synchronizeResult } from '../../core/circuitSync.js';
 import {
   DiagramLayoutError,
@@ -20,9 +20,8 @@ export const IMPORT_SIZE_LIMIT = 2_000_000;
 /**
  * The schematic router can fail on a circuit the board router handles fine (a
  * 555 astable with a CTRL decoupling cap is one), so a layout failure must not
- * cost the user the import. Mirrors buildInitialDiagram in
- * server/circuit/circuitResponse.ts: fall back to the coarse diagram and carry
- * the violations along so the schematic view can report them.
+ * cost the user the import: fall back to the coarse diagram and carry the
+ * violations along so the schematic view can report them.
  *
  * @param {object} circuit
  * @returns {object} diagram, possibly carrying `layoutError`/`layoutViolations`

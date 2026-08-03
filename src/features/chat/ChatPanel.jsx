@@ -1,8 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { formatChatTime } from './chatFormat.js';
-import { ClarificationCard } from './ClarificationCard.jsx';
-import { PlanCard } from './PlanCard.jsx';
-import { ThinkingWindow } from './ThinkingWindow.jsx';
 
 const COMPOSER_MODE_OPTIONS = [
   { value: 'plan', label: 'Plan' },
@@ -119,31 +116,19 @@ function GenerationStatus({ stage }) {
 export function ChatPanel({
   chatPanelView,
   setChatPanelView,
-  newChatPrompt,
-  setNewChatPrompt,
-  startChatFromHistory,
   openImportCircuit,
-  handleNewChatComposerKeyDown,
   chatStore,
   sortedChats,
   activeChat,
   openChat,
   isGenerating,
-  isClarifying,
-  isAssisting,
   composerMode,
   setComposerMode,
-  buildFromPlan,
   generationStage,
   thinkingText,
-  answerClarification,
-  submitClarification,
-  skipClarification,
   messagesEndRef,
   prompt,
   setPrompt,
-  handleComposerKeyDown,
-  generate,
   generationBusy,
   error,
 }) {
@@ -151,33 +136,6 @@ export function ChatPanel({
     <aside className={`side-panel chat-panel-${chatPanelView}`}>
       {chatPanelView === 'history' ? (
         <>
-          <form
-            className="chat-composer new-chat-composer"
-            onSubmit={(event) => { event.preventDefault(); startChatFromHistory(); }}
-          >
-            <div className="chat-composer-input">
-              <textarea
-                value={newChatPrompt}
-                onChange={(event) => setNewChatPrompt(event.target.value)}
-                onKeyDown={handleNewChatComposerKeyDown}
-                rows={3}
-                placeholder="Describe a new circuit to start a new chat..."
-                aria-label="Describe a new circuit to start a new chat"
-              />
-              <button
-                className="composer-send-button"
-                type="submit"
-                disabled={generationBusy || !newChatPrompt.trim()}
-                aria-label="Start new chat"
-                title="Start new chat"
-              >
-                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                  <path d="M3 11.5L21 3l-8.5 18-2.2-7.3L3 11.5z" fill="currentColor" />
-                </svg>
-              </button>
-            </div>
-          </form>
-
           <button
             type="button"
             className="import-circuit-trigger"
@@ -270,22 +228,6 @@ export function ChatPanel({
                     <time>{formatChatTime(message.createdAt)}</time>
                   </div>
                   <p className={message.mode ? 'chat-multiline' : ''}>{message.content}</p>
-                  {message.plan && (
-                    <PlanCard
-                      message={message}
-                      disabled={generationBusy}
-                      onBuild={() => buildFromPlan(message.id)}
-                    />
-                  )}
-                  {message.clarification && (
-                    <ClarificationCard
-                      message={message}
-                      disabled={generationBusy}
-                      onAnswer={(questionId, answer) => answerClarification(message.id, questionId, answer)}
-                      onSubmit={() => submitClarification(message.id)}
-                      onSkip={() => skipClarification(message.id)}
-                    />
-                  )}
                   {message.circuit && (
                     <div className="chat-artifact-chip">
                       <span>{message.circuit.type.replaceAll('_', ' ')}</span>
@@ -294,50 +236,31 @@ export function ChatPanel({
                   )}
                 </article>
               ))}
-              {isClarifying && (
-                <article className="chat-message assistant pending">
-                  <p>
-                    Preparing a few quick questions...{' '}
-                    <span className="typing-dots" aria-hidden="true"><i /><i /><i /></span>
-                  </p>
-                  <ThinkingWindow text={thinkingText} />
-                </article>
-              )}
-              {isAssisting && (
-                <article className="chat-message assistant pending">
-                  <p>
-                    {composerMode === 'plan' ? 'Drafting a design plan...' : 'Thinking...'}{' '}
-                    <span className="typing-dots" aria-hidden="true"><i /><i /><i /></span>
-                  </p>
-                  <ThinkingWindow text={thinkingText} />
-                </article>
-              )}
               {isGenerating && (
                 <article className="chat-message assistant pending">
                   <GenerationStatus stage={generationStage} />
-                  <ThinkingWindow text={thinkingText} />
                 </article>
               )}
               <div ref={messagesEndRef} />
             </div>
 
-            <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); generate(); }}>
+            <form className="chat-composer" onSubmit={(event) => event.preventDefault()}>
               <div className="chat-composer-input">
                 <textarea
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
-                  onKeyDown={handleComposerKeyDown}
                   rows={3}
-                  placeholder={COMPOSER_PLACEHOLDERS[composerMode] || COMPOSER_PLACEHOLDERS.implement}
+                  disabled
+                  placeholder="Circuit generation has been removed. Use Import JSON to load a circuit."
                   aria-label="Message the circuit assistant"
                 />
                 <ComposerModeMenu mode={composerMode} onSelect={setComposerMode} />
                 <button
                   className="composer-send-button"
                   type="submit"
-                  disabled={generationBusy || !prompt.trim()}
-                  aria-label={isGenerating ? 'Sending...' : generationBusy ? 'AI busy...' : 'Send message'}
-                  title={isGenerating ? 'Sending...' : generationBusy ? 'AI busy...' : 'Send message'}
+                  disabled
+                  aria-label="Circuit generation removed"
+                  title="Circuit generation removed"
                 >
                   <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
                     <path d="M3 11.5L21 3l-8.5 18-2.2-7.3L3 11.5z" fill="currentColor" />

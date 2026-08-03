@@ -36,7 +36,7 @@ const OPAMP_LEG_LAYOUT = { bottom: [2, 1, 0, 4], top: [3, null, null, null] };
 const DIP8_IDENTITY_LEG_LAYOUT = { bottom: [0, 1, 2, 3], top: [7, 6, 5, 4] };
 
 // Canonical positional pin lists for the microcontroller boards. Order is the
-// contract the AI is taught (server/ai/ollamaProvider.ts) and what the
+// contract a circuit generator must follow and what the
 // selection pin labels display; unused pins ride on NC_* placeholder nets.
 export const MCU_PINS = {
   arduino_uno: ['5V', '3V3', 'GND', 'VIN', 'D0', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'D13', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5'],

@@ -1,25 +1,14 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { loadEnv } from './env.js';
 import { parseAllowedOrigins, resolveCorsOrigin } from './cors.js';
-import { buildCircuitResponse, reconcileCircuitRevision } from './circuit/circuitResponse.js';
-import { normalizeChatMemory, sanitizeConversationHistory, updateChatMemory } from './ai/chatMemory.js';
-import { runCircuitPipeline } from './ai/circuitPipeline.js';
-import { checkCircuitTopology } from '../src/core/topologyRules.js';
-import { generateClarifyingQuestions } from './ai/clarifyProvider.js';
-import { generateAssistReply } from './ai/assistProvider.js';
 import { runNgspiceSimulation } from './simulation/simulator.js';
 import { compileSketch } from './compile/compiler.js';
-import { buildStreamingSpice } from './circuit/streamingCircuit.js';
 import { initDb } from './auth/db.js';
 import { handleSignup, handleLogin, handleVerifyEmail, handleMe, verifyJwt } from './auth/auth.js';
 import { handleBillingStatus, handleCreateCheckout, handleCreatePortal, handleStripeWebhook } from './billing/billing.js';
-import { QuotaError, checkAndConsumeQuota } from './billing/quota.js';
-import { DailyTokenLimitError, dailyLimitMessage, enforceDailyTokenLimit, getDailyTokenStatus, recordDailyTokens } from './billing/dailyTokens.js';
-import { trackTokenUsage } from './ai/tokenUsage.js';
-import { handleArtifactDownload, handleMcpRequest } from './mcp/httpServer.js';
-import { authorizeMcpRequest, mcpAuthConfigFromEnv, protectedResourceMetadata } from './mcp/resourceServer.js';
-import { ArtifactStore } from '../mcp/artifactSink.js';
-import type { ChatMemory, ChatMessage, Circuit, CurrentDesign, JwtPayload, PipelineEvent, StreamState } from './types.js';
+import { QuotaError } from './billing/quota.js';
+import { DailyTokenLimitError, dailyLimitMessage, getDailyTokenStatus } from './billing/dailyTokens.js';
+import type { Circuit, JwtPayload } from './types.js';
 
 loadEnv();
 
@@ -31,39 +20,6 @@ if (!process.env.JWT_SECRET) {
 const port = Number(process.env.PORT || process.env.API_PORT || 8787);
 const host = process.env.HOST || '127.0.0.1';
 const allowedOrigins = parseAllowedOrigins(process.env.CORS_ORIGIN);
-// The hosted MCP endpoint is off unless explicitly switched on.
-const mcpEnabled = process.env.MCP_HTTP_ENABLED === '1';
-const mcpArtifacts = new ArtifactStore();
-
-// OAuth config comes from the environment. Without it the endpoint would be
-// unauthenticated, which is only tolerable locally.
-const mcpAuth = mcpAuthConfigFromEnv();
-
-// In production, misconfiguration disables the MCP endpoint rather than killing the
-// process. Exiting would fail closed too — but it would also take generation,
-// simulation, and auth down with it, so a typo in an optional feature's env var
-// becomes a full outage. Disabling just this feature keeps the same security
-// property (the tools are never exposed unauthenticated) at feature-sized cost.
-const mcpUnauthenticatedInProduction = mcpEnabled && !mcpAuth && process.env.NODE_ENV === 'production';
-const mcpServingEnabled = mcpEnabled && !mcpUnauthenticatedInProduction;
-
-if (mcpUnauthenticatedInProduction) {
-  console.error(
-    '[mcp] MCP_HTTP_ENABLED=1 but MCP_RESOURCE_URI/MCP_OAUTH_ISSUER are unset. '
-    + 'Serving the MCP endpoint would expose the tools without authorization, so it '
-    + 'is DISABLED. The rest of the API is unaffected. Set the OAuth variables to '
-    + 'enable it (see docs/OPERATIONS.md).',
-  );
-} else if (mcpEnabled && !mcpAuth) {
-  console.warn('[mcp] Running WITHOUT authorization — local development only.');
-}
-
-const aiProviderName = (): string => process.env.AI_PROVIDER || 'ollama';
-const aiModelName = (): string => (
-  process.env.AI_PROVIDER && process.env.AI_PROVIDER !== 'ollama'
-    ? process.env.AI_MODEL || ''
-    : process.env.OLLAMA_MODEL || 'llama3.2:latest'
-);
 
 const sendJson = (response: ServerResponse, status: number, body: unknown): void => {
   // Access-Control-Allow-Origin is set per-request in the server handler.
@@ -145,47 +101,6 @@ const sendDailyLimitReached = (response: ServerResponse, error: DailyTokenLimitE
   });
 };
 
-const startJsonStream = (response: ServerResponse): void => {
-  // Access-Control-Allow-Origin is set per-request in the server handler.
-  response.writeHead(200, {
-    'Content-Type': 'application/x-ndjson; charset=utf-8',
-    'Cache-Control': 'no-cache, no-transform',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-  });
-};
-
-const writeStreamEvent = (response: ServerResponse, event: unknown): void => {
-  response.write(`${JSON.stringify(event)}\n`);
-};
-
-// Reasoning tokens arrive one word at a time; batching them into ~10 events
-// per second keeps the NDJSON wire and the client's re-render rate sane.
-// Deltas are flushed with the next push after the interval elapses, so a tail
-// shorter than the interval is only dropped when the request finishes — at
-// which point the thinking display disappears anyway.
-const createThinkingBatcher = (write: (delta: string) => void, intervalMs = 100) => {
-  let buffer = '';
-  let lastFlush = 0;
-  return {
-    push(delta: string): void {
-      buffer += delta;
-      const now = Date.now();
-      if (now - lastFlush >= intervalMs) {
-        lastFlush = now;
-        const batched = buffer;
-        buffer = '';
-        write(batched);
-      }
-    },
-    flush(): void {
-      if (!buffer) return;
-      const batched = buffer;
-      buffer = '';
-      write(batched);
-    },
-  };
-};
 
 function getUser(request: IncomingMessage): JwtPayload | null {
   const auth = request.headers.authorization || '';
@@ -207,11 +122,8 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
   }
 
   if (request.url === '/api/health') {
-    sendJson(response, 200, {
-      ok: true,
-      provider: aiProviderName(),
-      model: aiModelName(),
-    });
+    // Circuit generation was removed; this reports only that the API is up.
+    sendJson(response, 200, { ok: true });
     return;
   }
 
@@ -270,43 +182,6 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
     return;
   }
 
-  // The MCP endpoint is registered ABOVE the JWT gate on purpose. MCP clients
-  // authenticate as OAuth clients against their own authorization server, not with
-  // this app's session JWT — a Claude connector has no way to obtain one. Moving
-  // this below the gate makes every MCP call 401, which is exactly what happened
-  // the first time it was mounted at the bottom of the router.
-  //
-  // It carries its own authorization instead (Phase 2 of
-  // docs/superpowers/specs/2026-08-01-hosted-mcp-connector-design.md); until that
-  // lands, `MCP_HTTP_ENABLED` keeps it off by default.
-  // RFC 9728 discovery. Unauthenticated by design — it is how a client finds out
-  // where to authenticate, so gating it would deadlock the flow.
-  if (mcpServingEnabled && mcpAuth && request.url === '/.well-known/oauth-protected-resource') {
-    sendJson(response, 200, protectedResourceMetadata(mcpAuth));
-    return;
-  }
-
-  if (mcpServingEnabled && request.url?.startsWith('/api/mcp')) {
-    let subject: string;
-
-    if (mcpAuth) {
-      // authorizeMcpRequest writes the 401/403 challenge itself when it fails.
-      const outcome = await authorizeMcpRequest(request, response, mcpAuth);
-      if (!outcome.ok) return;
-      subject = outcome.subject;
-    } else {
-      // Unauthenticated local development only — guarded at startup above.
-      const mcpUser = getUser(request);
-      subject = mcpUser ? `user:${mcpUser.id}` : 'anonymous';
-    }
-
-    if (request.url.startsWith('/api/mcp/artifacts/')) {
-      handleArtifactDownload(request, response, { store: mcpArtifacts, subject });
-      return;
-    }
-    await handleMcpRequest(request, response, { store: mcpArtifacts, subject });
-    return;
-  }
 
   // Everything below the auth/health/webhook routes requires a logged-in,
   // verified user. Anonymous requests are rejected here.
@@ -352,225 +227,6 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       sendJson(response, result.status, result.body);
     } catch (error) {
       sendJson(response, statusFor(error), { error: (error as Error).message });
-    }
-    return;
-  }
-
-  if (request.url === '/api/clarify-circuit' && request.method === 'POST') {
-    try {
-      const body = await readJsonBody(request);
-      const prompt = String(body.prompt || '').trim();
-      if (!prompt) {
-        sendJson(response, 400, { code: 'clarify_failed', error: 'Prompt is required.' });
-        return;
-      }
-
-      try {
-        await checkAndConsumeQuota(user.id, 'assist');
-      } catch (quotaError) {
-        if (quotaError instanceof QuotaError) {
-          sendQuotaExceeded(response, quotaError);
-          return;
-        }
-        throw quotaError;
-      }
-
-      try {
-        await enforceDailyTokenLimit(user.id);
-      } catch (limitError) {
-        if (limitError instanceof DailyTokenLimitError) {
-          sendDailyLimitReached(response, limitError);
-          return;
-        }
-        throw limitError;
-      }
-
-      const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
-      const currentDesign = (body.currentDesign as CurrentDesign)?.circuit ? body.currentDesign as CurrentDesign : null;
-      const memory = normalizeChatMemory(body.memory as Partial<ChatMemory> | null);
-      startJsonStream(response);
-      const thinking = createThinkingBatcher((delta) => writeStreamEvent(response, { type: 'thinking', delta }));
-      const { result, tokens } = await trackTokenUsage(
-        () => generateClarifyingQuestions(prompt, messages, currentDesign, memory, thinking.push)
-      );
-      await recordDailyTokens(user.id, tokens);
-      writeStreamEvent(response, { type: 'complete', data: result });
-      response.end();
-    } catch (error) {
-      console.error(`[circuit-clarify] ${(error as Error).message}`);
-      if (response.headersSent) {
-        writeStreamEvent(response, { type: 'error', code: 'clarify_failed', error: (error as Error).message });
-        response.end();
-      } else {
-        sendJson(response, statusFor(error), { code: 'clarify_failed', error: (error as Error).message });
-      }
-    }
-    return;
-  }
-
-  if (request.url === '/api/assist-circuit' && request.method === 'POST') {
-    try {
-      const body = await readJsonBody(request);
-      const mode = String(body.mode || '');
-      if (mode !== 'plan' && mode !== 'ask') {
-        sendJson(response, 400, { code: 'assist_failed', error: 'Mode must be "plan" or "ask".' });
-        return;
-      }
-      const prompt = String(body.prompt || '').trim();
-      if (!prompt) {
-        sendJson(response, 400, { code: 'assist_failed', error: 'Prompt is required.' });
-        return;
-      }
-
-      try {
-        await checkAndConsumeQuota(user.id, 'assist');
-      } catch (quotaError) {
-        if (quotaError instanceof QuotaError) {
-          sendQuotaExceeded(response, quotaError);
-          return;
-        }
-        throw quotaError;
-      }
-
-      try {
-        await enforceDailyTokenLimit(user.id);
-      } catch (limitError) {
-        if (limitError instanceof DailyTokenLimitError) {
-          sendDailyLimitReached(response, limitError);
-          return;
-        }
-        throw limitError;
-      }
-
-      const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
-      const currentDesign = (body.currentDesign as CurrentDesign)?.circuit ? body.currentDesign as CurrentDesign : null;
-      const memory = normalizeChatMemory(body.memory as Partial<ChatMemory> | null);
-      startJsonStream(response);
-      const thinking = createThinkingBatcher((delta) => writeStreamEvent(response, { type: 'thinking', delta }));
-      // Assist replies confirm no design, so chat memory is deliberately not updated.
-      const { result, tokens } = await trackTokenUsage(
-        () => generateAssistReply(mode, prompt, messages, currentDesign, memory, thinking.push)
-      );
-      await recordDailyTokens(user.id, tokens);
-      writeStreamEvent(response, { type: 'complete', data: result });
-      response.end();
-    } catch (error) {
-      console.error(`[circuit-assist] ${(error as Error).message}`);
-      if (response.headersSent) {
-        writeStreamEvent(response, { type: 'error', code: 'assist_failed', error: (error as Error).message });
-        response.end();
-      } else {
-        sendJson(response, statusFor(error), { code: 'assist_failed', error: (error as Error).message });
-      }
-    }
-    return;
-  }
-
-  if (request.url === '/api/generate-circuit' && request.method === 'POST') {
-    try {
-      const body = await readJsonBody(request);
-      const prompt = String(body.prompt || '').trim();
-      if (!prompt) {
-        sendJson(response, 400, { error: 'Prompt is required.' });
-        return;
-      }
-
-      try {
-        await checkAndConsumeQuota(user.id, 'generation');
-      } catch (quotaError) {
-        if (quotaError instanceof QuotaError) {
-          sendQuotaExceeded(response, quotaError);
-          return;
-        }
-        throw quotaError;
-      }
-
-      try {
-        await enforceDailyTokenLimit(user.id);
-      } catch (limitError) {
-        if (limitError instanceof DailyTokenLimitError) {
-          sendDailyLimitReached(response, limitError);
-          return;
-        }
-        throw limitError;
-      }
-
-      const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
-      const currentDesign = (body.currentDesign as CurrentDesign)?.circuit ? body.currentDesign as CurrentDesign : null;
-      const memory = normalizeChatMemory(body.memory as Partial<ChatMemory> | null);
-      const contextDiagnostics = {
-        contextTurnCount: sanitizeConversationHistory(messages).length,
-        revision: Boolean(currentDesign),
-      };
-      if (process.env.OLLAMA_CONTEXT_DIAGNOSTICS === '1') {
-        console.info(`[circuit-context] turns=${contextDiagnostics.contextTurnCount} revision=${contextDiagnostics.revision}`);
-      }
-      startJsonStream(response);
-      writeStreamEvent(response, {
-        type: 'spice',
-        provisional: true,
-        componentCount: currentDesign?.circuit.components?.length || 0,
-        spice: currentDesign?.spice || '* AI is preparing the circuit...\n* Components will appear here as they are generated.',
-      });
-
-      let lastSpiceEvent = '';
-      const { result: aiResponse, tokens: tokensUsed } = await trackTokenUsage(
-        () => runCircuitPipeline(prompt, messages, currentDesign, memory, (event: PipelineEvent) => {
-          if (event.type === 'stage') {
-            writeStreamEvent(response, { type: 'stage', stage: event.stage });
-            return;
-          }
-          const partial = buildStreamingSpice(event.content, prompt, currentDesign?.circuit ?? null);
-          const eventKey = `${event.attempt}:${partial.spice}`;
-          if (eventKey === lastSpiceEvent) return;
-          lastSpiceEvent = eventKey;
-          writeStreamEvent(response, {
-            type: 'spice',
-            provisional: true,
-            correcting: event.correcting,
-            ...partial,
-          });
-        })
-      );
-      await recordDailyTokens(user.id, tokensUsed);
-      const circuit = reconcileCircuitRevision(aiResponse.circuit as unknown as Record<string, unknown>, prompt, currentDesign?.circuit ?? null);
-      // Reconciliation can merge the candidate with the prior confirmed
-      // design, so run the topology check on what actually ships; the
-      // pipeline's reviewer stage already corrected what it could, so the
-      // checker's surviving findings are surfaced in the UI, never fatal.
-      let issues: Array<Record<string, unknown>> = [];
-      try {
-        issues = (checkCircuitTopology(circuit) as unknown as { violations: typeof issues }).violations;
-      } catch (topologyError) {
-        console.error(`[topology-check] ${(topologyError as Error).message}`);
-      }
-      let updatedMemory: ChatMemory = memory;
-      try {
-        updatedMemory = updateChatMemory(memory, prompt, circuit);
-      } catch (memoryError) {
-        console.error(`[chat-memory] ${(memoryError as Error).message}`);
-      }
-      writeStreamEvent(response, {
-        type: 'complete',
-        data: {
-          ...buildCircuitResponse(circuit, { rawPrompt: prompt, type: circuit.type }, aiProviderName()),
-          reply: aiResponse.reply,
-          code: aiResponse.code || '',
-          memory: updatedMemory,
-          issues,
-          ...(process.env.OLLAMA_CONTEXT_DIAGNOSTICS === '1' ? { contextDiagnostics } : {}),
-        },
-      });
-      response.end();
-    } catch (error) {
-      const errorCode = (error as Error & { code?: string }).code || 'generation_failed';
-      console.error(`[circuit-generation:${errorCode}] ${(error as Error).message}`);
-      if (response.headersSent) {
-        writeStreamEvent(response, { type: 'error', code: errorCode, error: (error as Error).message });
-        response.end();
-      } else {
-        sendJson(response, statusFor(error), { code: errorCode, error: (error as Error).message });
-      }
     }
     return;
   }

@@ -61,7 +61,6 @@ export const chatTitleFromPrompt = (prompt) => {
   return title.length > 42 ? `${title.slice(0, 39).trimEnd()}...` : title;
 };
 
-export const NO_PREFERENCE_ANSWER = 'No preference (you decide)';
 
 const CLARIFICATION_STATUSES = ['pending', 'answered', 'skipped'];
 
@@ -288,54 +287,3 @@ export const migrateChatDiagram = (chat) => {
 
   return changed ? { ...chat, result, editedDiagram } : chat;
 };
-
-const resolvedAnswer = (answers, questionId) =>
-  String(answers?.[questionId] || '').trim() || NO_PREFERENCE_ANSWER;
-
-// The full prompt sent to /api/generate-circuit after a clarification round.
-export const composeClarifiedPrompt = (forPrompt, questions, answers) => [
-  `Original request: ${forPrompt}`,
-  'User clarifications:',
-  ...questions.map((question) => `- ${question.question} -> ${resolvedAnswer(answers, question.id)}`),
-  'Design the circuit now honoring these clarifications.',
-].join('\n');
-
-// The full prompt sent to /api/generate-circuit when the user builds a plan.
-export const composePlanBuildPrompt = (forPrompt, planText) => [
-  `Original request: ${forPrompt}`,
-  'Approved design plan:',
-  String(planText || '').trim(),
-  'Build this circuit now, following the approved plan.',
-].join('\n');
-
-// The compact user bubble shown in chat (and replayed as history context).
-export const formatClarificationSummary = (questions, answers) =>
-  `Clarifications: ${questions
-    .map((question) => `${question.question} -> ${resolvedAnswer(answers, question.id)}`)
-    .join('; ')}`;
-
-// Generation/clarify context: assistant text-only turns ride along so the
-// server's reply stage can see the AI's own past words. Clarification-question
-// bubbles and empty turns stay out; the server re-filters per stage (stage 1
-// keeps only circuit-bearing assistant turns).
-export const buildConversationContext = (messages) =>
-  (Array.isArray(messages) ? messages : [])
-    .filter((message) => message.role === 'user'
-      || (message.role === 'assistant'
-        && (message.circuit || (String(message.content || '').trim() && !message.clarification))))
-    .map((message) => ({
-      role: message.role,
-      content: message.content,
-      ...(message.circuit ? { circuit: message.circuit } : {}),
-    }));
-
-// Context for /api/assist-circuit (Plan/Ask): keeps assistant text-only turns
-// for conversational continuity.
-export const buildAssistContext = (messages) =>
-  (Array.isArray(messages) ? messages : [])
-    .filter((message) => message.role === 'user' || message.role === 'assistant')
-    .map((message) => ({
-      role: message.role,
-      content: message.content,
-      ...(message.circuit ? { circuit: message.circuit } : {}),
-    }));

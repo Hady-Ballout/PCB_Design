@@ -9,7 +9,6 @@ export const pageFromHash = () => {
   if (hash === '#login') return 'login';
   if (hash === '#signup') return 'signup';
   if (hash === '#waveform') return 'waveform';
-  if (hash === '#connect') return 'connect';
   // '', '#app', and anything unrecognized open the workspace.
   return 'workspace';
 };
