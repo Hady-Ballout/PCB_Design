@@ -1,0 +1,134 @@
+{
+  "title": "Battery-Powered ESP32 Temperature Logger",
+  "type": "data_logger",
+  "supplyVoltage": 3.3,
+  "nodes": [
+    "VIN_9V",
+    "VCC_3V3",
+    "GPIO2",
+    "TEMP_OUT",
+    "LED_ANODE",
+    "SDA",
+    "SCL",
+    "NC_U1_3",
+    "NC_U1_6",
+    "NC_U1_7",
+    "NC_U1_9",
+    "NC_U1_10",
+    "0"
+  ],
+  "components": [
+    {
+      "ref": "V1",
+      "kind": "voltage_source",
+      "value": "9V",
+      "nodes": [
+        "VIN_9V",
+        "0"
+      ],
+      "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"
+    },
+    {
+      "ref": "U2",
+      "kind": "regulator",
+      "value": "AMS1117-3.3",
+      "nodes": [
+        "VIN_9V",
+        "0",
+        "VCC_3V3"
+      ],
+      "footprint": "Package_TO_SOT_THT:TO-220-3_Vertical"
+    },
+    {
+      "ref": "C1",
+      "kind": "capacitor",
+      "value": "10uF",
+      "nodes": [
+        "VIN_9V",
+        "0"
+      ],
+      "footprint": "Capacitor_THT:CP_Radial_D5.0mm_P2.00mm"
+    },
+    {
+      "ref": "C2",
+      "kind": "capacitor",
+      "value": "10uF",
+      "nodes": [
+        "VCC_3V3",
+        "0"
+      ],
+      "footprint": "Capacitor_THT:CP_Radial_D5.0mm_P2.00mm"
+    },
+    {
+      "ref": "U_TEMP",
+      "kind": "temp_sensor",
+      "value": "LM35",
+      "nodes": [
+        "VCC_3V3",
+        "TEMP_OUT",
+        "0"
+      ],
+      "footprint": "Package_TO_SOT_THT:TO-92_Inline"
+    },
+    {
+      "ref": "R1",
+      "kind": "resistor",
+      "value": "220",
+      "nodes": [
+        "GPIO2",
+        "LED_ANODE"
+      ],
+      "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+    },
+    {
+      "ref": "D1",
+      "kind": "led",
+      "value": "Red",
+      "nodes": [
+        "LED_ANODE",
+        "0"
+      ],
+      "footprint": "LED_THT:LED_D5.0mm"
+    },
+    {
+      "ref": "U_RTC",
+      "kind": "rtc_module",
+      "value": "DS3231",
+      "nodes": [
+        "0",
+        "VCC_3V3",
+        "SDA",
+        "SCL"
+      ],
+      "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical"
+    },
+    {
+      "ref": "U1",
+      "kind": "esp32",
+      "value": "DevKit V1",
+      "nodes": [
+        "VCC_3V3",
+        "0",
+        "NC_U1_3",
+        "VCC_3V3",
+        "GPIO2",
+        "NC_U1_6",
+        "NC_U1_7",
+        "TEMP_OUT",
+        "NC_U1_9",
+        "NC_U1_10",
+        "SDA",
+        "SCL"
+      ],
+      "footprint": "Module:ESP32-DevKitC"
+    }
+  ],
+  "notes": [
+    "Battery-powered temperature logger using ESP32.",
+    "Regulated 3.3V rail from 9V battery via AMS1117-3.3.",
+    "LM35 analog temperature sensor on GPIO13 (ADC).",
+    "Status LED on GPIO2 with 220Ω series resistor.",
+    "RTC module (DS3231) on I2C (GPIO21 SDA, GPIO22 SCL).",
+    "Input and output capacitors (10µF each) stabilize the regulator."
+  ]
+}

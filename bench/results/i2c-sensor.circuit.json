@@ -1,0 +1,60 @@
+{
+  "title": "ESP32 BMP280 Barometer with OLED Display",
+  "type": "microcontroller_sensor_display",
+  "supplyVoltage": 3.3,
+  "nodes": [
+    "VCC3",
+    "SDA",
+    "SCL",
+    "0"
+  ],
+  "components": [
+    {
+      "ref": "U1",
+      "kind": "esp32",
+      "value": "DevKit V1",
+      "nodes": [
+        "VCC3",
+        "0",
+        "NC_U1_3",
+        "NC_U1_4",
+        "NC_U1_5",
+        "NC_U1_6",
+        "NC_U1_7",
+        "NC_U1_8",
+        "NC_U1_9",
+        "NC_U1_10",
+        "SDA",
+        "SCL"
+      ],
+      "footprint": "Module:ESP32-DevKitC"
+    },
+    {
+      "ref": "U2",
+      "kind": "baro_sensor",
+      "value": "BMP280",
+      "nodes": [
+        "VCC3",
+        "0",
+        "SCL",
+        "SDA"
+      ],
+      "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical"
+    },
+    {
+      "ref": "U3",
+      "kind": "oled_display",
+      "value": "SSD1306",
+      "nodes": [
+        "VCC3",
+        "0",
+        "SCL",
+        "SDA"
+      ],
+      "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical"
+    }
+  ],
+  "notes": [
+    "Wiring-only circuit: ESP32 reads BMP280 via I2C and displays on SSD1306 OLED. I2C bus uses GPIO21 (SDA) and GPIO22 (SCL). Power both sensors from ESP32 3.3V pin."
+  ]
+}

@@ -1,0 +1,89 @@
+{
+  "title": "12V to 5V Buck Converter",
+  "type": "buck_converter",
+  "supplyVoltage": 12,
+  "nodes": [
+    "VIN",
+    "VOUT",
+    "SW",
+    "0"
+  ],
+  "components": [
+    {
+      "ref": "V1",
+      "kind": "voltage_source",
+      "value": "12V",
+      "nodes": [
+        "VIN",
+        "0"
+      ],
+      "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"
+    },
+    {
+      "ref": "U1",
+      "kind": "buck_converter",
+      "value": "LM2596-5.0",
+      "nodes": [
+        "VIN",
+        "SW",
+        "0",
+        "VOUT",
+        "0"
+      ],
+      "footprint": "Package_TO_SOT_THT:TO-220-5_Vertical"
+    },
+    {
+      "ref": "C1",
+      "kind": "capacitor",
+      "value": "100uF",
+      "nodes": [
+        "VIN",
+        "0"
+      ],
+      "footprint": "Capacitor_THT:CP_Radial_D5.0mm_P2.00mm"
+    },
+    {
+      "ref": "C2",
+      "kind": "capacitor",
+      "value": "220uF",
+      "nodes": [
+        "VOUT",
+        "0"
+      ],
+      "footprint": "Capacitor_THT:CP_Radial_D5.0mm_P2.00mm"
+    },
+    {
+      "ref": "D1",
+      "kind": "schottky",
+      "value": "1N5819",
+      "nodes": [
+        "0",
+        "SW"
+      ],
+      "footprint": "Diode_THT:D_DO-35_SOD27_P7.62mm_Horizontal"
+    },
+    {
+      "ref": "L1",
+      "kind": "inductor",
+      "value": "33uH",
+      "nodes": [
+        "SW",
+        "VOUT"
+      ],
+      "footprint": "Inductor_THT:L_Axial_D10.0mm_P12.70mm_Horizontal"
+    },
+    {
+      "ref": "R1",
+      "kind": "resistor",
+      "value": "100",
+      "nodes": [
+        "VOUT",
+        "0"
+      ],
+      "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+    }
+  ],
+  "notes": [
+    "12V barrel jack input on VIN. 5V screw terminal output on VOUT. Educational circuit not for high-power."
+  ]
+}

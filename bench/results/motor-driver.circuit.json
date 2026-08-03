@@ -1,0 +1,81 @@
+{
+  "title": "12V DC Motor Switch with MOSFET",
+  "type": "mosfet_low_side_switch",
+  "supplyVoltage": 12,
+  "nodes": [
+    "VCC",
+    "CTRL",
+    "GATE",
+    "DRAIN",
+    "0"
+  ],
+  "components": [
+    {
+      "ref": "V1",
+      "kind": "voltage_source",
+      "value": "12V",
+      "nodes": [
+        "VCC",
+        "0"
+      ],
+      "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"
+    },
+    {
+      "ref": "M1",
+      "kind": "dc_motor",
+      "value": "DC Motor 12V",
+      "nodes": [
+        "VCC",
+        "DRAIN"
+      ],
+      "footprint": "TerminalBlock:TerminalBlock_bornier-2_P5.08mm"
+    },
+    {
+      "ref": "Q1",
+      "kind": "mosfet_n",
+      "value": "IRLZ44N",
+      "nodes": [
+        "DRAIN",
+        "GATE",
+        "0"
+      ],
+      "footprint": "Package_TO_SOT_THT:TO-220-3_Vertical"
+    },
+    {
+      "ref": "D1",
+      "kind": "diode",
+      "value": "1N4007",
+      "nodes": [
+        "DRAIN",
+        "VCC"
+      ],
+      "footprint": "Diode_THT:D_DO-35_SOD27_P7.62mm_Horizontal"
+    },
+    {
+      "ref": "R1",
+      "kind": "resistor",
+      "value": "1k",
+      "nodes": [
+        "CTRL",
+        "GATE"
+      ],
+      "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+    },
+    {
+      "ref": "R2",
+      "kind": "resistor",
+      "value": "100k",
+      "nodes": [
+        "GATE",
+        "0"
+      ],
+      "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+    }
+  ],
+  "notes": [
+    "Connect GPIO to CTRL pin on input header; share ground.",
+    "D1 is a flyback protection diode.",
+    "R1 limits gate current; R2 ensures MOSFET off when CTRL is floating.",
+    "Use a logic-level MOSFET like IRLZ44N; ensure motor current within MOSFET rating."
+  ]
+}

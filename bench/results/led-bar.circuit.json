@@ -1,0 +1,197 @@
+{
+  "title": "5 V LED Indicator Bar",
+  "type": "led_indicator_bar",
+  "supplyVoltage": 5,
+  "nodes": [
+    "VCC",
+    "0",
+    "LED1_A",
+    "LED2_A",
+    "LED3_A",
+    "LED4_A",
+    "LED5_A",
+    "LED6_A",
+    "LED1_K",
+    "LED2_K",
+    "LED3_K",
+    "LED4_K",
+    "LED5_K",
+    "LED6_K"
+  ],
+  "components": [
+    {
+      "ref": "V1",
+      "kind": "voltage_source",
+      "value": "5V",
+      "nodes": [
+        "VCC",
+        "0"
+      ],
+      "footprint": "TerminalBlock:TerminalBlock_bornier-2_P5.00mm"
+    },
+    {
+      "ref": "R1",
+      "kind": "resistor",
+      "value": "330",
+      "nodes": [
+        "VCC",
+        "LED1_A"
+      ],
+      "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+    },
+    {
+      "ref": "D1",
+      "kind": "led",
+      "value": "red",
+      "nodes": [
+        "LED1_A",
+        "LED1_K"
+      ],
+      "footprint": "LED_THT:LED_D5.0mm"
+    },
+    {
+      "ref": "R2",
+      "kind": "resistor",
+      "value": "330",
+      "nodes": [
+        "VCC",
+        "LED2_A"
+      ],
+      "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+    },
+    {
+      "ref": "D2",
+      "kind": "led",
+      "value": "red",
+      "nodes": [
+        "LED2_A",
+        "LED2_K"
+      ],
+      "footprint": "LED_THT:LED_D5.0mm"
+    },
+    {
+      "ref": "R3",
+      "kind": "resistor",
+      "value": "330",
+      "nodes": [
+        "VCC",
+        "LED3_A"
+      ],
+      "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+    },
+    {
+      "ref": "D3",
+      "kind": "led",
+      "value": "red",
+      "nodes": [
+        "LED3_A",
+        "LED3_K"
+      ],
+      "footprint": "LED_THT:LED_D5.0mm"
+    },
+    {
+      "ref": "R4",
+      "kind": "resistor",
+      "value": "330",
+      "nodes": [
+        "VCC",
+        "LED4_A"
+      ],
+      "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+    },
+    {
+      "ref": "D4",
+      "kind": "led",
+      "value": "red",
+      "nodes": [
+        "LED4_A",
+        "LED4_K"
+      ],
+      "footprint": "LED_THT:LED_D5.0mm"
+    },
+    {
+      "ref": "R5",
+      "kind": "resistor",
+      "value": "330",
+      "nodes": [
+        "VCC",
+        "LED5_A"
+      ],
+      "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+    },
+    {
+      "ref": "D5",
+      "kind": "led",
+      "value": "red",
+      "nodes": [
+        "LED5_A",
+        "LED5_K"
+      ],
+      "footprint": "LED_THT:LED_D5.0mm"
+    },
+    {
+      "ref": "R6",
+      "kind": "resistor",
+      "value": "330",
+      "nodes": [
+        "VCC",
+        "LED6_A"
+      ],
+      "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+    },
+    {
+      "ref": "D6",
+      "kind": "led",
+      "value": "red",
+      "nodes": [
+        "LED6_A",
+        "LED6_K"
+      ],
+      "footprint": "LED_THT:LED_D5.0mm"
+    }
+  ],
+  "notes": [
+    "Six red LEDs in a common‑anode configuration, each with a 330 Ω current‑limiting resistor, powered from screw terminals (VCC and GND).",
+    "Solder a 1×6 pin header with pins connected to LED1_K … LED6_K to interface with an external board that sinks each LED to GND when active.",
+    "Connect a regulated 5 V supply to the screw terminals; each LED draws ≈10 mA when on.",
+    "All parts use through‑hole footprints for easy hand soldering."
+  ],
+  "schematic": {
+    "version": 1,
+    "topology": "led_bar",
+    "externalTerminals": [
+      {
+        "node": "VCC",
+        "side": "left"
+      },
+      {
+        "node": "0",
+        "side": "left"
+      },
+      {
+        "node": "LED1_K",
+        "side": "right"
+      },
+      {
+        "node": "LED2_K",
+        "side": "right"
+      },
+      {
+        "node": "LED3_K",
+        "side": "right"
+      },
+      {
+        "node": "LED4_K",
+        "side": "right"
+      },
+      {
+        "node": "LED5_K",
+        "side": "right"
+      },
+      {
+        "node": "LED6_K",
+        "side": "right"
+      }
+    ]
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "name": "rc-filter",
+  "prompt": "Build a passive RC low-pass filter with a 1 kHz cutoff, fed from a 5 V supply, with screw terminals for the input and the output.",
+  "assertions": [
+    "count(resistor) >= 1",
+    "count(capacitor) >= 1"
+  ],
+  "model": "deepseek-v4-pro",
+  "error": null,
+  "durationMs": 89022,
+  "requests": 3,
+  "usage": {
+    "input": 1042,
+    "output": 4370,
+    "cacheRead": 15360,
+    "cacheWrite": 0
+  },
+  "calls": [
+    {
+      "input": 10,
+      "output": 2340,
+      "cacheRead": 14592,
+      "status": 200,
+      "ms": 48020
+    },
+    {
+      "input": 419,
+      "output": 1718,
+      "cacheRead": 768,
+      "status": 200,
+      "ms": 34992
+    },
+    {
+      "input": 613,
+      "output": 312,
+      "cacheRead": 0,
+      "status": 200,
+      "ms": 6007
+    }
+  ],
+  "circuit": {
+    "title": "Passive RC Low-Pass Filter",
+    "type": "rc_low_pass",
+    "supplyVoltage": 5,
+    "nodes": [
+      "VIN",
+      "VOUT",
+      "0"
+    ],
+    "components": [
+      {
+        "ref": "V1",
+        "kind": "signal_source",
+        "value": "SINE(0 5 1k)",
+        "nodes": [
+          "VIN",
+          "0"
+        ],
+        "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"
+      },
+      {
+        "ref": "R1",
+        "kind": "resistor",
+        "value": "10k",
+        "nodes": [
+          "VIN",
+          "VOUT"
+        ],
+        "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+      },
+      {
+        "ref": "C1",
+        "kind": "capacitor",
+        "value": "15nF",
+        "nodes": [
+          "VOUT",
+          "0"
+        ],
+        "footprint": "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P5.00mm"
+      }
+    ],
+    "notes": [
+      "fc = 1/(2π·10kΩ·15nF) ≈ 1.06 kHz.",
+      "V1 is for simulation; use screw terminals at VIN/GND and VOUT/GND for physical connection."
+    ],
+    "schematic": {
+      "version": 1,
+      "topology": "rc_low_pass_filter",
+      "externalTerminals": [
+        {
+          "node": "VIN",
+          "side": "left",
+          "label": "Input Screw Term"
+        },
+        {
+          "node": "VOUT",
+          "side": "right",
+          "label": "Output Screw Term"
+        }
+      ]
+    }
+  }
+}

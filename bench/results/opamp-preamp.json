@@ -1,0 +1,133 @@
+{
+  "name": "opamp-preamp",
+  "prompt": "Build a non-inverting op-amp amplifier with a gain of 10, running from a 9 V supply, input and output on screw terminals.",
+  "assertions": [
+    "count(opamp) == 1",
+    "count(resistor) >= 2",
+    "opamp[0].IN+ != opamp[0].IN-"
+  ],
+  "model": "deepseek-v4-pro",
+  "error": null,
+  "durationMs": 197284,
+  "requests": 5,
+  "usage": {
+    "input": 1650,
+    "output": 9753,
+    "cacheRead": 30976,
+    "cacheWrite": 0
+  },
+  "calls": [
+    {
+      "input": 137,
+      "output": 1224,
+      "cacheRead": 14464,
+      "status": 200,
+      "ms": 24557
+    },
+    {
+      "input": 174,
+      "output": 3388,
+      "cacheRead": 14592,
+      "status": 200,
+      "ms": 69583
+    },
+    {
+      "input": 491,
+      "output": 3468,
+      "cacheRead": 768,
+      "status": 200,
+      "ms": 66577
+    },
+    {
+      "input": 163,
+      "output": 1382,
+      "cacheRead": 1152,
+      "status": 200,
+      "ms": 29391
+    },
+    {
+      "input": 685,
+      "output": 291,
+      "cacheRead": 0,
+      "status": 200,
+      "ms": 7165
+    }
+  ],
+  "circuit": {
+    "title": "Non-Inverting Op-Amp Amplifier (Gain=10)",
+    "type": "opamp_amplifier",
+    "supplyVoltage": 9,
+    "nodes": [
+      "VIN",
+      "VOUT",
+      "VCC",
+      "INV",
+      "0"
+    ],
+    "components": [
+      {
+        "ref": "V1",
+        "kind": "voltage_source",
+        "value": "9V",
+        "nodes": [
+          "VCC",
+          "0"
+        ],
+        "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"
+      },
+      {
+        "ref": "R1",
+        "kind": "resistor",
+        "value": "1k",
+        "nodes": [
+          "INV",
+          "0"
+        ],
+        "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+      },
+      {
+        "ref": "R2",
+        "kind": "resistor",
+        "value": "9.1k",
+        "nodes": [
+          "INV",
+          "VOUT"
+        ],
+        "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+      },
+      {
+        "ref": "XU1",
+        "kind": "opamp",
+        "value": "LM358",
+        "nodes": [
+          "VIN",
+          "INV",
+          "VOUT",
+          "VCC",
+          "0"
+        ],
+        "footprint": "Package_DIP:DIP-8_W7.62mm"
+      }
+    ],
+    "notes": [
+      "Single-supply non-inverting amplifier: gain = 1 + R2/R1 ≈ 10.1. VIN is the input terminal (signal + gnd). VOUT is the output terminal. Supply is 9 V from V1."
+    ],
+    "schematic": {
+      "version": 1,
+      "topology": "non_inverting_amplifier",
+      "primaryRef": "XU1",
+      "externalTerminals": [
+        {
+          "node": "VIN",
+          "side": "left",
+          "label": "VIN"
+        },
+        {
+          "node": "VOUT",
+          "side": "right",
+          "label": "VOUT"
+        }
+      ]
+    }
+  }
+}

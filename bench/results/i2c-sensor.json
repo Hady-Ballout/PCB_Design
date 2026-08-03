@@ -1,0 +1,103 @@
+{
+  "name": "i2c-sensor",
+  "prompt": "Build a 3.3 V ESP32 board that reads a BMP280 barometric sensor over I2C and shows readings on an I2C OLED display.",
+  "assertions": [
+    "count(baro_sensor) == 1",
+    "count(oled_display) == 1",
+    "baro_sensor[0].SDA == oled_display[0].SDA",
+    "baro_sensor[0].SCL == oled_display[0].SCL"
+  ],
+  "model": "deepseek-v4-pro",
+  "error": null,
+  "durationMs": 83948,
+  "requests": 3,
+  "usage": {
+    "input": 1059,
+    "output": 5443,
+    "cacheRead": 15360,
+    "cacheWrite": 0
+  },
+  "calls": [
+    {
+      "input": 11,
+      "output": 2546,
+      "cacheRead": 14592,
+      "status": 200,
+      "ms": 35188
+    },
+    {
+      "input": 427,
+      "output": 2619,
+      "cacheRead": 768,
+      "status": 200,
+      "ms": 42644
+    },
+    {
+      "input": 621,
+      "output": 278,
+      "cacheRead": 0,
+      "status": 200,
+      "ms": 6109
+    }
+  ],
+  "circuit": {
+    "title": "ESP32 BMP280 Barometer with OLED Display",
+    "type": "microcontroller_sensor_display",
+    "supplyVoltage": 3.3,
+    "nodes": [
+      "VCC3",
+      "SDA",
+      "SCL",
+      "0"
+    ],
+    "components": [
+      {
+        "ref": "U1",
+        "kind": "esp32",
+        "value": "DevKit V1",
+        "nodes": [
+          "VCC3",
+          "0",
+          "NC_U1_3",
+          "NC_U1_4",
+          "NC_U1_5",
+          "NC_U1_6",
+          "NC_U1_7",
+          "NC_U1_8",
+          "NC_U1_9",
+          "NC_U1_10",
+          "SDA",
+          "SCL"
+        ],
+        "footprint": "Module:ESP32-DevKitC"
+      },
+      {
+        "ref": "U2",
+        "kind": "baro_sensor",
+        "value": "BMP280",
+        "nodes": [
+          "VCC3",
+          "0",
+          "SCL",
+          "SDA"
+        ],
+        "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical"
+      },
+      {
+        "ref": "U3",
+        "kind": "oled_display",
+        "value": "SSD1306",
+        "nodes": [
+          "VCC3",
+          "0",
+          "SCL",
+          "SDA"
+        ],
+        "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical"
+      }
+    ],
+    "notes": [
+      "Wiring-only circuit: ESP32 reads BMP280 via I2C and displays on SSD1306 OLED. I2C bus uses GPIO21 (SDA) and GPIO22 (SCL). Power both sensors from ESP32 3.3V pin."
+    ]
+  }
+}

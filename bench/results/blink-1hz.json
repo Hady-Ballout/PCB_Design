@@ -1,0 +1,152 @@
+{
+  "name": "blink-1hz",
+  "prompt": "Build a circuit that blinks an LED once per second, running from a 9 V battery.",
+  "assertions": [
+    "count(timer_555) == 1",
+    "timer_555[0].TRIG == timer_555[0].THRES",
+    "timer_555[0].RESET == timer_555[0].VCC",
+    "timer_555[0].GND == 0",
+    "count(led) >= 1"
+  ],
+  "model": "deepseek-v4-pro",
+  "error": null,
+  "durationMs": 86800,
+  "requests": 3,
+  "usage": {
+    "input": 1628,
+    "output": 4529,
+    "cacheRead": 15232,
+    "cacheWrite": 0
+  },
+  "calls": [
+    {
+      "input": 126,
+      "output": 3068,
+      "cacheRead": 14464,
+      "status": 200,
+      "ms": 56507
+    },
+    {
+      "input": 654,
+      "output": 1148,
+      "cacheRead": 768,
+      "status": 200,
+      "ms": 21929
+    },
+    {
+      "input": 848,
+      "output": 313,
+      "cacheRead": 0,
+      "status": 200,
+      "ms": 8358
+    }
+  ],
+  "circuit": {
+    "title": "9V Battery LED Blinker with 555 Timer",
+    "type": "led_blinker",
+    "supplyVoltage": 9,
+    "nodes": [
+      "VCC",
+      "0",
+      "THRES_TRIG",
+      "DISCH",
+      "OUT",
+      "LED_ANODE",
+      "CTRL"
+    ],
+    "components": [
+      {
+        "ref": "V1",
+        "kind": "voltage_source",
+        "value": "9V",
+        "nodes": [
+          "VCC",
+          "0"
+        ],
+        "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"
+      },
+      {
+        "ref": "XU1",
+        "kind": "timer_555",
+        "value": "NE555",
+        "nodes": [
+          "0",
+          "THRES_TRIG",
+          "OUT",
+          "VCC",
+          "CTRL",
+          "THRES_TRIG",
+          "DISCH",
+          "VCC"
+        ],
+        "footprint": "Package_DIP:DIP-8_W7.62mm"
+      },
+      {
+        "ref": "R1",
+        "kind": "resistor",
+        "value": "1k",
+        "nodes": [
+          "VCC",
+          "DISCH"
+        ],
+        "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+      },
+      {
+        "ref": "R2",
+        "kind": "resistor",
+        "value": "68k",
+        "nodes": [
+          "DISCH",
+          "THRES_TRIG"
+        ],
+        "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+      },
+      {
+        "ref": "C1",
+        "kind": "capacitor",
+        "value": "10uF",
+        "nodes": [
+          "THRES_TRIG",
+          "0"
+        ],
+        "footprint": "Capacitor_THT:CP_Radial_D5.0mm_P2.00mm"
+      },
+      {
+        "ref": "C2",
+        "kind": "capacitor",
+        "value": "0.1uF",
+        "nodes": [
+          "CTRL",
+          "0"
+        ],
+        "footprint": "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P5.00mm"
+      },
+      {
+        "ref": "RLED",
+        "kind": "resistor",
+        "value": "560",
+        "nodes": [
+          "OUT",
+          "LED_ANODE"
+        ],
+        "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+      },
+      {
+        "ref": "DLED1",
+        "kind": "led",
+        "value": "red",
+        "nodes": [
+          "LED_ANODE",
+          "0"
+        ],
+        "footprint": "LED_THT:LED_D5.0mm"
+      }
+    ],
+    "notes": [
+      "LED blinks approximately once per second (frequency ~1 Hz).",
+      "Standard 555 astable configuration with 50% duty cycle approximation.",
+      "CTRL pin bypassed with 0.1 uF for noise immunity.",
+      "Adjustable: change C1 for different blink rates (larger = slower)."
+    ]
+  }
+}

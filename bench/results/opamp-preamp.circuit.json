@@ -1,0 +1,77 @@
+{
+  "title": "Non-Inverting Op-Amp Amplifier (Gain=10)",
+  "type": "opamp_amplifier",
+  "supplyVoltage": 9,
+  "nodes": [
+    "VIN",
+    "VOUT",
+    "VCC",
+    "INV",
+    "0"
+  ],
+  "components": [
+    {
+      "ref": "V1",
+      "kind": "voltage_source",
+      "value": "9V",
+      "nodes": [
+        "VCC",
+        "0"
+      ],
+      "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"
+    },
+    {
+      "ref": "R1",
+      "kind": "resistor",
+      "value": "1k",
+      "nodes": [
+        "INV",
+        "0"
+      ],
+      "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+    },
+    {
+      "ref": "R2",
+      "kind": "resistor",
+      "value": "9.1k",
+      "nodes": [
+        "INV",
+        "VOUT"
+      ],
+      "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+    },
+    {
+      "ref": "XU1",
+      "kind": "opamp",
+      "value": "LM358",
+      "nodes": [
+        "VIN",
+        "INV",
+        "VOUT",
+        "VCC",
+        "0"
+      ],
+      "footprint": "Package_DIP:DIP-8_W7.62mm"
+    }
+  ],
+  "notes": [
+    "Single-supply non-inverting amplifier: gain = 1 + R2/R1 ≈ 10.1. VIN is the input terminal (signal + gnd). VOUT is the output terminal. Supply is 9 V from V1."
+  ],
+  "schematic": {
+    "version": 1,
+    "topology": "non_inverting_amplifier",
+    "primaryRef": "XU1",
+    "externalTerminals": [
+      {
+        "node": "VIN",
+        "side": "left",
+        "label": "VIN"
+      },
+      {
+        "node": "VOUT",
+        "side": "right",
+        "label": "VOUT"
+      }
+    ]
+  }
+}

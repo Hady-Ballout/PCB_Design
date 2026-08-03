@@ -1,0 +1,88 @@
+{
+  "title": "ESP32 Pushbutton LED",
+  "type": "microcontroller_io",
+  "supplyVoltage": 3.3,
+  "nodes": [
+    "VIN_barrel",
+    "3V3_net",
+    "GPIO4_btn",
+    "GPIO2_led",
+    "LED_AN",
+    "0"
+  ],
+  "components": [
+    {
+      "ref": "V1",
+      "kind": "voltage_source",
+      "value": "5V",
+      "nodes": [
+        "VIN_barrel",
+        "0"
+      ],
+      "footprint": "Connector_BarrelJack:BarrelJack_CUI_PJ-063AH_Horizontal"
+    },
+    {
+      "ref": "U1",
+      "kind": "esp32",
+      "value": "DevKit V1",
+      "nodes": [
+        "3V3_net",
+        "0",
+        "VIN_barrel",
+        "NC_U1_4",
+        "GPIO2_led",
+        "GPIO4_btn",
+        "NC_U1_7",
+        "NC_U1_8",
+        "NC_U1_9",
+        "NC_U1_10",
+        "NC_U1_11",
+        "NC_U1_12"
+      ],
+      "footprint": "Module:ESP32-DevKitC"
+    },
+    {
+      "ref": "SW1",
+      "kind": "pushbutton",
+      "value": "6x6mm tactile",
+      "nodes": [
+        "GPIO4_btn",
+        "0"
+      ],
+      "footprint": "Button_Switch_THT:SW_Tactile_SPST_Angled_PTS645Vx39-2_L6.0mm_W3.5mm"
+    },
+    {
+      "ref": "R2",
+      "kind": "resistor",
+      "value": "10k",
+      "nodes": [
+        "3V3_net",
+        "GPIO4_btn"
+      ],
+      "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+    },
+    {
+      "ref": "R1",
+      "kind": "resistor",
+      "value": "220",
+      "nodes": [
+        "GPIO2_led",
+        "LED_AN"
+      ],
+      "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+    },
+    {
+      "ref": "DLED1",
+      "kind": "led",
+      "value": "red",
+      "nodes": [
+        "LED_AN",
+        "0"
+      ],
+      "footprint": "LED_THT:LED_D5.0mm"
+    }
+  ],
+  "notes": [
+    "Barrel jack supplies 5 V to VIN. On-board regulator provides 3.3 V for LED and pull-up. Button with external pull-up on GPIO4. LED on GPIO2 with 220 Ω resistor."
+  ]
+}

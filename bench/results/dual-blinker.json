@@ -1,0 +1,242 @@
+{
+  "name": "dual-blinker",
+  "prompt": "Build a board with two LEDs on one 9 V supply: one blinking every 2 seconds, the other every 2.5 seconds.",
+  "assertions": [
+    "count(timer_555) == 2",
+    "timer_555[0].TRIG == timer_555[0].THRES",
+    "timer_555[1].TRIG == timer_555[1].THRES",
+    "timer_555[0].TRIG != timer_555[1].TRIG",
+    "timer_555[0].DISCH != timer_555[1].DISCH",
+    "count(led) == 2"
+  ],
+  "model": "deepseek-v4-pro",
+  "error": null,
+  "durationMs": 137022,
+  "requests": 3,
+  "usage": {
+    "input": 2423,
+    "output": 8341,
+    "cacheRead": 15360,
+    "cacheWrite": 0
+  },
+  "calls": [
+    {
+      "input": 7,
+      "output": 5757,
+      "cacheRead": 14592,
+      "status": 200,
+      "ms": 87820
+    },
+    {
+      "input": 1111,
+      "output": 2133,
+      "cacheRead": 768,
+      "status": 200,
+      "ms": 40750
+    },
+    {
+      "input": 1305,
+      "output": 451,
+      "cacheRead": 0,
+      "status": 200,
+      "ms": 8444
+    }
+  ],
+  "circuit": {
+    "title": "Dual LED Blinker with 555 Timers",
+    "type": "astable",
+    "supplyVoltage": 9,
+    "nodes": [
+      "9V",
+      "OUT1",
+      "OUT2",
+      "T1_C",
+      "T2_C",
+      "DISCH1",
+      "DISCH2",
+      "CTRL1",
+      "CTRL2",
+      "LED1_K",
+      "LED2_K",
+      "0"
+    ],
+    "components": [
+      {
+        "ref": "V1",
+        "kind": "voltage_source",
+        "value": "9V",
+        "nodes": [
+          "9V",
+          "0"
+        ],
+        "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"
+      },
+      {
+        "ref": "C3",
+        "kind": "capacitor",
+        "value": "100uF",
+        "nodes": [
+          "9V",
+          "0"
+        ],
+        "footprint": "Capacitor_THT:CP_Radial_D5.0mm_P2.00mm"
+      },
+      {
+        "ref": "XU1",
+        "kind": "timer_555",
+        "value": "555",
+        "nodes": [
+          "0",
+          "T1_C",
+          "OUT1",
+          "9V",
+          "CTRL1",
+          "T1_C",
+          "DISCH1",
+          "9V"
+        ],
+        "footprint": "Package_DIP:DIP-8_W7.62mm"
+      },
+      {
+        "ref": "R1_1",
+        "kind": "resistor",
+        "value": "10k",
+        "nodes": [
+          "9V",
+          "DISCH1"
+        ],
+        "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+      },
+      {
+        "ref": "R2_1",
+        "kind": "resistor",
+        "value": "10k",
+        "nodes": [
+          "DISCH1",
+          "T1_C"
+        ],
+        "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+      },
+      {
+        "ref": "C1_1",
+        "kind": "capacitor",
+        "value": "100uF",
+        "nodes": [
+          "T1_C",
+          "0"
+        ],
+        "footprint": "Capacitor_THT:CP_Radial_D5.0mm_P2.00mm"
+      },
+      {
+        "ref": "C_CTRL1",
+        "kind": "capacitor",
+        "value": "10nF",
+        "nodes": [
+          "CTRL1",
+          "0"
+        ],
+        "footprint": "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P5.00mm"
+      },
+      {
+        "ref": "DLED1",
+        "kind": "led",
+        "value": "Red",
+        "nodes": [
+          "9V",
+          "LED1_K"
+        ],
+        "footprint": "LED_THT:LED_D5.0mm"
+      },
+      {
+        "ref": "R_LED1",
+        "kind": "resistor",
+        "value": "470",
+        "nodes": [
+          "LED1_K",
+          "OUT1"
+        ],
+        "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+      },
+      {
+        "ref": "XU2",
+        "kind": "timer_555",
+        "value": "555",
+        "nodes": [
+          "0",
+          "T2_C",
+          "OUT2",
+          "9V",
+          "CTRL2",
+          "T2_C",
+          "DISCH2",
+          "9V"
+        ],
+        "footprint": "Package_DIP:DIP-8_W7.62mm"
+      },
+      {
+        "ref": "R1_2",
+        "kind": "resistor",
+        "value": "10k",
+        "nodes": [
+          "9V",
+          "DISCH2"
+        ],
+        "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+      },
+      {
+        "ref": "R2_2",
+        "kind": "resistor",
+        "value": "13k",
+        "nodes": [
+          "DISCH2",
+          "T2_C"
+        ],
+        "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+      },
+      {
+        "ref": "C1_2",
+        "kind": "capacitor",
+        "value": "100uF",
+        "nodes": [
+          "T2_C",
+          "0"
+        ],
+        "footprint": "Capacitor_THT:CP_Radial_D5.0mm_P2.00mm"
+      },
+      {
+        "ref": "C_CTRL2",
+        "kind": "capacitor",
+        "value": "10nF",
+        "nodes": [
+          "CTRL2",
+          "0"
+        ],
+        "footprint": "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P5.00mm"
+      },
+      {
+        "ref": "DLED2",
+        "kind": "led",
+        "value": "Red",
+        "nodes": [
+          "9V",
+          "LED2_K"
+        ],
+        "footprint": "LED_THT:LED_D5.0mm"
+      },
+      {
+        "ref": "R_LED2",
+        "kind": "resistor",
+        "value": "470",
+        "nodes": [
+          "LED2_K",
+          "OUT2"
+        ],
+        "footprint": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal"
+      }
+    ],
+    "notes": [
+      "Two independent 555 astable oscillators blink LEDs at ~2s and ~2.5s periods.",
+      "All parts are through-hole for easy construction."
+    ]
+  }
+}
