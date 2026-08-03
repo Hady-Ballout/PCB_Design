@@ -13,11 +13,11 @@ status: core
 
 # Sound sensor (KY-038)
 
-> **STUB** — the frontmatter above is generated and authoritative. The prose
-> below is not written yet. Fill it in when you use this part, then delete this
-> callout: that is what flips the part to "written" in the index.
-
-TODO: one sentence on what this part is and when to reach for it.
+An electret-microphone breakout with an onboard comparator, giving both a
+digital "loud enough" flag (`DO`, threshold set by the board's trim pot) and a
+raw analog envelope (`AO`). Reach for it for clap detectors, noise-triggered
+alarms, or anywhere you want a simple loudness gate without doing audio ADC
+sampling yourself.
 
 ## Pin contract
 
@@ -25,26 +25,42 @@ TODO: one sentence on what this part is and when to reach for it.
 
 | # | Pin | Role |
 |---|-----|------|
-| 1 | `VCC` | TODO |
-| 2 | `GND` | TODO |
-| 3 | `DO` | TODO |
-| 4 | `AO` | TODO |
+| 1 | `VCC` | Supply, typically 3.3–5 V. |
+| 2 | `GND` | Ground. Almost always `"0"`. |
+| 3 | `DO` | Digital output, high (or low, depending on board) when sound exceeds the trim-pot threshold. |
+| 4 | `AO` | Analog output, the raw microphone envelope. |
 
 Ground is `"0"`. For a pin you deliberately leave unconnected use
 `"NC_<REF>_<pinNumber>"`.
 
 ## Value
 
-TODO: what the `value` string means for this kind.
+Free-form part number, e.g. `"KY-038"`. This kind is `wiring_only`: the value
+documents the part but doesn't drive a SPICE model.
 
 ## Wiring rules
 
-TODO: what must be true for this part to work.
+Both `DO` and `AO` are already-driven outputs — wire whichever one you need to
+a GPIO or ADC pin respectively; the one you don't use can be left as
+`"NC_<REF>_<pinNumber>"`. `VCC` and `GND` go to supply and ground.
 
 ## Worked example
 
-TODO: a minimal component entry, copy-pasteable.
+Using only the digital threshold output:
+
+```json
+{ "ref": "U1", "kind": "sound_sensor", "value": "KY-038",
+  "nodes": ["VCC", "0", "LOUD", "NC_U1_4"] }
+```
 
 ## Gotchas
 
-TODO: what goes wrong most often.
+- **A wrong pin order still validates.** Swap `DO` and `AO` and you'll read a
+  digital high/low on what firmware expects to be a smoothly varying analog
+  signal, or vice versa — the board still routes and simulates clean. Copy the
+  order from the table above.
+- The digital threshold is set by a physical trim pot on the module itself;
+  nothing in this component model represents that pot, so "it never triggers"
+  is usually a hardware trim issue, not a wiring one.
+- Leaving both `DO` and `AO` unconnected (or on single-pin nets) means the
+  sensor reads nothing useful — `single_pin_net` flags a used-but-dangling pin.

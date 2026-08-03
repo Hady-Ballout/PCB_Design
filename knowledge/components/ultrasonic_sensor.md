@@ -13,11 +13,10 @@ status: core
 
 # Ultrasonic sensor (HC-SR04)
 
-> **STUB** — the frontmatter above is generated and authoritative. The prose
-> below is not written yet. Fill it in when you use this part, then delete this
-> callout: that is what flips the part to "written" in the index.
-
-TODO: one sentence on what this part is and when to reach for it.
+A distance-ranging module: a `TRIG` pulse fires a chirp, and `ECHO` goes high
+for a duration proportional to the round-trip time. Reach for it for
+obstacle-avoidance robots, parking sensors, and non-contact level/proximity
+measurement.
 
 ## Pin contract
 
@@ -25,26 +24,55 @@ TODO: one sentence on what this part is and when to reach for it.
 
 | # | Pin | Role |
 |---|-----|------|
-| 1 | `VCC` | TODO |
-| 2 | `TRIG` | TODO |
-| 3 | `ECHO` | TODO |
-| 4 | `GND` | TODO |
+| 1 | `VCC` | Supply, 5 V. |
+| 2 | `TRIG` | Trigger input from a GPIO — pulse it high to start a ranging cycle. |
+| 3 | `ECHO` | Echo output back to a GPIO — high for the round-trip duration, at 5 V logic level. |
+| 4 | `GND` | Ground. Almost always `"0"`. |
 
 Ground is `"0"`. For a pin you deliberately leave unconnected use
 `"NC_<REF>_<pinNumber>"`.
 
 ## Value
 
-TODO: what the `value` string means for this kind.
+Free-form part number, e.g. `"HC-SR04"`. This kind is `wiring_only`: the value
+documents the part but doesn't drive a SPICE model — the ranging behaviour
+isn't simulated.
 
 ## Wiring rules
 
-TODO: what must be true for this part to work.
+`TRIG` and `ECHO` are two separate GPIO connections, not a single bus — do not
+tie them together. The HC-SR04 runs its logic at 5 V (this part's `VCC` is
+5 V, not 3.3 V), so **`ECHO` driving a 3.3 V-only MCU input (Raspberry Pi,
+ESP32) needs a level shifter or a resistor divider** dropping it to a safe
+voltage before the MCU pin. Note the `voltage_domain_overdrive` rule only
+checks voltage flowing *from* an MCU's GPIO pin into another part — it does
+not model a module like this one driving 5 V back into an MCU input, so the
+board will validate clean even without the level shifter. Do not rely on the
+checker here; an Arduino Uno's 5 V logic tolerates `ECHO` directly, but a
+3.3 V MCU does not.
 
 ## Worked example
 
-TODO: a minimal component entry, copy-pasteable.
+Wired to an MCU that tolerates 5 V logic (e.g. Arduino Uno):
+
+```json
+{ "ref": "U1", "kind": "ultrasonic_sensor", "value": "HC-SR04",
+  "nodes": ["VCC", "TRIG", "ECHO", "0"] }
+```
+
+For a 3.3 V-logic MCU, insert a divider between `ECHO` and the MCU input —
+see [resistor.md](resistor.md) — rather than wiring `ECHO` straight to the pin.
 
 ## Gotchas
 
-TODO: what goes wrong most often.
+- **A wrong pin order still validates.** Swap `TRIG` and `ECHO` and the board
+  routes and looks fine, but the trigger pulse goes nowhere and the "echo"
+  input is actually driving the sensor's trigger. Copy the order from the
+  table above.
+- Driving `ECHO` directly into a 3.3 V-only MCU is the single most common
+  real-world HC-SR04 mistake — it works intermittently and then damages the
+  input pin. The topology checker will not catch it for you (see above), so
+  double-check this one by hand.
+- `TRIG` and `ECHO` must be genuinely separate GPIO nets; some four-pin
+  "ultrasonic" breakouts use a single shared I/O pin, but the HC-SR04 modeled
+  here does not.

@@ -13,36 +13,53 @@ status: core
 
 # Thermistor
 
-> **STUB** — the frontmatter above is generated and authoritative. The prose
-> below is not written yet. Fill it in when you use this part, then delete this
-> callout: that is what flips the part to "written" in the index.
-
-TODO: one sentence on what this part is and when to reach for it.
+An NTC (or PTC) resistive temperature sensor: resistance changes with
+temperature. Reach for it for a cheap analog temperature input where you don't
+need the linear, calibrated output of a [temp_sensor.md](temp_sensor.md) module.
 
 ## Pin contract
 
-`nodes` must list exactly 2 net names, in this order:
+`nodes` must list exactly 2 net names. Order does not matter — `pin_order` is
+`null`, same as [resistor.md](resistor.md): a thermistor is a symmetric
+two-terminal part with no polarity.
 
-| # | Pin | Role |
-|---|-----|------|
-| 1 | pin 1 | TODO |
-| 2 | pin 2 | TODO |
-
-Ground is `"0"`. For a pin you deliberately leave unconnected use
-`"NC_<REF>_<pinNumber>"`.
+Ground is `"0"`.
 
 ## Value
 
-TODO: what the `value` string means for this kind.
+Ohms, parsed exactly like a resistor's (`parseResistance` in
+`topologyRules.js`; also consumed by `resistiveValue` in `pcbGenerator.js`).
+`preferred_values` in this file's frontmatter is `["10k"]` — a common NTC
+nominal resistance at 25°C, and the value this kind is simulated with is a
+**fixed** resistance, not a temperature-dependent model. If the string fails
+to parse, `pcbGenerator.js` falls back to 10k.
 
 ## Wiring rules
 
-TODO: what must be true for this part to work.
+Like the photoresistor, a thermistor has no output pin — pair it with a fixed
+resistor in a divider and sample the midpoint with an ADC. For a common 10 k
+NTC, a 10 k fixed resistor centers the divider near room temperature so the
+reading has headroom in both directions. Thermistor on the ground side gives a
+voltage that *falls* as it heats up (NTC resistance drops with heat); on the
+supply side it *rises* with heat.
 
 ## Worked example
 
-TODO: a minimal component entry, copy-pasteable.
+10 k NTC on the ground side of a 10 k fixed resistor:
+
+```json
+{ "ref": "R1", "kind": "resistor",   "value": "10k", "nodes": ["VCC", "SENSE"] },
+{ "ref": "R2", "kind": "thermistor", "value": "10k", "nodes": ["SENSE", "0"] }
+```
 
 ## Gotchas
 
-TODO: what goes wrong most often.
+- **No output pin.** Left unpaired, a thermistor just sits on one net;
+  `single_pin_net` flags that.
+- The simulated resistance is fixed, not temperature-varying — good for
+  checking divider math and range, not for testing thermal response.
+- NTC vs PTC matters for which direction the voltage moves with heat — check
+  the aliases/datasheet before assuming NTC behavior.
+- Two thermistors (or a thermistor and a resistor) sharing both nets sit in
+  parallel, not in series — a flat reading despite temperature swings usually
+  means a net-naming mistake, not a bad part.

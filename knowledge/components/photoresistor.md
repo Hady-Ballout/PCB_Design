@@ -12,36 +12,57 @@ status: core
 
 # Photoresistor (LDR)
 
-> **STUB** — the frontmatter above is generated and authoritative. The prose
-> below is not written yet. Fill it in when you use this part, then delete this
-> callout: that is what flips the part to "written" in the index.
-
-TODO: one sentence on what this part is and when to reach for it.
+A light-dependent resistor: resistance drops as ambient light rises. Reach for
+it for a cheap analog "is it light or dark" input — nightlights, light-seeking
+robots, exposure triggers.
 
 ## Pin contract
 
-`nodes` must list exactly 2 net names, in this order:
+`nodes` must list exactly 2 net names. Order does not matter — `pin_order` is
+`null` because, like [resistor.md](resistor.md), this is a symmetric two-terminal
+part with no anode/cathode distinction.
 
-| # | Pin | Role |
-|---|-----|------|
-| 1 | pin 1 | TODO |
-| 2 | pin 2 | TODO |
-
-Ground is `"0"`. For a pin you deliberately leave unconnected use
-`"NC_<REF>_<pinNumber>"`.
+Ground is `"0"`.
 
 ## Value
 
-TODO: what the `value` string means for this kind.
+Ohms, parsed exactly like a resistor's (`parseResistance` in `topologyRules.js`,
+also used directly by `resistiveValue` in `pcbGenerator.js` for the SPICE
+model) — `"330"`, `"4.7k"`, `"1M"`. It is simulated as a **fixed** resistance at
+that value; there is no dynamic light-level model, so it stands in for the
+LDR's resistance at whatever lighting condition you're designing around.
+Typical LDRs run roughly 200 Ω–1 kΩ in bright light and hundreds of kΩ to
+several MΩ in darkness — `"10k"` is a reasonable mid-light placeholder. If the
+string fails to parse, `pcbGenerator.js` silently falls back to 10k, so use a
+plain numeric form.
 
 ## Wiring rules
 
-TODO: what must be true for this part to work.
+A photoresistor has no output pin of its own — you read light level as a
+voltage by pairing it with a fixed resistor in a divider, then sampling the
+midpoint with an ADC. Put the fixed resistor at roughly the LDR's
+mid-brightness resistance (often ~10 k) so the midpoint swings through a
+useful range instead of pinning near one rail. Which leg carries the LDR
+decides polarity: LDR on top (supply side) gives a rising voltage with more
+light; LDR on bottom (ground side) gives a falling voltage with more light.
 
 ## Worked example
 
-TODO: a minimal component entry, copy-pasteable.
+LDR on the ground side of a 10 k fixed resistor, midpoint to an ADC pin —
+voltage rises as it gets darker:
+
+```json
+{ "ref": "R1", "kind": "resistor",      "value": "10k", "nodes": ["VCC", "SENSE"] },
+{ "ref": "R2", "kind": "photoresistor", "value": "10k", "nodes": ["SENSE", "0"] }
+```
 
 ## Gotchas
 
-TODO: what goes wrong most often.
+- **It is not a sensor module** — there's no VCC/GND/OUT triple. Without the
+  divider partner it just sits there; `single_pin_net` will flag a photoresistor
+  left with only one net connected.
+- Two LDRs (or an LDR and a resistor) sharing both nets end up in parallel, not
+  in series in a divider — check net names if the reading looks flat.
+- The simulated value is static, so the schematic simulator will never show a
+  changing reading — it's only useful for verifying the divider math, not for
+  testing light response.

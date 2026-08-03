@@ -13,11 +13,10 @@ status: core
 
 # Gas sensor (MQ-2)
 
-> **STUB** — the frontmatter above is generated and authoritative. The prose
-> below is not written yet. Fill it in when you use this part, then delete this
-> callout: that is what flips the part to "written" in the index.
-
-TODO: one sentence on what this part is and when to reach for it.
+A combustible-gas/smoke breakout module with both a digital threshold output
+and an analog output. Reach for it for smoke or LPG/propane/methane
+detection. It is `wiring_only` — the engine places and wires it but does not
+simulate it.
 
 ## Pin contract
 
@@ -25,26 +24,49 @@ TODO: one sentence on what this part is and when to reach for it.
 
 | # | Pin | Role |
 |---|-----|------|
-| 1 | `VCC` | TODO |
-| 2 | `GND` | TODO |
-| 3 | `DO` | TODO |
-| 4 | `AO` | TODO |
+| 1 | `VCC` | Supply. |
+| 2 | `GND` | Ground. Almost always `"0"`. |
+| 3 | `DO` | Digital output — trips high/low past an onboard trim-pot threshold. |
+| 4 | `AO` | Analog output — proportional to gas concentration. |
 
 Ground is `"0"`. For a pin you deliberately leave unconnected use
 `"NC_<REF>_<pinNumber>"`.
 
 ## Value
 
-TODO: what the `value` string means for this kind.
+Free-form part number, e.g. `"MQ-2"`. Since this kind is `wiring_only`, the
+value has no effect on simulation — the netlist emits only a comment line for
+this part.
 
 ## Wiring rules
 
-TODO: what must be true for this part to work.
+- `DO` goes to a digital MCU pin, `AO` to an analog-capable one. Wire
+  whichever output your circuit actually reads — you don't need both.
+- The MQ-2's sensing element is a heated resistive film; real modules draw
+  meaningfully more current at `VCC` than a typical breakout, and the heater
+  needs 5V to reach operating temperature — do not expect it to work at
+  3.3V. `gas_sensor` isn't in the engine's `MAX_INPUT_VOLTS` table, so no
+  topology rule enforces this; get the supply right by hand.
+- `VCC`/`GND` are power pins; at least one of `DO`/`AO` must be wired to a
+  real signal, or the part does nothing — see the `dead_active_device`
+  gotcha below.
 
 ## Worked example
 
-TODO: a minimal component entry, copy-pasteable.
+```json
+{ "ref": "U4", "kind": "gas_sensor", "value": "MQ-2", "nodes": ["VCC", "0", "D3", "NC_U4_4"] }
+```
+
+Here only the digital threshold output is used; the analog pin is
+deliberately left unconnected.
 
 ## Gotchas
 
-TODO: what goes wrong most often.
+- **A wrong pin order still validates.** Swap `DO` and `AO` and you'll read
+  the wrong signal type on the wrong MCU pin type — a clean board that
+  behaves nothing like intended.
+- If both `DO` and `AO` are left `NC_...`, the `dead_active_device` rule
+  fires: a `wiring_only` part with no live signal pin "does nothing in this
+  circuit."
+- Real MQ-2 modules need tens of seconds to minutes of warm-up before
+  readings stabilize — not something this repo models or checks.

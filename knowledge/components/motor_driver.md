@@ -13,11 +13,10 @@ status: core
 
 # Motor driver (L298N)
 
-> **STUB** — the frontmatter above is generated and authoritative. The prose
-> below is not written yet. Fill it in when you use this part, then delete this
-> callout: that is what flips the part to "written" in the index.
-
-TODO: one sentence on what this part is and when to reach for it.
+A dual H-bridge module: two independently switched output channels that can
+each drive a DC motor forward, backward, or brake from GPIO-level control
+signals. Reach for it any time a motor draws more current than a GPIO pin can
+source — which is always.
 
 ## Pin contract
 
@@ -25,34 +24,62 @@ TODO: one sentence on what this part is and when to reach for it.
 
 | # | Pin | Role |
 |---|-----|------|
-| 1 | `VS` | TODO |
-| 2 | `GND` | TODO |
-| 3 | `ENA` | TODO |
-| 4 | `IN1` | TODO |
-| 5 | `IN2` | TODO |
-| 6 | `ENB` | TODO |
-| 7 | `IN3` | TODO |
-| 8 | `IN4` | TODO |
-| 9 | `OUT1` | TODO |
-| 10 | `OUT2` | TODO |
-| 11 | `OUT3` | TODO |
-| 12 | `OUT4` | TODO |
+| 1 | `VS` | Motor supply, 5–35 V. Separate from logic power. |
+| 2 | `GND` | Ground, shared between motor and logic sides. |
+| 3 | `ENA` | Enable channel A (PWM speed control for channel A). Tie high for full speed if unused. |
+| 4 | `IN1` | Channel A direction input 1, from an MCU GPIO. |
+| 5 | `IN2` | Channel A direction input 2, from an MCU GPIO. |
+| 6 | `ENB` | Enable channel B (PWM speed control for channel B). |
+| 7 | `IN3` | Channel B direction input 1, from an MCU GPIO. |
+| 8 | `IN4` | Channel B direction input 2, from an MCU GPIO. |
+| 9 | `OUT1` | Channel A output +, to one motor terminal. |
+| 10 | `OUT2` | Channel A output −, to the other motor terminal. |
+| 11 | `OUT3` | Channel B output +, to one motor terminal. |
+| 12 | `OUT4` | Channel B output −, to the other motor terminal. |
 
 Ground is `"0"`. For a pin you deliberately leave unconnected use
 `"NC_<REF>_<pinNumber>"`.
 
 ## Value
 
-TODO: what the `value` string means for this kind.
+Free-form part number. Use `"L298N"`.
 
 ## Wiring rules
 
-TODO: what must be true for this part to work.
+A [dc_motor.md](dc_motor.md) (or vibration motor) belongs across a channel's
+two `OUT` pins, never straight on a GPIO net. `IN1`–`IN4` and `ENA`/`ENB`
+connect directly to MCU GPIOs with no series resistor needed — the module's
+own input buffering handles that.
+
+`missing_flyback_diode` skips motors on `OUT1`–`OUT4`: the L298N integrates
+its own protection diodes on every output, so you do not add a discrete
+flyback diode across a motor wired to this part (unlike a bare
+[bjt_npn.md](bjt_npn.md) or [mosfet_n.md](mosfet_n.md) switch — see
+[relay_module.md](relay_module.md) for a driver kind that does *not* get
+this exemption).
 
 ## Worked example
 
-TODO: a minimal component entry, copy-pasteable.
+Two motors, one per channel, both run at full speed (enables tied to the 5 V
+logic rail) with direction set by GPIOs:
+
+```json
+{ "ref": "U1", "kind": "motor_driver", "value": "L298N",
+  "nodes": ["VMOTOR", "0", "5V", "GPIO17", "GPIO18", "5V", "GPIO27", "GPIO22",
+            "MOTOR_A_1", "MOTOR_A_2", "MOTOR_B_1", "MOTOR_B_2"] },
+{ "ref": "M1", "kind": "dc_motor", "value": "130", "nodes": ["MOTOR_A_1", "MOTOR_A_2"] },
+{ "ref": "M2", "kind": "dc_motor", "value": "130", "nodes": ["MOTOR_B_1", "MOTOR_B_2"] }
+```
 
 ## Gotchas
 
-TODO: what goes wrong most often.
+- **A wrong pin order still validates.** `fixed_pin_node_count` only checks
+  the count. Swap `IN1` and `IN2` and the board routes and passes DRC — the
+  motor just spins the wrong direction, or channel A ends up wired to
+  channel B's enable. Copy the order from the table above.
+- `VS` is the motor supply, not the logic supply — do not tie it to the same
+  3.3 V/5 V rail the MCU runs on unless the motor genuinely wants that
+  voltage; most small motors want 6–12 V here.
+- Leaving `ENA`/`ENB` floating leaves the channel disabled (or in an
+  undefined PWM state depending on the board's pull resistors) — always tie
+  them high or drive them from a GPIO/PWM pin.
