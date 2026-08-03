@@ -26,6 +26,7 @@ To add a component that does not exist yet, see
 | [`adc_module`](adc_module.md) | ADC (MCP3008) | Drivers & interface ICs | `CH0, CH1, CH2, CH3, CH4, CH5, CH6, CH7, DGND, CS, DIN, DOUT, CLK, AGND, VREF, VDD` | ✅ |
 | [`arduino_uno`](arduino_uno.md) | Arduino Uno | Boards | `5V, 3V3, GND, VIN, D0, D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11, D12, D13, A0, A1, A2, A3, A4, A5` | ✅ |
 | [`baro_sensor`](baro_sensor.md) | Barometric sensor (BMP280, I2C) | Sensors | `VCC, GND, SCL, SDA` | ✅ |
+| [`barrel_jack`](barrel_jack.md) | DC barrel jack | Connectors | `VIN, GND` | — |
 | [`bjt_npn`](bjt_npn.md) | NPN transistor | Transistors | `collector, base, emitter` | ✅ |
 | [`bjt_pnp`](bjt_pnp.md) | PNP transistor | Transistors | `collector, base, emitter` | ✅ |
 | [`bridge_rectifier`](bridge_rectifier.md) | Bridge rectifier | Diodes & LEDs | `AC1, AC2, V+, V-` | ✅ |
@@ -61,6 +62,7 @@ To add a component that does not exist yet, see
 | [`opamp`](opamp.md) | Op amp | Analog ICs | `IN+, IN-, OUT, V+, V-` | ✅ |
 | [`optocoupler`](optocoupler.md) | Optocoupler (PC817) | Drivers & interface ICs | `A, K, E, C` | ✅ |
 | [`photoresistor`](photoresistor.md) | Photoresistor (LDR) | Sensors | 2 pins, no contract | ✅ |
+| [`pin_header`](pin_header.md) | Pin header | Connectors | 2 pins, no contract | — |
 | [`pir_sensor`](pir_sensor.md) | PIR motion sensor | Sensors | `VCC, OUT, GND` | ✅ |
 | [`potentiometer`](potentiometer.md) | Potentiometer | Passives | `end A, wiper, end B` | ✅ |
 | [`pushbutton`](pushbutton.md) | Pushbutton | Switches | `terminal 1, terminal 2` | ✅ |
@@ -85,6 +87,7 @@ To add a component that does not exist yet, see
 | [`stepper_motor`](stepper_motor.md) | Stepper motor (28BYJ-48) | Actuators & motors | `A, B, C, D, COM` | ✅ |
 | [`switch_spdt`](switch_spdt.md) | SPDT switch | Switches | `common, throw A, throw B` | ✅ |
 | [`temp_sensor`](temp_sensor.md) | Temperature sensor | Sensors | `VCC, OUT, GND` | ✅ |
+| [`terminal_block`](terminal_block.md) | Screw terminal block | Connectors | 2 pins, no contract | — |
 | [`thermistor`](thermistor.md) | Thermistor | Sensors | 2 pins, no contract | ✅ |
 | [`timer_555`](timer_555.md) | 555 timer | Analog ICs | `GND, TRIG, OUT, RESET, CTRL, THRES, DISCH, VCC` | ✅ |
 | [`ua741`](ua741.md) | Op amp (uA741) | Analog ICs | `OFS1, IN-, IN+, V-, OFS2, OUT, V+, NC` | ✅ |
@@ -93,4 +96,4 @@ To add a component that does not exist yet, see
 | [`voltage_source`](voltage_source.md) | Voltage source | Sources | 2 pins, no contract | ✅ |
 | [`zener`](zener.md) | Zener diode | Diodes & LEDs | `anode, cathode` | ✅ |
 
-69 kinds.
+72 kinds.

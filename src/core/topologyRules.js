@@ -16,6 +16,7 @@
 
 import {
   COMPOUND_SPICE_KINDS,
+  CONNECTOR_KINDS,
   DEFAULT_PIN_COUNT_BY_KIND,
   FIXED_PIN_NAMES,
   MCU_KINDS,
@@ -998,6 +999,11 @@ const TOPOLOGY_RULES = [
       const found = [];
       for (const part of circuit.components) {
         if (!MCU_KINDS.has(part.kind) && !WIRING_ONLY_KINDS.has(part.kind)) continue;
+        // A power connector legitimately touches nothing but power and ground:
+        // that IS its job. Without this the rule fires on any barrel jack or
+        // terminal block, but only on boards that also carry an MCU (which is
+        // what populates graph.supplyNets) — inconsistent as well as wrong.
+        if (CONNECTOR_KINDS.has(part.kind)) continue;
         const live = (part.nodes ?? [])
           .map((node, index) => ({ net: String(node), index }))
           .filter(({ net, index }) => net && !isUnconnectedTerminal(net, part.ref, index + 1));

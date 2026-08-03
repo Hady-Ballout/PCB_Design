@@ -235,7 +235,9 @@ export const copperItems = (layout) => {
         label: `pad ${component.ref}.${pad.padNumber ?? pad.pinIndex ?? '?'}`,
         drill: pad.drill,
         annularRing: PAD_ANNULAR_RING,
-        layers: BOTH,
+        // A surface-mount pad is copper on one side only, so it neither
+        // clears against nor shorts to copper on the other layer.
+        layers: pad.type === 'smd' ? layerMask(pad.layer) : BOTH,
         // Over-approximating keep-out circle, used only as the clearance
         // check's cheap reject (see the header).
         geom: { type: 'circle', x: pad.x, y: pad.y, r: padCopperRadius(pad) },

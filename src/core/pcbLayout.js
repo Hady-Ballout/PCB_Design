@@ -114,6 +114,10 @@ const placedBoard = (parts, expandFactor) => {
         diameter: Math.max(placedPad.pad.size.w, placedPad.pad.size.h),
         shape: placedPad.pad.shape,
         size: placedPad.pad.size,
+        // Surface-mount pads are copper on one side only. Absent both fields
+        // the pad is through-hole and spans the stack, which is what every
+        // generated footprint record is.
+        ...(placedPad.pad.type === 'smd' ? { type: 'smd', layer: placedPad.pad.layer || 'top' } : {}),
       })),
     };
   });

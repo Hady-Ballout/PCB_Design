@@ -114,9 +114,13 @@ describe('toGerberArchive files', () => {
   it('writes every Protel-named layer plus a drill file and a README', () => {
     const archive = archiveOf();
 
+    // Paste layers ship even on an all-through-hole board: a constant layer set
+    // is easier for a fab to intake than a conditional one.
     expect(archive.files.map((file) => file.name)).toEqual([
       ...GERBER_NAMES,
       'rc-low-pass.DRL',
+      'rc-low-pass.GTP',
+      'rc-low-pass.GBP',
       'PCB-README.txt',
     ]);
   });
@@ -150,7 +154,7 @@ describe('toGerberArchive files', () => {
     expect(archive.summary).toEqual({
       boardWidth: 20,
       boardHeight: 12,
-      layerFiles: [...GERBER_NAMES, 'rc-low-pass.DRL', 'PCB-README.txt'],
+      layerFiles: [...GERBER_NAMES, 'rc-low-pass.DRL', 'rc-low-pass.GTP', 'rc-low-pass.GBP', 'PCB-README.txt'],
       drillCount: 3,
       netCount: 2,
       componentCount: 1,

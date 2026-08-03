@@ -238,6 +238,10 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
         // circumscribing circle, kept only to size candidate-cell scans.
         shape: padCopperShape(pad),
         radius: padCopperRadius(pad),
+        // Which copper layers this pad exists on. A through-hole pad spans the
+        // stack; a surface-mount pad is one side only, so a trace may neither
+        // land on it nor be blocked by it from the other side.
+        layers: pad.type === 'smd' ? [pad.layer === 'bottom' ? 1 : 0] : [0, 1],
         record: pad,
       });
     }
@@ -361,7 +365,7 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
       netKey: pad.netKey,
       pad,
       island: pad.index,
-      cells: [cell, cell + cellCount],
+      cells: pad.layers.map((layer) => cell + layer * cellCount),
     });
   }
 
@@ -409,7 +413,10 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
    * the grid; `viaNeed` does not, because a via is a disc centred on a grid
    * node and the nearest point of a grid edge to a grid node is a grid node.
    */
-  const stampPad = (shape, owner, half) => {
+  // Copper layer indexes; LAYER_NAMES maps them to 'top' / 'bottom'.
+  const BOTH_LAYERS = [0, 1];
+
+  const stampPad = (shape, owner, half, layers = BOTH_LAYERS) => {
     const traceNeed = Math.hypot(shape.r + rules.clearance + half, halfCell);
     const viaNeed = shape.r + rules.clearance + viaRadius;
     const reach = Math.max(traceNeed, viaNeed);
@@ -422,7 +429,7 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
         const distance = padCoreDistance(shape, cellX(col), cellY(row));
         const cell = cellIndex(col, row);
         if (distance < traceNeed - EPSILON) {
-          for (const layer of BOTH_LAYERS) {
+          for (const layer of layers) {
             const node = cell + layer * cellCount;
             if (blockTrace[node] === FREE) blockTrace[node] = owner;
           }
@@ -477,8 +484,6 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
     }
   };
 
-  const BOTH_LAYERS = [0, 1];
-
   /**
    * Rebuilds both obstacle masks from the copper of every net but `netKey`, for
    * a job about to be laid at half-width `half`.
@@ -490,7 +495,7 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
     for (const pad of pads) {
       if (pad.netKey === netKey) continue;
       const owner = ownerIdFor(pad.netKey);
-      stampPad(pad.shape, owner, half);
+      stampPad(pad.shape, owner, half, pad.layers);
       // The pad's own escape cell, which its net may always use — and may still
       // leave at FULL width in any direction, so this disk is sized on
       // `fullHalf` rather than on whatever the current job necked down to.
@@ -499,7 +504,7 @@ export const routeBoard = ({ components = [], board }, rules = RULES) => {
         cellX(pad.escape.col), cellY(pad.escape.row),
         half + rules.clearance + fullHalf,
         viaRadius + rules.clearance + fullHalf,
-        owner, BOTH_LAYERS,
+        owner, pad.layers,
       );
     }
 

@@ -394,15 +394,24 @@ export const placedSilkStrokes = (component) => {
 
 const LAYER_SIDE = { top: 'top', bottom: 'bottom' };
 
+/**
+ * Is this pad's copper present on `side`? A through-hole pad is on both sides
+ * (a plated barrel joins them); a surface-mount pad is on its own side only.
+ */
+const padOnSide = (pad, side) => pad.type !== 'smd' || (pad.layer || 'top') === side;
+
 const copperLayer = (layout, side) => {
   const file = gerberFile({
     layerComment: `${side === 'top' ? 'Top' : 'Bottom'} copper`,
     fileFunction: side === 'top' ? 'Copper,L1,Top' : 'Copper,L2,Bot',
     boardHeight: layout.board.height,
   });
-  // Through-hole pads and through vias are present on BOTH copper layers.
+  // Through-hole pads and through vias are present on BOTH copper layers;
+  // surface-mount pads only on their own side.
   for (const component of layout.components) {
-    for (const pad of component.pads) paintPad(file, pad, 0);
+    for (const pad of component.pads) {
+      if (padOnSide(pad, side)) paintPad(file, pad, 0);
+    }
   }
   for (const via of layout.vias) file.flashCircle(via.diameter, via.x, via.y);
   for (const trace of layout.traces) {
@@ -431,10 +440,31 @@ const maskLayer = (layout, side) => {
     boardHeight: layout.board.height,
   });
   for (const component of layout.components) {
-    for (const pad of component.pads) paintPad(file, pad, RULES.maskExpansion);
+    for (const pad of component.pads) {
+      if (padOnSide(pad, side)) paintPad(file, pad, RULES.maskExpansion);
+    }
   }
   // Vias are deliberately absent: tenting them keeps solder off the barrels and
   // is what every low-cost vendor does by default.
+  return file.render();
+};
+
+/**
+ * Solder-paste stencil apertures. Surface-mount pads only: a through-hole joint
+ * is wave- or hand-soldered and must not be pasted. The file is emitted even
+ * when empty so the archive's layer set is constant.
+ */
+const pasteLayer = (layout, side) => {
+  const file = gerberFile({
+    layerComment: `${side === 'top' ? 'Top' : 'Bottom'} solder paste (stencil apertures)`,
+    fileFunction: side === 'top' ? 'Paste,Top' : 'Paste,Bot',
+    boardHeight: layout.board.height,
+  });
+  for (const component of layout.components) {
+    for (const pad of component.pads) {
+      if (pad.type === 'smd' && (pad.layer || 'top') === side) paintPad(file, pad, 0);
+    }
+  }
   return file.render();
 };
 
@@ -589,7 +619,8 @@ export const toGerberArchive = (layout, circuit) => {
   const holes = drillHoles(layout);
   const names = [
     `${slug}.GTL`, `${slug}.GBL`, `${slug}.GTS`, `${slug}.GBS`,
-    `${slug}.GTO`, `${slug}.GBO`, `${slug}.GKO`, `${slug}.DRL`, 'PCB-README.txt',
+    `${slug}.GTO`, `${slug}.GBO`, `${slug}.GKO`, `${slug}.DRL`,
+    `${slug}.GTP`, `${slug}.GBP`, 'PCB-README.txt',
   ];
 
   const files = [
@@ -601,7 +632,9 @@ export const toGerberArchive = (layout, circuit) => {
     { name: names[5], data: silkLayer(layout, 'bottom') },
     { name: names[6], data: outlineLayer(layout) },
     { name: names[7], data: drillFile(layout, holes) },
-    { name: names[8], data: readmeFile(layout, circuit, holes, names) },
+    { name: names[8], data: pasteLayer(layout, 'top') },
+    { name: names[9], data: pasteLayer(layout, 'bottom') },
+    { name: names[10], data: readmeFile(layout, circuit, holes, names) },
   ];
 
   return {

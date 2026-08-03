@@ -163,6 +163,15 @@ const PART_GAP = 1; // free columns kept between parts
 // realistic-schematic editor). Absent/empty overrides must reproduce the pure
 // auto-placement byte-for-byte — the two-phase pass below collapses to the
 // original single greedy pass when nothing is pinned.
+/**
+ * Parts whose footprint places copper on the board surface instead of leads
+ * through it. A breadboard seats leads in 2.54mm holes, so these cannot go on
+ * one at all — an 0805 chip resistor is 2mm long and has no leads.
+ */
+const surfaceMountRefs = (components) => components
+  .filter((component) => /_SMD:|:.*_(0402|0603|0805|1206)_|SOIC|SOT-23|QFN|QFP/i.test(String(component?.footprint || '')))
+  .map((component) => component.ref);
+
 export function circuitToBreadboard(circuit, overrides = {}) {
   const components = circuit?.components ?? [];
   const overrideParts = overrides?.parts ?? {};
@@ -751,7 +760,21 @@ export function circuitToBreadboard(circuit, overrides = {}) {
   // policy, board seams) — surfaced as warnings alongside the growth notice
   // above, so every built model carries them without the debug report having
   // to run the check separately.
-  model.warnings.push(...checkPhysicalModel(model));
+  // A breadboard cannot hold surface-mount parts. Say that once, plainly,
+  // instead of emitting occupancy and rail warnings about an imaginary layout —
+  // those describe where leads landed, and these parts have no leads.
+  const smdRefs = surfaceMountRefs(components);
+  if (smdRefs.length) {
+    const listed = smdRefs.slice(0, 6).join(', ');
+    const rest = smdRefs.length > 6 ? ` and ${smdRefs.length - 6} more` : '';
+    model.warnings.push(
+      `${smdRefs.length} surface-mount part${smdRefs.length === 1 ? '' : 's'} (${listed}${rest}) cannot be breadboarded — `
+      + 'they solder flat to the board and have no leads for the holes. This view is approximate for them; '
+      + 'the PCB, 3D and export views are unaffected.',
+    );
+  } else {
+    model.warnings.push(...checkPhysicalModel(model));
+  }
   // Runtime invariant: rebuild connectivity from the physical board and merge
   // any SPLIT/SHORT with the placement-time integrity problems, so an
   // electrically broken board is always visibly flagged, never silent.
