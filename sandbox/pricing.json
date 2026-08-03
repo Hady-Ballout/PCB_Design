@@ -1,0 +1,32 @@
+{
+  "_comment": [
+    "Token prices in USD per million tokens, keyed by model id (prefix match, longest wins).",
+    "",
+    "WHY THIS FILE EXISTS: the Agent SDK reports a `total_cost_usd` per run, computed",
+    "from its own internal rate table. Those rates are not necessarily what the endpoint",
+    "behind ANTHROPIC_BASE_URL actually bills you. The token counts are ground truth;",
+    "the dollars are whatever table you apply. So we apply this one, and it is yours to",
+    "correct.",
+    "",
+    "The DeepSeek rates are official published pricing. They are ~20x cheaper than the",
+    "rates the SDK's own table applies to these models, which is the entire reason this",
+    "file exists: a run the SDK reported as $0.41 actually costs about $0.02.",
+    "",
+    "DeepSeek publishes cache-miss input, cache-hit input and output, but no separate",
+    "cache-write price — cache writes bill at the cache-miss input rate, so cacheWrite",
+    "mirrors input rather than carrying Anthropic's 1.25x write premium.",
+    "",
+    "`cacheRead` matters more than it looks: a typical run here reads ~200k cached tokens",
+    "against ~35k fresh input. At a 120x discount to cache-miss, that 85% of the prompt",
+    "costs almost nothing — which is why fresh input, not total tokens, drives the bill."
+  ],
+  "currency": "USD",
+  "models": {
+    "default": { "input": 5.0, "output": 25.0, "cacheRead": 0.5, "cacheWrite": 6.25, "source": "fallback for an unknown model — deliberately pessimistic" },
+    "deepseek-v4-pro": { "input": 0.435, "output": 0.87, "cacheRead": 0.003625, "cacheWrite": 0.435, "source": "deepseek official pricing" },
+    "deepseek-v4-flash": { "input": 0.14, "output": 0.28, "cacheRead": 0.0028, "cacheWrite": 0.14, "source": "deepseek official pricing" },
+    "claude-sonnet-4-5": { "input": 3.0, "output": 15.0, "cacheRead": 0.3, "cacheWrite": 3.75, "source": "anthropic list price" },
+    "claude-opus-4": { "input": 15.0, "output": 75.0, "cacheRead": 1.5, "cacheWrite": 18.75, "source": "anthropic list price" },
+    "claude-haiku-4-5": { "input": 1.0, "output": 5.0, "cacheRead": 0.1, "cacheWrite": 1.25, "source": "anthropic list price" }
+  }
+}

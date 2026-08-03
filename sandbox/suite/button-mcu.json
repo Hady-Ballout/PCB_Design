@@ -1,0 +1,11 @@
+{
+  "name": "button-mcu",
+  "prompt": "Build a 3.3 V ESP32 board with a pushbutton on a GPIO input and an LED on a different GPIO, powered from a barrel jack.",
+  "notes": "Tests CLAUDE.md step 5 — rules that fire on combinations rather than on one part. `pushbutton_no_pull` only fires when the button sits on a net the graph knows is a GPIO, so the button must actually reach the MCU; a button switching an LED directly is a legitimate design that never triggers it. `led_no_series_resistor` applies regardless. An earlier version of this case asked for a plain 5 V button-and-LED board and asserted two resistors; the agent correctly built button → resistor → LED in series and the case was wrong, not the board.",
+  "assertions": [
+    "count(esp32) == 1",
+    "count(pushbutton) >= 1",
+    "count(led) >= 1",
+    "count(resistor) >= 2"
+  ]
+}

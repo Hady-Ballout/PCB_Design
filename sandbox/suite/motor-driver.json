@@ -1,0 +1,10 @@
+{
+  "name": "motor-driver",
+  "prompt": "Build a 12 V board where a microcontroller GPIO switches a DC motor on and off through an N-channel MOSFET. The control signal arrives on a pin header.",
+  "notes": "Tests combination rules from CLAUDE.md step 5: missing_flyback_diode across the motor and mosfet_gate_no_pulldown on a gate that would otherwise float while the MCU is in reset.",
+  "assertions": [
+    "count(dc_motor) >= 1",
+    "count(mosfet_n) >= 1",
+    "count(diode) + count(schottky) >= 1"
+  ]
+}

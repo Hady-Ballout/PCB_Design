@@ -1,0 +1,13 @@
+{
+  "name": "dual-blinker",
+  "prompt": "Build a board with two LEDs on one 9 V supply: one blinking every 2 seconds, the other every 2.5 seconds.",
+  "notes": "Two independent 555 astables sharing a rail. Tests whether the agent suffixes nets per stage instead of letting the two blocks short together \u2014 the failure mode is CT1/CT2 both being called CT.",
+  "assertions": [
+    "count(timer_555) == 2",
+    "timer_555[0].TRIG == timer_555[0].THRES",
+    "timer_555[1].TRIG == timer_555[1].THRES",
+    "timer_555[0].TRIG != timer_555[1].TRIG",
+    "timer_555[0].DISCH != timer_555[1].DISCH",
+    "count(led) == 2"
+  ]
+}

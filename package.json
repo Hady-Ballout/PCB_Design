@@ -12,9 +12,12 @@
     "knowledge": "node scripts/build-component-docs.mjs",
     "knowledge:check": "node scripts/build-component-docs.mjs --check",
     "preview": "vite preview --host 127.0.0.1 --configLoader native",
+    "sandbox": "node sandbox/cli.mjs",
+    "sandbox:eval": "node sandbox/eval.mjs",
     "test": "vitest run --configLoader runner"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.220",
     "@vitejs/plugin-react": "^5.0.0",
     "@xyflow/react": "^12.11.1",
     "animejs": "^4.5.0",

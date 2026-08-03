@@ -7,4 +7,12 @@ coverage/
 .env
 .env.local
 .env.*.local
-mcp/.artifacts/
+.env.deepseek
+
+# Scratch circuit JSON and other local-only working files.
+local/
+
+# Sandbox run workspaces and eval reports. Each run holds a full snapshot of the
+# engine and the knowledge base, so these are large and entirely reproducible.
+sandbox/runs/
+sandbox/results/

@@ -1,0 +1,9 @@
+{
+  "name": "rc-filter",
+  "prompt": "Build a passive RC low-pass filter with a 1 kHz cutoff, fed from a 5 V supply, with screw terminals for the input and the output.",
+  "notes": "Small and unambiguous, but it exercises the connector kinds and forces the agent to size R and C against an equation rather than recall a stock value.",
+  "assertions": [
+    "count(resistor) >= 1",
+    "count(capacitor) >= 1"
+  ]
+}

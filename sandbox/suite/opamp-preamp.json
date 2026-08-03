@@ -1,0 +1,10 @@
+{
+  "name": "opamp-preamp",
+  "prompt": "Build a non-inverting op-amp amplifier with a gain of 10, running from a 9 V supply, input and output on screw terminals.",
+  "notes": "Analog with a gain equation: 1 + Rf/Rg = 10, so the ratio must be 9:1 from E24 values. opamp_input_floating fires if either input is left unreferenced, and missing_supply_decoupling applies to the analog rail.",
+  "assertions": [
+    "count(opamp) == 1",
+    "count(resistor) >= 2",
+    "opamp[0].IN+ != opamp[0].IN-"
+  ]
+}
