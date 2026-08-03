@@ -22,19 +22,21 @@ export function ImportCircuitDialog({ open, onClose, onImport }) {
   const [text, setText] = useState('');
   const [errors, setErrors] = useState([]);
   const [fileName, setFileName] = useState('');
+  const [importing, setImporting] = useState(false);
   const textareaRef = useRef(null);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
     if (!open) return undefined;
     setErrors([]);
+    setImporting(false);
     const onKeyDown = (event) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape' && !importing) onClose();
     };
     document.addEventListener('keydown', onKeyDown);
     textareaRef.current?.focus();
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [open, onClose]);
+  }, [open, onClose, importing]);
 
   if (!open) return null;
 
@@ -49,27 +51,47 @@ export function ImportCircuitDialog({ open, onClose, onImport }) {
     setText(await file.text());
   };
 
-  const submit = () => {
+  const submit = async () => {
     const parsed = parseImportedCircuit(text);
     if (!parsed.ok) {
       setErrors(parsed.errors);
       return;
     }
-    // onImport returns a message when the circuit parses but cannot be built
-    // into a workspace package; the dialog stays open so the text is editable.
-    const failure = onImport(parsed.circuit, fileName);
-    if (failure) {
-      setErrors([failure]);
-      return;
-    }
-    setText('');
-    setFileName('');
+
+    // Building the workspace package is synchronous CPU work — the schematic
+    // router alone can run for a second on a dense board — so it blocks paint.
+    // Flip the busy state, then wait two frames: the first lets React commit
+    // it, the second lets the browser actually paint before the main thread is
+    // taken. Without this the spinner never appears, however long the wait.
+    setImporting(true);
     setErrors([]);
+    await new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(resolve));
+    });
+
+    try {
+      // onImport returns a message when the circuit parses but cannot be built
+      // into a workspace package; the dialog stays open so the text is editable.
+      const failure = onImport(parsed.circuit, fileName);
+      if (failure) {
+        setErrors([failure]);
+        return;
+      }
+      setText('');
+      setFileName('');
+      setErrors([]);
+    } finally {
+      setImporting(false);
+    }
   };
 
   return (
     <>
-      <div className="import-circuit-backdrop" onClick={onClose} role="presentation" />
+      <div
+        className="import-circuit-backdrop"
+        onClick={() => { if (!importing) onClose(); }}
+        role="presentation"
+      />
       <div
         className="import-circuit"
         role="dialog"
@@ -82,6 +104,7 @@ export function ImportCircuitDialog({ open, onClose, onImport }) {
             type="button"
             className="import-circuit-close"
             onClick={onClose}
+            disabled={importing}
             aria-label="Close import dialog"
           >
             ×
@@ -98,6 +121,7 @@ export function ImportCircuitDialog({ open, onClose, onImport }) {
           className="import-circuit-input"
           value={text}
           spellCheck={false}
+          disabled={importing}
           onChange={(event) => { setText(event.target.value); setFileName(''); }}
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => {
@@ -130,14 +154,18 @@ export function ImportCircuitDialog({ open, onClose, onImport }) {
             type="button"
             className="import-circuit-secondary"
             onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
           >
             Choose file…
           </button>
-          <span className="import-circuit-filename">{fileName}</span>
+          <span className="import-circuit-filename" role="status" aria-live="polite">
+            {importing ? 'Placing, routing and checking the board — this can take a moment.' : fileName}
+          </span>
           <button
             type="button"
             className="import-circuit-secondary"
             onClick={() => { setText(SAMPLE); setFileName(''); setErrors([]); }}
+            disabled={importing}
           >
             Use example
           </button>
@@ -145,9 +173,14 @@ export function ImportCircuitDialog({ open, onClose, onImport }) {
             type="button"
             className="import-circuit-primary"
             onClick={submit}
-            disabled={!text.trim()}
+            disabled={!text.trim() || importing}
           >
-            Import
+            {importing ? (
+              <>
+                <span className="import-circuit-spinner" aria-hidden="true" />
+                Building board...
+              </>
+            ) : 'Import'}
           </button>
         </footer>
       </div>

@@ -81,7 +81,10 @@ export const parseImportedCircuit = (source) => {
  * @returns {object} the same shape the generate route returns
  */
 export const buildImportedResult = (circuit) =>
-  synchronizeResult(null, circuit, buildImportedDiagram(circuit));
+  // The diagram goes in via `options.diagram`, not as `previousDiagram`: an
+  // import has no previous layout to preserve, and handing one to
+  // preserveDiagramLayout to reconcile against itself costs seconds.
+  synchronizeResult(null, circuit, null, { diagram: buildImportedDiagram(circuit) });
 
 /**
  * A chat carrying an imported circuit, seeded so the workspace opens on it the

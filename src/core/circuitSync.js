@@ -845,7 +845,14 @@ export const preserveDiagramLayout = (diagram, previousDiagram, circuit = null) 
 };
 
 export const synchronizeResult = (previousResult, circuit, previousDiagram, options = {}) => {
-  const diagram = preserveDiagramLayout(buildSyncDiagram(circuit, previousDiagram), previousDiagram, circuit);
+  // `options.diagram` is for a caller that already holds the diagram it wants —
+  // an import, which builds one itself so it can fall back when the schematic
+  // router gives up. Supplying it skips both a second layout pass and
+  // preserveDiagramLayout, which has nothing to preserve on a fresh circuit and
+  // is pathologically slow when handed a diagram to reconcile against itself
+  // (17s on a 10-part board; 48ms without).
+  const diagram = options.diagram
+    ?? preserveDiagramLayout(buildSyncDiagram(circuit, previousDiagram), previousDiagram, circuit);
   const spice = options.spice ?? toSpice(circuit);
   const kicadNetlist = options.kicadNetlist ?? toKiCadNetlist(circuit);
   return {

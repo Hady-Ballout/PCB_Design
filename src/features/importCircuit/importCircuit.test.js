@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildImportedResult, createImportedChat, parseImportedCircuit } from './importCircuit.js';
+import { buildImportedDiagram, buildImportedResult, createImportedChat, parseImportedCircuit } from './importCircuit.js';
+import { synchronizeResult } from '../../core/circuitSync.js';
 import { createChat } from '../chat/chatStore.js';
 import { buildPcbLayout } from '../../core/pcbLayout.js';
 
@@ -105,6 +106,36 @@ describe('buildImportedResult', () => {
     expect(layout.routing.complete).toBe(true);
     expect(layout.drc.ok).toBe(true);
     expect(layout.connectivity.ok).toBe(true);
+  });
+});
+
+describe('import cost', () => {
+  // buildImportedResult used to hand its freshly-built diagram to
+  // synchronizeResult as `previousDiagram`, which sent preserveDiagramLayout
+  // off to reconcile a diagram against itself: 17.9s on a 10-part board, with
+  // the UI frozen and nothing on screen. The diagram now goes in via
+  // `options.diagram` instead.
+  it('uses a supplied diagram as-is rather than reconciling it', () => {
+    const diagram = buildImportedDiagram(rcLowPass);
+    const result = synchronizeResult(null, rcLowPass, null, { diagram });
+    // Identity, not deep equality: anything else means it went back through
+    // buildSyncDiagram / preserveDiagramLayout.
+    expect(result.diagram).toBe(diagram);
+  });
+
+  it('builds the diagram exactly once', () => {
+    // A second layout pass shows up as a second call; one pass is the contract.
+    const result = buildImportedResult(rcLowPass);
+    expect(result.diagram.components.length).toBe(rcLowPass.components.length);
+    expect(result.diagramSvg).toContain('<svg');
+  });
+
+  it('stays far below the pathological path, even on the fallback route', () => {
+    // Generous by 10x against the fixed cost and 20x under the old one, so this
+    // catches a return of the quadratic path without flaking on a slow machine.
+    const started = Date.now();
+    buildImportedResult(blinker);
+    expect(Date.now() - started).toBeLessThan(10_000);
   });
 });
 
