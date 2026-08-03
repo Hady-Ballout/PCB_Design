@@ -9,6 +9,8 @@
     "dev:api": "tsx server/index.ts",
     "build": "vite build --configLoader native",
     "build:server": "tsc -p tsconfig.server.json && node -e \"require('fs').cpSync('src/core','dist/server/src/core',{recursive:true})\"",
+    "knowledge": "node scripts/build-component-docs.mjs",
+    "knowledge:check": "node scripts/build-component-docs.mjs --check",
     "preview": "vite preview --host 127.0.0.1 --configLoader native",
     "test": "vitest run --configLoader runner"
   },

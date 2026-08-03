@@ -62,7 +62,9 @@ const SUPPLY_PIN_NAMES = new Set(['5V', '3V3', 'VIN', 'VCC', 'GND', 'VS', 'EN'])
 const E24 = [1.0, 1.1, 1.2, 1.3, 1.5, 1.6, 1.8, 2.0, 2.2, 2.4, 2.7, 3.0, 3.3, 3.6, 3.9, 4.3, 4.7, 5.1, 5.6, 6.2, 6.8, 7.5, 8.2, 9.1];
 
 // Canonical positional pin roles for kinds without a fixedPins contract.
-const ROLE_PINS = {
+// Exported so the component knowledge base (knowledge/components) can document
+// one pin order per kind rather than keeping a second copy that drifts.
+export const ROLE_PINS = {
   opamp: ['IN+', 'IN-', 'OUT', 'V+', 'V-'],
   comparator: ['IN+', 'IN-', 'OUT', 'V+', 'V-'],
   bjt_npn: ['collector', 'base', 'emitter'],
