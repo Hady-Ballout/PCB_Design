@@ -256,6 +256,15 @@ describe('verify.mjs', () => {
     expect(code).toBe(1);
   });
 
+  it('compares pin to pin, so net names stay the designer\'s choice', () => {
+    // "RESET is tied to the supply" is pin-to-pin. Asserting `RESET == VCC`
+    // instead asserts that the agent named its rail VCC, and failed a correct
+    // board whose rail was called V9. Only ground is a fixed name, "0".
+    const { stdout, code } = run(VERIFY, [circuitPath('blinker-1hz.json'), '--quiet',
+      '--assert', 'timer_555[0].RESET == timer_555[0].VCC']);
+    expect(code, stdout).toBe(0);
+  });
+
   it('sums counts so "either kind" is expressible', () => {
     // A flyback diode may be a `diode` or a `schottky`; the assertion must not
     // care which. Before this, the whole term fell through to the net-literal
