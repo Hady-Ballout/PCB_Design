@@ -96,10 +96,16 @@ as **1117 volts** in both the SPICE deck and the topology rules. It passed anywa
 this is a latent wrongness that the gates did not catch and would have shipped.
 The sandbox avoided it by reading the defect table, not by being smarter.
 
-**Completeness.** Asked for an RC filter "fed from a 5 V supply", the baseline
-returned two components — a resistor and a capacitor with a floating input, no
-source. The sandbox returned a source, two terminal blocks, R and C. The
-baseline's answer is a fragment of a schematic; the sandbox's is a board.
+**Completeness.** The baseline tends to answer the circuit rather than the board:
+its RC filter is a source, a resistor and a capacitor; the sandbox's adds the two
+screw terminals the prompt asked for. Its I2C board is three parts — MCU, sensor,
+display — with no decoupling anywhere, against the sandbox's bus pull-ups and
+per-rail caps. Both are defensible as schematics; only one of each pair is a
+thing you would fabricate.
+
+(An earlier draft of this file said the baseline's RC filter had no source at
+all. That was true of a first run made under the 4096-token cap, not of the
+uncapped run reported here, which includes `V1`.)
 
 ## Where the baseline is better
 
