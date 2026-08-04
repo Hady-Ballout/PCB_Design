@@ -14,7 +14,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 // @ts-expect-error — the sandbox is plain ESM JavaScript, deliberately: it is
 // the same code the CLI runs, and a TS copy would be a second implementation.
-import { create, say, open, readSession } from '../../sandbox/session.mjs';
+import { create, say, open, readSession, cancel } from '../../sandbox/session.mjs';
 // @ts-expect-error — src/core is dependency-free JavaScript shared with the
 // browser; its label table is what names components in the progress readout.
 import { COMPONENT_KINDS } from '../../src/core/componentKinds.js';
@@ -88,15 +88,32 @@ export const handleSandboxGenerate = async (
 
   writeEvent(response, { type: 'run', runId: workspace.id });
 
-  // If the client disconnects mid-run, stop streaming. The agent finishes on its
-  // own and the workspace is still on disk, so the run is recoverable by id
-  // rather than lost.
+  // A disconnect now stops the agent, rather than only stopping the stream.
+  // Leaving it running meant a hung generation could not be cancelled at all —
+  // the browser could look away, but the run kept its workspace marked busy and
+  // there was no way to reach it.
+  const controller = new AbortController();
   let aborted = false;
   let reply = '';
-  request.on('close', () => { aborted = true; });
+  // `response.on('close')`, not `request.on('close')`. The request body is fully
+  // read before this handler is called, so that stream has already closed and
+  // its event either never fires again or fires instantly — measured: a
+  // disconnect left the run `running` because nothing was listening to the
+  // socket. The response closes when the connection does, which is the actual
+  // signal that the browser went away.
+  response.on('close', () => {
+    if (aborted) return;
+    aborted = true;
+    controller.abort();
+    // Mark it stopped here rather than waiting for the loop to notice. The
+    // `for await` below is suspended until the agent produces its next event,
+    // so a stalled model — the case most worth cancelling — would otherwise
+    // leave the run `running` indefinitely with nothing able to clear it.
+    cancel(workspace);
+  });
 
   try {
-    for await (const event of say(workspace, turn)) {
+    for await (const event of say(workspace, turn, { abortController: controller })) {
       if (aborted) break;
       switch (event.event) {
         case 'init':
@@ -125,6 +142,9 @@ export const handleSandboxGenerate = async (
           break;
         case 'verify':
           writeEvent(response, { type: 'verify', verify: event.verify });
+          break;
+        case 'cancelled':
+          writeEvent(response, { type: 'cancelled', message: event.message });
           break;
         case 'error':
           writeEvent(response, { type: 'error', message: event.message });

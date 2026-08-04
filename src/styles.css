@@ -1292,6 +1292,16 @@ h3 {
   margin: 0;
 }
 
+/* Stop replaces Send while a board is building. It must never look disabled:
+   it is the only way out of a run that has stalled on the provider's side. */
+.composer-stop-button {
+  background: var(--color-chip);
+}
+
+.composer-stop-button:hover {
+  background: var(--color-hover-tint);
+}
+
 .error-boundary {
   margin: 0 auto;
   max-width: 560px;

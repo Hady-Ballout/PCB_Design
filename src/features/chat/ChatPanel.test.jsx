@@ -106,9 +106,36 @@ describe('starting a new design', () => {
     expect(onNewChat).toHaveBeenCalledTimes(1);
   });
 
-  it('does not let a board be abandoned mid-build', () => {
-    render({ activeChat: chatWith(null), generationBusy: true });
-    expect(container.querySelector('.chat-new-button').disabled).toBe(true);
+  it('stays available while a board is building', () => {
+    // Being unable to start a new design because an earlier run hung is a trap,
+    // and a hang is exactly when you most want out.
+    const onNewChat = vi.fn();
+    render({ activeChat: chatWith(null), generationBusy: true, onNewChat });
+    const button = container.querySelector('.chat-new-button');
+    expect(button.disabled).toBe(false);
+    act(() => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(onNewChat).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('stopping a run', () => {
+  // A run can stall on the provider's side with no error and no output —
+  // observed live, seven minutes of silence after a tool call was approved.
+  // Without a stop control there is no way out of that.
+  it('turns the send button into stop while building', () => {
+    const onStop = vi.fn();
+    render({ activeChat: chatWith(null), generationBusy: true, onStop });
+    const stop = container.querySelector('.composer-stop-button');
+    expect(stop).not.toBeNull();
+    expect(stop.disabled).toBe(false);
+    act(() => stop.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows send again when nothing is running', () => {
+    render({ activeChat: chatWith(null), prompt: 'blink an LED' });
+    expect(container.querySelector('.composer-stop-button')).toBeNull();
+    expect(container.querySelector('.composer-send-button').disabled).toBe(false);
   });
 });
 
@@ -219,10 +246,12 @@ describe('composer', () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
-  it('locks the composer while a board is being built', () => {
+  it('locks the input while a board is being built, but offers stop', () => {
+    // The send button is replaced by Stop rather than disabled — a disabled
+    // control at this moment would leave no way out of a stalled run.
     render({ activeChat: chatWith(null), prompt: 'blink an LED', generationBusy: true });
     expect(container.querySelector('.chat-composer-input textarea').disabled).toBe(true);
-    expect(container.querySelector('.composer-send-button').disabled).toBe(true);
+    expect(container.querySelector('.composer-stop-button').disabled).toBe(false);
   });
 
   it('changes the placeholder with the mode, since the modes do different work', () => {

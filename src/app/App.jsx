@@ -105,6 +105,9 @@ function App() {
   // recovery effect can check it synchronously — state would be stale inside an
   // effect that does not depend on it.
   const streamingChatRef = useRef(null);
+  // Lets the Stop button abort the in-flight request. Aborting the fetch closes
+  // the connection, which is what tells the server to stop the agent.
+  const generationAbortRef = useRef(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [theme, setTheme] = useState(loadTheme);
   const [userBarOpen, setUserBarOpen] = useState(false);
@@ -751,8 +754,16 @@ function App() {
    * would inherit the previous board as context. A new chat has no run id, so
    * the next prompt starts a clean workspace.
    */
+  /** Abort the in-flight generation. The server stops the agent on disconnect. */
+  const stopGeneration = () => {
+    generationAbortRef.current?.abort();
+  };
+
   const startNewChat = () => {
-    if (generationBusy) return;
+    // Deliberately not blocked while a run is in flight. Being unable to start
+    // a new design because an earlier one hung is a trap, and a hang is exactly
+    // when you most want out — the running board is stopped on the way.
+    stopGeneration();
     const chat = createChat();
     setChatStore((current) => ({ chats: [chat, ...current.chats], activeChatId: chat.id }));
     setChatPanelView('conversation');
@@ -868,9 +879,13 @@ function App() {
       }));
     };
 
+    const controller = new AbortController();
+    generationAbortRef.current = controller;
+
     try {
       const response = await fetch(`${API_BASE}/api/sandbox/generate`, {
         method: 'POST',
+        signal: controller.signal,
         headers: authHeaders(),
         // A run resumes when the chat already has one, so a follow-up keeps the
         // context that produced the board instead of restating it as JSON.
@@ -923,7 +938,7 @@ function App() {
             }
           } else if (event.type === 'done') {
             done = event;
-          } else if (event.type === 'error') {
+          } else if (event.type === 'error' || event.type === 'cancelled') {
             failure = event.message;
           }
         }
@@ -958,8 +973,13 @@ function App() {
       );
       openEditorView('realisticSchematic');
     } catch (generationError) {
-      updateChat(chatId, (chat) => ({ ...chat, error: generationError.message }));
+      // Stopping is a choice, not a failure — say so plainly instead of
+      // reporting the abort as an error.
+      const stopped = generationError.name === 'AbortError';
+      if (stopped) finish('Stopped. The workspace is kept, so you can pick this up again or start over.');
+      else updateChat(chatId, (chat) => ({ ...chat, error: generationError.message }));
     } finally {
+      generationAbortRef.current = null;
       streamingChatRef.current = null;
       setGeneratingChatId(null);
       setGenerationStage(null);
@@ -1820,6 +1840,7 @@ function App() {
           generationBusy={generationBusy}
           onSubmit={generateCircuit}
           onNewChat={startNewChat}
+          onStop={stopGeneration}
           error={error}
         />
 

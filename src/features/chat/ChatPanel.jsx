@@ -183,6 +183,7 @@ export function ChatPanel({
   generationBusy,
   onSubmit,
   onNewChat,
+  onStop,
   error,
 }) {
   return (
@@ -265,9 +266,8 @@ export function ChatPanel({
               className="chat-new-button"
               onClick={onNewChat}
               type="button"
-              disabled={generationBusy}
               aria-label="New design"
-              title={generationBusy ? 'Finish the current board first' : 'Start a new design'}
+              title="Start a new design"
             >
               <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
                 <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -369,17 +369,34 @@ export function ChatPanel({
                   aria-label="Message the circuit assistant"
                 />
                 <ComposerModeMenu mode={composerMode} onSelect={setComposerMode} />
-                <button
-                  className="composer-send-button"
-                  type="submit"
-                  disabled={generationBusy || !prompt.trim()}
-                  aria-label={generationBusy ? 'Building the board' : 'Send'}
-                  title={generationBusy ? 'Building the board' : 'Send'}
-                >
-                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                    <path d="M3 11.5L21 3l-8.5 18-2.2-7.3L3 11.5z" fill="currentColor" />
-                  </svg>
-                </button>
+                {/* While a board is building the send button becomes Stop. A run
+                    can stall on the provider's side with no error and no output,
+                    and without this there is no way out of one. */}
+                {generationBusy ? (
+                  <button
+                    className="composer-send-button composer-stop-button"
+                    type="button"
+                    onClick={onStop}
+                    aria-label="Stop"
+                    title="Stop this run"
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                      <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" />
+                    </svg>
+                  </button>
+                ) : (
+                  <button
+                    className="composer-send-button"
+                    type="submit"
+                    disabled={!prompt.trim()}
+                    aria-label="Send"
+                    title="Send"
+                  >
+                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                      <path d="M3 11.5L21 3l-8.5 18-2.2-7.3L3 11.5z" fill="currentColor" />
+                    </svg>
+                  </button>
+                )}
               </div>
             </form>
             {error && <p className="inline-error chat-error">{error}</p>}

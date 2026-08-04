@@ -83,14 +83,36 @@ export async function* say(workspace, message, options = {}) {
   trace({ event: 'prompt', text: message });
 
   let result = null;
+  let settled = false;
+  let streamEnded = false;
   const turnIndex = record.turns.length;
+
+  /**
+   * Leave the record in a terminal state no matter how iteration ends.
+   *
+   * A consumer that stops early — an HTTP handler breaking out of its
+   * `for await` when the browser disconnects — resumes this generator through
+   * `.return()`, which runs this `finally` but none of the code after the loop.
+   * Without it the run stayed `status: "running"` forever: the UI kept polling
+   * it, the workspace looked busy, and the only way out was editing JSON by
+   * hand. That is precisely how a stalled generation trapped the app.
+   */
+  const settle = (status, error) => {
+    if (settled) return;
+    settled = true;
+    record.status = status;
+    if (error) record.error = error;
+    record.updatedAt = now();
+    writeSession(workspace, record);
+  };
+
   try {
     for await (const event of runAgent({
       workspace,
       prompt: message,
       resume: record.sessionId ?? undefined,
       maxTurns: options.maxTurns,
-      signal: options.signal,
+      abortController: options.abortController,
     })) {
       trace(event);
       if (event.event === 'init') record.sessionId = event.sessionId;
@@ -127,14 +149,23 @@ export async function* say(workspace, message, options = {}) {
       }
       yield event;
     }
+    // The agent finished on its own; the outcome is decided below, not here.
+    streamEnded = true;
   } catch (error) {
-    trace({ event: 'error', message: error.message });
-    record.status = 'failed';
-    record.error = error.message;
-    record.updatedAt = now();
-    writeSession(workspace, record);
-    yield { event: 'error', message: error.message };
+    const cancelled = options.abortController?.signal.aborted || /abort/i.test(error.message || '');
+    trace({ event: cancelled ? 'cancelled' : 'error', message: error.message });
+    settle(cancelled ? 'cancelled' : 'failed', cancelled ? 'Stopped before it finished.' : error.message);
+    yield { event: cancelled ? 'cancelled' : 'error', message: record.error };
     return;
+  } finally {
+    // `finally` also runs on success, so it must not claim every run it sees.
+    // Only an unfinished stream means the consumer walked away — a `return()`
+    // from an HTTP handler whose browser disconnected — and only then is there
+    // an agent still running that nobody is listening to.
+    if (!streamEnded && !settled) {
+      options.abortController?.abort();
+      settle('cancelled', 'Stopped before it finished.');
+    }
   }
 
   // Score the run by executing the workspace's own verify.mjs — the same
@@ -174,6 +205,29 @@ export async function* say(workspace, message, options = {}) {
 
   yield { event: 'verify', verify };
 }
+
+/**
+ * Mark a running run as stopped, without waiting for the agent to agree.
+ *
+ * Cancelling cannot depend on the agent noticing. A consumer sits suspended in
+ * `for await` until the next event arrives, so if the model stalls — which is
+ * the case you most want to cancel — aborting the controller changes nothing
+ * that the loop can observe, and the record stays `running` forever. Writing the
+ * terminal state here frees whatever is watching immediately. If the agent does
+ * eventually finish, `say` records the real outcome over the top.
+ *
+ * @returns {boolean} whether this call was the one that stopped it
+ */
+export const cancel = (workspace, note = 'Stopped before it finished.') => {
+  const record = readSession(workspace);
+  if (!record || record.status !== 'running') return false;
+  record.status = 'cancelled';
+  record.error = note;
+  record.updatedAt = now();
+  writeSession(workspace, record);
+  workspace.appendLine(TRACE_FILE, { at: now(), event: 'cancelled', message: note });
+  return true;
+};
 
 /** Mark a run reviewed and closed. Only the user calls this. */
 export const close = (workspace, { status = 'done', note } = {}) => {

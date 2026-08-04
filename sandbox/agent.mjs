@@ -167,7 +167,7 @@ export const buildSystemPrompt = (workspace) => {
  * @param {number} [params.maxTurns]
  * @param {AbortSignal} [params.signal]
  */
-export const buildQueryOptions = ({ workspace, guard, resume, maxTurns = 60, signal, env }) => ({
+export const buildQueryOptions = ({ workspace, guard, resume, maxTurns = 60, abortController, env }) => ({
   cwd: workspace.root,
   systemPrompt: { type: 'preset', preset: 'claude_code', append: buildSystemPrompt(workspace) },
   // Nothing from the host reaches the agent: no user CLAUDE.md, no project
@@ -182,18 +182,29 @@ export const buildQueryOptions = ({ workspace, guard, resume, maxTurns = 60, sig
   model: env.ANTHROPIC_MODEL,
   env,
   ...(resume ? { resume } : {}),
-  ...(signal ? { abortController: { signal } } : {}),
+  // The SDK wants the controller itself, not a { signal } wrapper — the earlier
+  // shape was silently ignored, so a cancelled run kept going.
+  ...(abortController ? { abortController } : {}),
 });
 
-export async function* runAgent({ workspace, prompt, resume, maxTurns = 60, signal }) {
+export async function* runAgent({ workspace, prompt, resume, maxTurns = 60, abortController }) {
   const pending = [];
   const guard = makeGuard(workspace.root, (entry) => pending.push(entry));
 
-  const env = { ...process.env, ...readEnvFile(ENV_FILE) };
+  const env = {
+    ...process.env,
+    ...readEnvFile(ENV_FILE),
+    // A provider can stop sending mid-response and the run then sits forever
+    // with no error and no output — observed live: a tool call was approved and
+    // nothing happened for seven minutes. The watchdog turns that silence into
+    // a failure the caller can report instead of an indefinite hang.
+    CLAUDE_ENABLE_STREAM_WATCHDOG: '1',
+    CLAUDE_STREAM_IDLE_TIMEOUT_MS: process.env.CLAUDE_STREAM_IDLE_TIMEOUT_MS || '180000',
+  };
 
   const stream = query({
     prompt,
-    options: buildQueryOptions({ workspace, guard, resume, maxTurns, signal, env }),
+    options: buildQueryOptions({ workspace, guard, resume, maxTurns, abortController, env }),
   });
 
   for await (const message of stream) {
