@@ -30,6 +30,7 @@ const baseProps = {
   setPrompt: () => {},
   generationBusy: false,
   onSubmit: () => {},
+  onNewChat: () => {},
   error: '',
 };
 
@@ -78,6 +79,34 @@ describe('circuit chip', () => {
   it('survives a circuit with no title and no components', () => {
     render({ activeChat: chatWith({}) });
     expect(container.querySelector('.chat-artifact-chip').textContent).toContain('0 parts');
+  });
+});
+
+describe('starting a new design', () => {
+  // A follow-up resumes the same sandbox run, so an unrelated board needs its
+  // own entry point. There was none — `createChat` was imported and never
+  // called from any control.
+  it('offers a new design from the conversation header', () => {
+    const onNewChat = vi.fn();
+    render({ activeChat: chatWith(null), onNewChat });
+    const button = container.querySelector('.chat-new-button');
+    expect(button).not.toBeNull();
+    act(() => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(onNewChat).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers one from the history page too', () => {
+    const onNewChat = vi.fn();
+    render({ activeChat: chatWith(null), chatPanelView: 'history', onNewChat });
+    const button = container.querySelector('.chat-new-design');
+    expect(button).not.toBeNull();
+    act(() => button.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(onNewChat).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a board be abandoned mid-build', () => {
+    render({ activeChat: chatWith(null), generationBusy: true });
+    expect(container.querySelector('.chat-new-button').disabled).toBe(true);
   });
 });
 

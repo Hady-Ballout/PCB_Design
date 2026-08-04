@@ -720,6 +720,21 @@ function App() {
     return null;
   };
 
+  /**
+   * Open an empty chat and switch to it.
+   *
+   * A follow-up message resumes the same sandbox run, which is what makes
+   * "make it 5 seconds instead" cheap — but it also means an unrelated request
+   * would inherit the previous board as context. A new chat has no run id, so
+   * the next prompt starts a clean workspace.
+   */
+  const startNewChat = () => {
+    if (generationBusy) return;
+    const chat = createChat();
+    setChatStore((current) => ({ chats: [chat, ...current.chats], activeChatId: chat.id }));
+    setChatPanelView('conversation');
+  };
+
   // Reattach to a run that outlived the page.
   //
   // The agent runs server-side and writes into its own workspace, so a reload or
@@ -1758,6 +1773,7 @@ function App() {
           setPrompt={setPrompt}
           generationBusy={generationBusy}
           onSubmit={generateCircuit}
+          onNewChat={startNewChat}
           error={error}
         />
 

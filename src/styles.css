@@ -436,8 +436,54 @@ h3 {
   border-bottom: 2px solid var(--color-ink);
   display: grid;
   gap: 8px;
-  grid-template-columns: auto minmax(0, 1fr);
+  /* back · title · new — the title takes whatever is left so a long one
+     truncates instead of pushing the new-design button off the panel. */
+  grid-template-columns: auto minmax(0, 1fr) auto;
   padding-bottom: 10px;
+}
+
+/* Matches the back button's shape so the header reads as one control row. */
+.chat-new-button {
+  align-items: center;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
+  border-radius: 6px;
+  color: var(--color-text);
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 0;
+  padding: 4px;
+}
+
+.chat-new-button:hover:not(:disabled) {
+  background: var(--color-hover-tint);
+}
+
+.chat-new-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* Primary action on the history page: it sits above Import JSON, which is the
+   fallback for a circuit you already have. */
+.chat-new-design {
+  align-items: center;
+  background: var(--nb-yellow);
+  border: 2px solid var(--color-ink);
+  border-radius: 6px;
+  color: var(--color-on-accent);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 6px 10px;
+}
+
+.chat-new-design:hover {
+  filter: brightness(0.96);
 }
 
 .chat-conversation-title {

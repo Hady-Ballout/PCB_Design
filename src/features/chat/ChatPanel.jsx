@@ -142,12 +142,25 @@ export function ChatPanel({
   setPrompt,
   generationBusy,
   onSubmit,
+  onNewChat,
   error,
 }) {
   return (
     <aside className={`side-panel chat-panel-${chatPanelView}`}>
       {chatPanelView === 'history' ? (
         <>
+          <button
+            type="button"
+            className="chat-new-design"
+            onClick={onNewChat}
+            title="Start a new design"
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            New design
+          </button>
+
           <button
             type="button"
             className="import-circuit-trigger"
@@ -205,6 +218,21 @@ export function ChatPanel({
             <div className="chat-conversation-title">
               <h1>{activeChat?.title}</h1>
             </div>
+            {/* A follow-up message continues the same design — and resumes the
+                same agent session — so starting an unrelated board needs its own
+                affordance rather than a fresh sentence in an old thread. */}
+            <button
+              className="chat-new-button"
+              onClick={onNewChat}
+              type="button"
+              disabled={generationBusy}
+              aria-label="New design"
+              title={generationBusy ? 'Finish the current board first' : 'Start a new design'}
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
           </header>
 
           <section className="chat-thread" aria-label="Current conversation">
