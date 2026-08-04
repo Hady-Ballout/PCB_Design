@@ -114,7 +114,7 @@ export const handleSandboxGenerate = async (
           writeEvent(response, {
             type: 'tool',
             tool: event.tool,
-            detail: summarizeTool(event.tool, event.input as Record<string, unknown>),
+            detail: summarizeTool(event.tool, event.input as Record<string, unknown>, workspace.root),
           });
           break;
         case 'result':
@@ -198,16 +198,36 @@ export const handleSandboxRun = (
   });
 };
 
-/** One short line describing what a tool call is doing, for the progress list. */
-const summarizeTool = (tool: string, input: Record<string, unknown> = {}): string => {
+/**
+ * One short line describing what a tool call is doing, for the progress readout.
+ *
+ * Paths are shown relative to the workspace, so `knowledge/components/led.md`
+ * reads as `components/led.md` and the run's own files as bare names. Taking the
+ * last two segments instead put the run id on screen — `2026-08-04-9ub9/
+ * circuit.json` — which means nothing to the person waiting.
+ */
+const summarizeTool = (tool: string, input: Record<string, unknown> = {}, root = ''): string => {
   if (tool === 'Bash') {
-    const command = String(input.command || '');
+    // Collapse whitespace first: the agent writes multi-line node scripts, and a
+    // raw newline breaks the single-line readout.
+    const command = String(input.command || '').replace(/\s+/g, ' ').trim();
     if (command.includes('verify.mjs')) return 'verifying the board';
     if (command.includes('solve.mjs')) return 'searching component values';
-    return command.slice(0, 60);
+    // It reads reference pages with `cat` as often as with the Read tool.
+    const read = /(?:^|\s)(?:cat|head|tail|less)\s+(\S+)/.exec(command);
+    if (read) return `reading ${read[1].split('/').slice(-2).join('/')}`;
+    if (/^node\s+-e/.test(command)) return 'working out the numbers';
+    if (/^(grep|rg|ls|find)\b/.test(command)) return 'searching the knowledge base';
+    return command.length > 60 ? `${command.slice(0, 59)}…` : command;
   }
-  const path = String(input.file_path || input.path || '');
-  const name = path.split('/').slice(-2).join('/');
+
+  const raw = String(input.file_path || input.path || '');
+  const relative = root && raw.startsWith(root) ? raw.slice(root.length).replace(/^\//, '') : raw;
+  // Drop the top-level folder: `knowledge/components/led.md` is one segment
+  // longer than it needs to be, and `src/core/pcbLayout.js` reads fine as
+  // `core/pcbLayout.js`.
+  const name = relative.split('/').slice(-2).join('/');
+
   if (tool === 'Read') return name ? `reading ${name}` : 'reading';
   if (tool === 'Write' || tool === 'Edit') return name ? `writing ${name}` : 'writing';
   if (tool === 'Grep' || tool === 'Glob') return 'searching the knowledge base';

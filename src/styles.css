@@ -1139,6 +1139,32 @@ h3 {
   width: 100%;
 }
 
+/* The live tool line: what the agent is reading or running at this moment.
+   Truncated to one line — it changes every few seconds and must not reflow the
+   thread while the user is reading it. */
+.generation-activity {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  margin: 4px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A repeat verification means a gate failed and the board is being fixed. */
+.generation-attempts {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-style: italic;
+  margin: 4px 0 0;
+}
+
+/* Ask answers a question, so it gets a thinking indicator and nothing else —
+   no stage trail for a pipeline it never enters. */
+.generation-status-ask p {
+  margin: 0;
+}
+
 .error-boundary {
   margin: 0 auto;
   max-width: 560px;

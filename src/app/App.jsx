@@ -82,6 +82,10 @@ function App() {
   const [generatingChatId, setGeneratingChatId] = useState(null);
   const [generationStage, setGenerationStage] = useState(null);
   const [thinkingText, setThinkingText] = useState('');
+  // The mode the running turn was sent with, held separately from the composer
+  // so changing the dropdown mid-run does not rewrite what the progress claims.
+  const [generationMode, setGenerationMode] = useState('implement');
+  const [verifyAttempts, setVerifyAttempts] = useState(0);
   const [isSimulating, setIsSimulating] = useState(false);
   const [theme, setTheme] = useState(loadTheme);
   const [userBarOpen, setUserBarOpen] = useState(false);
@@ -817,8 +821,10 @@ function App() {
       messages: [...chat.messages, { id: messageId(), role: 'user', content: request, createdAt: now }],
     }));
     setGeneratingChatId(chatId);
+    setGenerationMode(composerMode);
     setGenerationStage('design');
     setThinkingText('');
+    setVerifyAttempts(0);
 
     const finish = (message, extra = {}) => {
       updateChat(chatId, (chat) => ({
@@ -872,9 +878,17 @@ function App() {
             updateChat(chatId, (chat) => ({ ...chat, sandboxRunId: event.runId }));
           } else if (event.type === 'tool') {
             setThinkingText(event.detail || event.tool);
-            if (event.detail?.includes('verif')) setGenerationStage('verify');
-            else if (event.detail?.includes('component values')) setGenerationStage('solve');
-            else setGenerationStage('design');
+            if (event.detail?.includes('verif')) {
+              setGenerationStage('verify');
+              // Each verify run is one attempt. More than one means a gate
+              // failed and the agent went back to fix the board — the single
+              // most useful thing to show while waiting.
+              setVerifyAttempts((count) => count + 1);
+            } else if (event.detail?.includes('component values')) {
+              setGenerationStage('solve');
+            } else {
+              setGenerationStage('design');
+            }
           } else if (event.type === 'done') {
             done = event;
           } else if (event.type === 'error') {
@@ -921,6 +935,7 @@ function App() {
       setGeneratingChatId(null);
       setGenerationStage(null);
       setThinkingText('');
+      setVerifyAttempts(0);
       refreshUsage();
     }
   };
@@ -1767,6 +1782,8 @@ function App() {
           generationStage={generationStage}
           composerMode={composerMode}
           setComposerMode={setComposerMode}
+          generationMode={generationMode}
+          verifyAttempts={verifyAttempts}
           thinkingText={thinkingText}
           messagesEndRef={messagesEndRef}
           prompt={prompt}

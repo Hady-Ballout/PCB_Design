@@ -24,6 +24,8 @@ const baseProps = {
   composerMode: 'implement',
   setComposerMode: () => {},
   generationStage: null,
+  generationMode: 'implement',
+  verifyAttempts: 0,
   thinkingText: '',
   messagesEndRef: { current: null },
   prompt: '',
@@ -107,6 +109,45 @@ describe('starting a new design', () => {
   it('does not let a board be abandoned mid-build', () => {
     render({ activeChat: chatWith(null), generationBusy: true });
     expect(container.querySelector('.chat-new-button').disabled).toBe(true);
+  });
+});
+
+describe('progress readout', () => {
+  // Every mode used to render the same three-stage trail, so an Ask turn
+  // advertised a VERIFY step it never runs — and the live tool line was
+  // captured but never displayed, which is why runs looked identical.
+  const generating = { activeChat: chatWith(null), isGenerating: true };
+
+  it('shows only a thinking indicator for a question', () => {
+    render({ ...generating, generationMode: 'ask', generationStage: 'design' });
+    expect(container.querySelector('.stage-trail')).toBeNull();
+    expect(container.querySelector('.generation-status-ask').textContent).toMatch(/Thinking/);
+  });
+
+  it('drops the verify stage from a plan, which never builds', () => {
+    render({ ...generating, generationMode: 'plan', generationStage: 'design' });
+    const nodes = [...container.querySelectorAll('.stage-node')].map((node) => node.textContent);
+    expect(nodes).toEqual(['Reading', 'Sizing']);
+  });
+
+  it('keeps all three for a board, and marks the active one', () => {
+    render({ ...generating, generationMode: 'implement', generationStage: 'verify' });
+    const nodes = [...container.querySelectorAll('.stage-node')];
+    expect(nodes.map((node) => node.textContent)).toEqual(['Design', 'Values', 'Verify']);
+    expect(nodes[2].className).toContain('active');
+    expect(nodes[0].className).toContain('done');
+  });
+
+  it('surfaces what the agent is actually doing', () => {
+    render({ ...generating, generationMode: 'implement', thinkingText: 'reading components/timer_555.md' });
+    expect(container.querySelector('.generation-activity').textContent).toBe('reading components/timer_555.md');
+  });
+
+  it('says when the board failed a gate and is being fixed', () => {
+    render({ ...generating, generationMode: 'implement', verifyAttempts: 1 });
+    expect(container.querySelector('.generation-attempts')).toBeNull();
+    render({ ...generating, generationMode: 'implement', verifyAttempts: 3 });
+    expect(container.querySelector('.generation-attempts').textContent).toMatch(/attempt 3/);
   });
 });
 

@@ -75,33 +75,65 @@ function ComposerModeMenu({ mode, onSelect }) {
   );
 }
 
+// Short enough to sit on one line at the panel's narrowest width. Longer text
+// wrapped to a second line and rendered under the mode chip and send button.
 const COMPOSER_PLACEHOLDERS = {
-  plan: 'Describe a circuit to plan before building...',
-  ask: 'Ask about the design or electronics...',
-  implement: 'Message the circuit assistant...',
+  plan: 'What should we plan?',
+  ask: 'Ask about this design…',
+  implement: 'Describe a circuit…',
 };
 
 // The sandbox's actual loop, not a fixed pipeline: it reads the knowledge base,
 // searches component values, then runs the engine — and goes back to reading
 // whenever verification fails. The trail shows where it is now, so a stage can
 // light up more than once during a run.
-const GENERATION_STAGES = [
-  { id: 'design', node: 'Design', label: 'Reading the component reference...' },
-  { id: 'solve', node: 'Values', label: 'Searching component values...' },
-  { id: 'verify', node: 'Verify', label: 'Placing, routing and checking the board...' },
-];
+// Each mode gets the readout that matches the work it actually does. Showing a
+// VERIFY node while answering a question was a lie: Ask never places a board.
+const STAGE_TRAILS = {
+  implement: [
+    { id: 'design', node: 'Design', label: 'Reading the component reference' },
+    { id: 'solve', node: 'Values', label: 'Searching component values' },
+    { id: 'verify', node: 'Verify', label: 'Placing, routing and checking the board' },
+  ],
+  plan: [
+    { id: 'design', node: 'Reading', label: 'Reading the component reference' },
+    { id: 'solve', node: 'Sizing', label: 'Working out the values' },
+  ],
+};
 
-// Live pipeline readout: past stages are copper, the active stage pulses
-// phosphor, upcoming stages stay dim.
-function GenerationStatus({ stage }) {
-  const activeIndex = GENERATION_STAGES.findIndex((entry) => entry.id === stage);
-  const label = activeIndex === -1
-    ? 'Designing the circuit package...'
-    : GENERATION_STAGES[activeIndex].label;
+const DOTS = <span className="typing-dots" aria-hidden="true"><i /><i /><i /></span>;
+
+/**
+ * What the agent is doing, right now.
+ *
+ * `activity` is the live tool line — the actual file being read, the actual
+ * command being run — and it is the whole point: without it every run looked
+ * identical no matter what it was doing, because only the generic stage label
+ * was ever shown.
+ *
+ * `attempts` counts verification passes. The agent loops back to designing
+ * whenever a gate fails, so a second or third attempt is the most informative
+ * thing on screen: it means the board did not verify and is being fixed.
+ */
+function GenerationStatus({ stage, mode = 'implement', activity = '', attempts = 0 }) {
+  // Ask produces prose, not a board. A question deserves a thinking indicator,
+  // not a pipeline.
+  if (mode === 'ask') {
+    return (
+      <div className="generation-status generation-status-ask" role="status">
+        <p>Thinking {DOTS}</p>
+      </div>
+    );
+  }
+
+  const stages = STAGE_TRAILS[mode] || STAGE_TRAILS.implement;
+  const activeIndex = stages.findIndex((entry) => entry.id === stage);
+  const label = activeIndex === -1 ? 'Working' : stages[activeIndex].label;
+
   return (
     <div className="generation-status" role="status">
       <div className="stage-trail" aria-hidden="true">
-        {GENERATION_STAGES.map((entry, index) => (
+        {stages.map((entry, index) => (
           <React.Fragment key={entry.id}>
             {index > 0 && <span className="stage-link" />}
             <span
@@ -114,10 +146,13 @@ function GenerationStatus({ stage }) {
           </React.Fragment>
         ))}
       </div>
-      <p>
-        {label}{' '}
-        <span className="typing-dots" aria-hidden="true"><i /><i /><i /></span>
-      </p>
+      <p>{label} {DOTS}</p>
+      {activity && <p className="generation-activity" title={activity}>{activity}</p>}
+      {attempts > 1 && (
+        <p className="generation-attempts">
+          Verification attempt {attempts} — the last one did not pass, so it is being fixed.
+        </p>
+      )}
     </div>
   );
 }
@@ -136,6 +171,10 @@ export function ChatPanel({
   composerMode,
   setComposerMode,
   generationStage,
+  // The mode the *running* turn was sent with — not the composer's current
+  // selection, which the user can change while a board is building.
+  generationMode,
+  verifyAttempts,
   thinkingText,
   messagesEndRef,
   prompt,
@@ -286,7 +325,12 @@ export function ChatPanel({
               ))}
               {isGenerating && (
                 <article className="chat-message assistant pending">
-                  <GenerationStatus stage={generationStage} />
+                  <GenerationStatus
+                    stage={generationStage}
+                    mode={generationMode}
+                    activity={thinkingText}
+                    attempts={verifyAttempts}
+                  />
                 </article>
               )}
               <div ref={messagesEndRef} />
