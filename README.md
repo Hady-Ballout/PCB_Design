@@ -18,8 +18,14 @@ snapshot of the engine — see [sandbox/README.md](sandbox/README.md):
 node sandbox/cli.mjs new "blink an LED once per second from a 9 V battery"
 ```
 
-It is not yet wired into the app: a circuit still enters through **Import
-JSON**, so paste `sandbox/runs/<id>/circuit.json` in.
+It is wired into the workspace: type a request into the chat composer and the
+board streams in. **Import JSON** still works for a circuit you already have.
+
+The composer's three modes differ in what the agent is allowed to do —
+**Implement** designs and verifies a board, **Ask** answers a question about the
+current one, **Plan** proposes an approach. Only Implement pays for the
+place-route-verify loop: a measured Ask turn was 1 request and 11 seconds against
+Implement's 7 and 86.
 
 Measured cost is **≈$0.02 per board** on DeepSeek V4 Pro, tracked per request by
 `node sandbox/cli.mjs cost`. Note that the Agent SDK's own `total_cost_usd`

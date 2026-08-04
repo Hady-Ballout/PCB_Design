@@ -1,10 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { formatChatTime } from './chatFormat.js';
 
+// The three modes change what the agent is asked to do with its turn, which is
+// the only difference that matters: Implement writes a board, the other two
+// deliberately do not. Ask and Plan are cheap — no place-and-route, no
+// verification loop — so they are the right way to interrogate a design before
+// paying to build it.
 const COMPOSER_MODE_OPTIONS = [
-  { value: 'plan', label: 'Plan' },
-  { value: 'ask', label: 'Ask' },
-  { value: 'implement', label: 'Implement' },
+  { value: 'plan', label: 'Plan', hint: 'Propose an approach without building it' },
+  { value: 'ask', label: 'Ask', hint: 'Answer a question about the current circuit' },
+  { value: 'implement', label: 'Implement', hint: 'Design and verify a board' },
 ];
 
 // Minimal mode dropdown pinned to the composer's bottom-left corner: the
@@ -36,16 +41,18 @@ function ComposerModeMenu({ mode, onSelect }) {
     <div className="composer-mode-menu" ref={menuRef}>
       {open && (
         <ul className="composer-mode-list" role="listbox" aria-label="Assistant mode">
-          {COMPOSER_MODE_OPTIONS.map(({ value, label }) => (
+          {COMPOSER_MODE_OPTIONS.map(({ value, label, hint }) => (
             <li key={value}>
               <button
                 type="button"
                 role="option"
                 aria-selected={mode === value}
                 className={`composer-mode-option ${mode === value ? 'selected' : ''}`}
+                title={hint}
                 onClick={() => { onSelect(value); setOpen(false); }}
               >
                 {label}
+                <em>{hint}</em>
               </button>
             </li>
           ))}
@@ -74,10 +81,14 @@ const COMPOSER_PLACEHOLDERS = {
   implement: 'Message the circuit assistant...',
 };
 
+// The sandbox's actual loop, not a fixed pipeline: it reads the knowledge base,
+// searches component values, then runs the engine — and goes back to reading
+// whenever verification fails. The trail shows where it is now, so a stage can
+// light up more than once during a run.
 const GENERATION_STAGES = [
-  { id: 'circuit', node: 'Circuit', label: 'Generating circuit...' },
-  { id: 'reviewing', node: 'Review', label: 'Reviewing design...' },
-  { id: 'reply', node: 'Reply', label: 'Writing summary...' },
+  { id: 'design', node: 'Design', label: 'Reading the component reference...' },
+  { id: 'solve', node: 'Values', label: 'Searching component values...' },
+  { id: 'verify', node: 'Verify', label: 'Placing, routing and checking the board...' },
 ];
 
 // Live pipeline readout: past stages are copper, the active stage pulses
@@ -130,6 +141,7 @@ export function ChatPanel({
   prompt,
   setPrompt,
   generationBusy,
+  onSubmit,
   error,
 }) {
   return (
@@ -229,9 +241,17 @@ export function ChatPanel({
                   </div>
                   <p className={message.mode ? 'chat-multiline' : ''}>{message.content}</p>
                   {message.circuit && (
+                    // `type` is not part of the circuit contract — title,
+                    // supplyVoltage and components are. The old pipeline
+                    // happened to emit one and this read it unguarded, so a
+                    // generated circuit crashed the whole app to a white page.
+                    // Describe the board from fields that are always there.
                     <div className="chat-artifact-chip">
-                      <span>{message.circuit.type.replaceAll('_', ' ')}</span>
-                      <strong>{message.circuit.title}</strong>
+                      <span>
+                        {message.circuit.components?.length ?? 0} parts
+                        {message.circuit.supplyVoltage ? ` · ${message.circuit.supplyVoltage} V` : ''}
+                      </span>
+                      <strong>{message.circuit.title || 'Circuit'}</strong>
                     </div>
                   )}
                 </article>
@@ -244,23 +264,39 @@ export function ChatPanel({
               <div ref={messagesEndRef} />
             </div>
 
-            <form className="chat-composer" onSubmit={(event) => event.preventDefault()}>
+            <form
+              className="chat-composer"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!generationBusy && prompt.trim()) onSubmit?.();
+              }}
+            >
               <div className="chat-composer-input">
                 <textarea
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
+                  onKeyDown={(event) => {
+                    // Enter sends, Shift+Enter breaks the line — a circuit
+                    // request is usually one sentence.
+                    if (event.key !== 'Enter' || event.shiftKey) return;
+                    event.preventDefault();
+                    if (!generationBusy && prompt.trim()) onSubmit?.();
+                  }}
                   rows={3}
-                  disabled
-                  placeholder="Circuit generation has been removed. Use Import JSON to load a circuit."
+                  disabled={generationBusy}
+                  // Short enough to sit on one line at the panel's narrowest.
+                  // The long version wrapped to three lines and ran under the
+                  // mode chip and send button.
+                  placeholder={COMPOSER_PLACEHOLDERS[composerMode] || COMPOSER_PLACEHOLDERS.implement}
                   aria-label="Message the circuit assistant"
                 />
                 <ComposerModeMenu mode={composerMode} onSelect={setComposerMode} />
                 <button
                   className="composer-send-button"
                   type="submit"
-                  disabled
-                  aria-label="Circuit generation removed"
-                  title="Circuit generation removed"
+                  disabled={generationBusy || !prompt.trim()}
+                  aria-label={generationBusy ? 'Building the board' : 'Send'}
+                  title={generationBusy ? 'Building the board' : 'Send'}
                 >
                   <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
                     <path d="M3 11.5L21 3l-8.5 18-2.2-7.3L3 11.5z" fill="currentColor" />

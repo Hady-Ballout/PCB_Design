@@ -1004,6 +1004,10 @@ h3 {
   border-radius: 0;
   height: 72px;
   min-height: 0;
+  /* Keep text and placeholder clear of the mode chip and send button, which are
+     absolutely positioned along the bottom edge. Without this a wrapped
+     placeholder renders straight through them. */
+  padding-bottom: 26px;
 }
 
 /* Drop the mode dropdown and send button to the bottom edge so they clear
@@ -1087,6 +1091,36 @@ h3 {
   padding: 6px 8px;
   text-align: left;
   width: 100%;
+}
+
+.error-boundary {
+  margin: 0 auto;
+  max-width: 560px;
+  padding: 64px 24px;
+}
+
+.error-boundary pre {
+  background: var(--color-hover-tint);
+  border-radius: 8px;
+  overflow-x: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+}
+
+/* Each option carries a one-line hint: the labels alone do not say that Ask and
+   Plan skip the build, which is the whole difference between them. */
+.composer-mode-option em {
+  color: var(--color-text-muted);
+  display: block;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+.composer-mode-option.selected em {
+  color: inherit;
+  opacity: 0.75;
 }
 
 .composer-mode-option:hover {

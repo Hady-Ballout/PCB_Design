@@ -8,6 +8,7 @@ import { handleSignup, handleLogin, handleVerifyEmail, handleMe, verifyJwt } fro
 import { handleBillingStatus, handleCreateCheckout, handleCreatePortal, handleStripeWebhook } from './billing/billing.js';
 import { QuotaError } from './billing/quota.js';
 import { DailyTokenLimitError, dailyLimitMessage, getDailyTokenStatus } from './billing/dailyTokens.js';
+import { handleSandboxGenerate, handleSandboxRun } from './sandbox/generate.js';
 import type { Circuit, JwtPayload } from './types.js';
 
 loadEnv();
@@ -261,6 +262,23 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       sendJson(response, compilation.ok ? 200 : 422, compilation);
     } catch (error) {
       sendJson(response, statusFor(error), { error: (error as Error).message });
+    }
+    return;
+  }
+
+  if (request.url?.startsWith('/api/sandbox/run/') && request.method === 'GET') {
+    handleSandboxRun(response, decodeURIComponent(request.url.slice('/api/sandbox/run/'.length)));
+    return;
+  }
+
+  if (request.url === '/api/sandbox/generate' && request.method === 'POST') {
+    try {
+      await handleSandboxGenerate(request, response, await readJsonBody(request));
+    } catch (error) {
+      // The handler owns the response once it has written SSE headers, so only
+      // a failure before that point can still be reported as JSON.
+      if (!response.headersSent) sendJson(response, statusFor(error), { error: (error as Error).message });
+      else response.end();
     }
     return;
   }
