@@ -56,6 +56,21 @@ import { applyTheme, loadTheme, saveTheme } from './theme.js';
 import { ThemeToggle } from './ThemeToggle.jsx';
 import '../features/auth/auth.css';
 
+/**
+ * One sentence describing a finished board.
+ *
+ * Shared by both delivery paths — the live stream and the reconnect — because a
+ * board is the same board whichever way it reaches the page, and having two
+ * wordings is what made a normal build announce itself as "recovered".
+ */
+const describeBoard = (circuit, verify) => {
+  const parts = circuit?.components?.length ?? 0;
+  const board = verify?.board;
+  return `${circuit?.title || 'Circuit'} — ${parts} component${parts === 1 ? '' : 's'}`
+    + `${board ? `, ${board.width} x ${board.height} mm` : ''}.`
+    + `${verify?.pass ? ' Routing complete, DRC clean.' : ''}`;
+};
+
 function App() {
   const { user, loading, logout } = useAuth();
   const authHeaders = () => ({
@@ -86,6 +101,10 @@ function App() {
   // so changing the dropdown mid-run does not rewrite what the progress claims.
   const [generationMode, setGenerationMode] = useState('implement');
   const [verifyAttempts, setVerifyAttempts] = useState(0);
+  // Which chat this tab is actively streaming, if any. Held in a ref so the
+  // recovery effect can check it synchronously — state would be stale inside an
+  // effect that does not depend on it.
+  const streamingChatRef = useRef(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [theme, setTheme] = useState(loadTheme);
   const [userBarOpen, setUserBarOpen] = useState(false);
@@ -748,7 +767,14 @@ function App() {
   // generation is silently thrown away by an accidental refresh.
   useEffect(() => {
     const chat = chatStore.chats.find((entry) => entry.sandboxRunId && !entry.result);
-    if (!chat || generatingChatId) return undefined;
+    // `streamingChatRef`, not `generatingChatId`: this effect keys on the chat
+    // awaiting a run, and the `run` event sets that id mid-stream — so the
+    // effect fired during a live generation while its closure still held the
+    // pre-run `generatingChatId` of null. It then polled alongside the stream
+    // and its own completion path wrote the reply, which is why a board built
+    // while watching announced itself as "recovered". A ref is read at call
+    // time and cannot go stale.
+    if (!chat || streamingChatRef.current) return undefined;
 
     let cancelled = false;
     let timer = null;
@@ -783,7 +809,12 @@ function App() {
             : [...current.messages, {
               id: messageId(),
               role: 'assistant',
-              content: `Recovered ${run.circuit.title || 'the circuit'} from a run that finished after the page closed.`,
+              // Same shape as a normal completion — this *is* the board being
+              // delivered, just later than the page expected. Claiming it was
+              // "recovered from a run that finished after the page closed"
+              // asserted something the app cannot know: a reload, a background
+              // tab and a closed window all look identical from here.
+              content: `${describeBoard(run.circuit, run.verify)} Picked up after the page reconnected.`,
               circuit: run.circuit,
               createdAt: Date.now(),
             }],
@@ -820,6 +851,7 @@ function App() {
       title: chat.messages.length ? chat.title : request.slice(0, 60),
       messages: [...chat.messages, { id: messageId(), role: 'user', content: request, createdAt: now }],
     }));
+    streamingChatRef.current = chatId;
     setGeneratingChatId(chatId);
     setGenerationMode(composerMode);
     setGenerationStage('design');
@@ -912,12 +944,8 @@ function App() {
       // the browser show the last progress frame before it starts.
       await new Promise((resolve) => { requestAnimationFrame(() => requestAnimationFrame(resolve)); });
       const result = buildImportedResult(done.circuit);
-      const parts = done.circuit.components.length;
-      const board = done.verify?.board;
       finish(
-        `${done.circuit.title || 'Circuit'} — ${parts} component${parts === 1 ? '' : 's'}`
-        + `${board ? `, ${board.width} x ${board.height} mm` : ''}.`
-        + `${done.verify?.pass ? ' Routing complete, DRC clean.' : ' Some checks did not pass; see the report.'}`,
+        describeBoard(done.circuit, done.verify),
         {
           circuit: done.circuit,
           result,
@@ -932,6 +960,7 @@ function App() {
     } catch (generationError) {
       updateChat(chatId, (chat) => ({ ...chat, error: generationError.message }));
     } finally {
+      streamingChatRef.current = null;
       setGeneratingChatId(null);
       setGenerationStage(null);
       setThinkingText('');

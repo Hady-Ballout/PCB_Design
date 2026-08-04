@@ -618,6 +618,11 @@ h3 {
   align-self: flex-start;
   animation: message-in 300ms cubic-bezier(0.2, 1, 0.5, 1) both;
   display: grid;
+  /* Grid tracks size to their content by default (min-width: auto), so one wide
+     child — a parts table — stretched the whole message past its max-width and
+     clipped the prose around it. minmax(0, 1fr) lets the track shrink so the
+     table scrolls inside the bubble instead of dragging it wider. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   max-width: 92%;
   padding: 2px;
@@ -1142,8 +1147,22 @@ h3 {
 /* Assistant replies arrive as markdown: parts tables, solved-value lists, fenced
    assertion blocks. These styles keep that readable at chat-bubble scale — tight
    vertical rhythm, nothing that stretches the panel. */
+.chat-markdown {
+  /* Same reason as .chat-message: without this the block refuses to shrink
+     below its widest child and the paragraphs get clipped. */
+  min-width: 0;
+}
+
 .chat-markdown > :first-child { margin-top: 0; }
 .chat-markdown > :last-child { margin-bottom: 0; }
+
+/* Long identifiers in prose — net names, kinds, file paths in inline code —
+   must be allowed to break rather than set the width of the whole message. */
+.chat-markdown p,
+.chat-markdown li,
+.chat-markdown code {
+  overflow-wrap: anywhere;
+}
 
 .chat-markdown p,
 .chat-markdown ul,
@@ -1188,8 +1207,14 @@ h3 {
   padding: 0;
 }
 
-/* A parts table is the densest thing in a reply and is often wider than the
-   panel, so it scrolls itself rather than stretching the layout. */
+/* A parts table is the densest thing in a reply, and the panel is 420px at its
+   widest. Two rules make that work:
+
+   1. Cells wrap. They used to be `nowrap`, which forced a five-column parts
+      list far past the panel and was the reason tables ran off screen at all.
+      Wrapping lets the table compress to whatever room there is, which is
+      enough for almost every table the agent writes.
+   2. What still does not fit scrolls, inside the bubble only. */
 .chat-md-table-wrap {
   margin: 0 0 8px;
   max-width: 100%;
@@ -1199,14 +1224,27 @@ h3 {
 .chat-markdown table {
   border-collapse: collapse;
   font-size: 11px;
+  /* Divide the space evenly rather than letting one long cell dominate. */
+  table-layout: auto;
+  width: 100%;
 }
 
 .chat-markdown th,
 .chat-markdown td {
   border: 1px solid var(--color-ink);
-  padding: 3px 7px;
+  overflow-wrap: anywhere;
+  padding: 3px 6px;
   text-align: left;
-  white-space: nowrap;
+  vertical-align: top;
+}
+
+/* Inline code inside a cell must not set the column width: `voltage_source` and
+   `missing_supply_decoupling` are common and long. */
+.chat-markdown td code,
+.chat-markdown th code {
+  font-size: 10px;
+  padding: 0 2px;
+  white-space: normal;
 }
 
 .chat-markdown th {
