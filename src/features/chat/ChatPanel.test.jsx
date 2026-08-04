@@ -112,6 +112,61 @@ describe('starting a new design', () => {
   });
 });
 
+describe('assistant replies are markdown', () => {
+  // The agent answers in markdown — parts tables, solved values, fenced
+  // assertion blocks. Rendered as plain text that became a wall of pipes and
+  // hashes.
+  const reply = (content) => ({
+    id: 'c1',
+    title: 'A chat',
+    messages: [{ id: 'm1', role: 'assistant', content, createdAt: Date.now() }],
+  });
+
+  it('renders a parts table, which is the densest thing in a reply', () => {
+    render({ activeChat: reply('| Ref | Value |\n|---|---|\n| R1 | 9.1k |\n| R2 | 82k |') });
+    expect(container.querySelectorAll('.chat-markdown table th')).toHaveLength(2);
+    expect(container.querySelectorAll('.chat-markdown table tbody tr')).toHaveLength(2);
+    // Wide tables scroll inside the bubble instead of stretching the panel.
+    expect(container.querySelector('.chat-md-table-wrap')).not.toBeNull();
+  });
+
+  it('renders headings, emphasis and code without showing the syntax', () => {
+    render({ activeChat: reply('## Plan\n\nAchieved **1.200 s** via `solve.mjs`.') });
+    const text = container.querySelector('.chat-markdown').textContent;
+    expect(container.querySelector('.chat-md-heading').textContent).toBe('Plan');
+    expect(container.querySelector('.chat-markdown strong')).not.toBeNull();
+    expect(container.querySelector('.chat-markdown code').textContent).toBe('solve.mjs');
+    expect(text).not.toContain('##');
+    expect(text).not.toContain('**');
+  });
+
+  it('renders a fenced block of assertions', () => {
+    render({ activeChat: reply('```\nU1.TRIG == U1.THRES\n```') });
+    expect(container.querySelector('.chat-markdown pre code').textContent).toContain('U1.TRIG == U1.THRES');
+  });
+
+  it('does not execute HTML embedded in a reply', () => {
+    // The text comes from a model, so raw HTML must stay inert — no rehype-raw.
+    render({ activeChat: reply('<img src=x onerror="window.__x=1"> and <b>bold</b>') });
+    const markdown = container.querySelector('.chat-markdown');
+    expect(markdown.querySelector('img')).toBeNull();
+    expect(markdown.querySelector('b')).toBeNull();
+    expect(window.__x).toBeUndefined();
+  });
+
+  it('leaves the user\'s own words exactly as typed', () => {
+    render({
+      activeChat: {
+        id: 'c1',
+        title: 'A chat',
+        messages: [{ id: 'm1', role: 'user', content: 'blink an LED **fast**', createdAt: Date.now() }],
+      },
+    });
+    expect(container.querySelector('.chat-markdown')).toBeNull();
+    expect(container.querySelector('.chat-message.user p').textContent).toBe('blink an LED **fast**');
+  });
+});
+
 describe('progress readout', () => {
   // Every mode used to render the same three-stage trail, so an Ask turn
   // advertised a VERIFY step it never runs — and the live tool line was

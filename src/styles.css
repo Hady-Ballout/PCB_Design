@@ -1139,6 +1139,95 @@ h3 {
   width: 100%;
 }
 
+/* Assistant replies arrive as markdown: parts tables, solved-value lists, fenced
+   assertion blocks. These styles keep that readable at chat-bubble scale — tight
+   vertical rhythm, nothing that stretches the panel. */
+.chat-markdown > :first-child { margin-top: 0; }
+.chat-markdown > :last-child { margin-bottom: 0; }
+
+.chat-markdown p,
+.chat-markdown ul,
+.chat-markdown ol {
+  margin: 0 0 8px;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  padding-left: 20px;
+}
+
+.chat-markdown li {
+  margin-bottom: 2px;
+}
+
+/* Headings are flattened into emphasis: a reply is not a document, and the
+   page's heading scale would dwarf the bubble. */
+.chat-md-heading {
+  display: block;
+  font-size: 13px;
+  margin: 12px 0 4px;
+}
+
+.chat-markdown code {
+  background: var(--color-hover-tint);
+  border-radius: 3px;
+  font-size: 11px;
+  padding: 1px 4px;
+}
+
+.chat-markdown pre {
+  background: var(--color-hover-tint);
+  border-radius: 6px;
+  margin: 0 0 8px;
+  overflow-x: auto;
+  padding: 8px 10px;
+}
+
+.chat-markdown pre code {
+  background: none;
+  padding: 0;
+}
+
+/* A parts table is the densest thing in a reply and is often wider than the
+   panel, so it scrolls itself rather than stretching the layout. */
+.chat-md-table-wrap {
+  margin: 0 0 8px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.chat-markdown table {
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.chat-markdown th,
+.chat-markdown td {
+  border: 1px solid var(--color-ink);
+  padding: 3px 7px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.chat-markdown th {
+  background: var(--color-hover-tint);
+  font-weight: 700;
+}
+
+.chat-markdown hr {
+  border: none;
+  border-top: 1px solid var(--color-ink);
+  margin: 12px 0;
+  opacity: 0.3;
+}
+
+.chat-markdown blockquote {
+  border-left: 3px solid var(--color-ink);
+  margin: 0 0 8px;
+  opacity: 0.8;
+  padding-left: 10px;
+}
+
 /* The live tool line: what the agent is reading or running at this moment.
    Truncated to one line — it changes every few seconds and must not reflow the
    thread while the user is reading it. */

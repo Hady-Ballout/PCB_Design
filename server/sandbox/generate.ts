@@ -15,6 +15,9 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 // @ts-expect-error — the sandbox is plain ESM JavaScript, deliberately: it is
 // the same code the CLI runs, and a TS copy would be a second implementation.
 import { create, say, open, readSession } from '../../sandbox/session.mjs';
+// @ts-expect-error — src/core is dependency-free JavaScript shared with the
+// browser; its label table is what names components in the progress readout.
+import { COMPONENT_KINDS } from '../../src/core/componentKinds.js';
 
 interface StreamEvent {
   type: string;
@@ -199,37 +202,74 @@ export const handleSandboxRun = (
 };
 
 /**
- * One short line describing what a tool call is doing, for the progress readout.
+ * One short line describing what a tool call is doing, in the language of the
+ * work rather than the language of the implementation.
  *
- * Paths are shown relative to the workspace, so `knowledge/components/led.md`
- * reads as `components/led.md` and the run's own files as bare names. Taking the
- * last two segments instead put the run id on screen — `2026-08-04-9ub9/
- * circuit.json` — which means nothing to the person waiting.
+ * The readout used to print file paths — "reading components/voltage_source.md"
+ * — which exposes how the knowledge base happens to be laid out and tells the
+ * person waiting nothing they care about. They want to know the agent is looking
+ * at the voltage source, not which file that lives in.
+ *
+ * Component pages are named from the engine's own label table, so "555 timer"
+ * and "Barometric sensor (BMP280, I2C)" come out right without a second list to
+ * keep in sync.
  */
-const summarizeTool = (tool: string, input: Record<string, unknown> = {}, root = ''): string => {
+export const summarizeTool = (tool: string, input: Record<string, unknown> = {}, root = ''): string => {
   if (tool === 'Bash') {
     // Collapse whitespace first: the agent writes multi-line node scripts, and a
     // raw newline breaks the single-line readout.
     const command = String(input.command || '').replace(/\s+/g, ' ').trim();
-    if (command.includes('verify.mjs')) return 'verifying the board';
-    if (command.includes('solve.mjs')) return 'searching component values';
+    if (command.includes('verify.mjs')) return 'Checking the board';
+    if (command.includes('solve.mjs')) return 'Solving component values';
     // It reads reference pages with `cat` as often as with the Read tool.
     const read = /(?:^|\s)(?:cat|head|tail|less)\s+(\S+)/.exec(command);
-    if (read) return `reading ${read[1].split('/').slice(-2).join('/')}`;
-    if (/^node\s+-e/.test(command)) return 'working out the numbers';
-    if (/^(grep|rg|ls|find)\b/.test(command)) return 'searching the knowledge base';
-    return command.length > 60 ? `${command.slice(0, 59)}…` : command;
+    if (read) return describePath(read[1]);
+    if (/^node\s+-e/.test(command)) return 'Working through the arithmetic';
+    if (/^(grep|rg|ls|find)\b/.test(command)) return 'Looking for the right part';
+    return 'Working';
   }
+
+  // The agent keeps a todo list; the tool's name is not a progress update.
+  if (/^(TodoWrite|Task(Create|Update|List))$/.test(tool)) return 'Planning the next step';
 
   const raw = String(input.file_path || input.path || '');
   const relative = root && raw.startsWith(root) ? raw.slice(root.length).replace(/^\//, '') : raw;
-  // Drop the top-level folder: `knowledge/components/led.md` is one segment
-  // longer than it needs to be, and `src/core/pcbLayout.js` reads fine as
-  // `core/pcbLayout.js`.
-  const name = relative.split('/').slice(-2).join('/');
 
-  if (tool === 'Read') return name ? `reading ${name}` : 'reading';
-  if (tool === 'Write' || tool === 'Edit') return name ? `writing ${name}` : 'writing';
-  if (tool === 'Grep' || tool === 'Glob') return 'searching the knowledge base';
-  return tool;
+  if (tool === 'Grep' || tool === 'Glob') return 'Looking for the right part';
+  // Anything without a path to describe gets a neutral line rather than a tool
+  // name — "TaskUpdate" is internal vocabulary leaking into the UI.
+  if (!relative) return 'Working';
+  if (tool === 'Write' || tool === 'Edit') {
+    if (/circuit\.json$/.test(relative)) return 'Drafting the circuit';
+    if (/report\.md$/.test(relative)) return 'Writing up the result';
+    return 'Working';
+  }
+  return describePath(relative);
+};
+
+/** Turn a workspace path into something worth reading. */
+const describePath = (path: string): string => {
+  const clean = String(path).replace(/^\.\//, '');
+
+  const component = /components\/([\w-]+)\.md$/.exec(clean);
+  if (component) {
+    const kind = component[1];
+    if (kind === 'README') return 'Browsing the component index';
+    const label = (COMPONENT_KINDS as Record<string, { label?: string }>)[kind]?.label;
+    return `Exploring ${label || kind.replace(/_/g, ' ')}`;
+  }
+
+  const pattern = /patterns\/([\w-]+)\.md$/.exec(clean);
+  if (pattern) {
+    return pattern[1] === 'README'
+      ? 'Looking for a matching pattern'
+      : `Studying the ${pattern[1].replace(/-/g, ' ')} pattern`;
+  }
+
+  if (/prompts\//.test(clean)) return 'Reviewing the design procedure';
+  if (/^(CLAUDE|WORKSPACE)\.md$/.test(clean)) return 'Re-reading the brief';
+  if (/circuit\.json$/.test(clean)) return 'Reviewing the circuit';
+  if (/report\.md$/.test(clean)) return 'Reviewing the write-up';
+  if (/src\/core\//.test(clean)) return 'Consulting the design rules';
+  return 'Reading the reference';
 };

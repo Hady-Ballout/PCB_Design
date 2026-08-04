@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { formatChatTime } from './chatFormat.js';
+import { ChatMarkdown } from './ChatMarkdown.jsx';
 
 // The three modes change what the agent is asked to do with its turn, which is
 // the only difference that matters: Implement writes a board, the other two
@@ -306,7 +307,12 @@ export function ChatPanel({
                   <div className="chat-message-meta">
                     <time>{formatChatTime(message.createdAt)}</time>
                   </div>
-                  <p className={message.mode ? 'chat-multiline' : ''}>{message.content}</p>
+                  {/* Only the assistant writes markdown. A user's message is
+                      shown exactly as typed — running it through a renderer
+                      would reformat their own words back at them. */}
+                  {message.role === 'assistant'
+                    ? <ChatMarkdown>{message.content}</ChatMarkdown>
+                    : <p className={message.mode ? 'chat-multiline' : ''}>{message.content}</p>}
                   {message.circuit && (
                     // `type` is not part of the circuit contract — title,
                     // supplyVoltage and components are. The old pipeline
