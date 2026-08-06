@@ -42,7 +42,7 @@ the frontend expects `VITE_API_URL` (see below) or same-origin `/api`.
 | `MCP_RESOURCE_URI` | canonical URI of this MCP server. **Production: `https://mcp.impedo.ai/api/mcp`** (the MCP endpoint has its own subdomain — see `docs/MCP_DEPLOYMENT.md`). Tokens must carry it as `aud` — this is the audience binding that stops a token issued for another service being replayed here. Must match the WorkOS Resource Indicator and `VITE_MCP_BASE_URL` exactly |
 | `MCP_OAUTH_ISSUER` | the authorization server's issuer URL (WorkOS AuthKit) |
 | `MCP_OAUTH_JWKS_URI` | JWKS endpoint; defaults to `<issuer>/oauth2/jwks` |
-| `MCP_REQUIRED_SCOPE` | scope a token must carry (default `circuits:use`) |
+| `MCP_REQUIRED_SCOPE` | scope a token must carry. **Default: empty (no scope required).** WorkOS AuthKit authorizes MCP by the Resource Indicator (`aud`) and rejects custom scopes with `invalid_scope`, so requiring one breaks sign-in. Set this only for an IdP that actually mints the scope into its tokens |
 | `MCP_MAX_CONCURRENT_SIMULATIONS` | simultaneous ngspice runs per user (default `1`) |
 | `NGSPICE_TIMEOUT_MS` | wall-clock cap on a single ngspice run before it is killed (default `30000`) |
 | `VITE_MCP_BASE_URL` | frontend override for the base URL shown on the Connect page (it appends `/api/mcp`). **Production: `https://mcp.impedo.ai`**, set at build time in `.github/workflows/firebase-deploy.yml`. Needed because the MCP endpoint is on its own subdomain, not on `VITE_API_URL` |

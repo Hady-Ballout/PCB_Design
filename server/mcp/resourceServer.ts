@@ -21,6 +21,15 @@ export interface McpAuthConfig {
   resourceUri: string;
   issuer: string;
   jwksUri: string;
+  /**
+   * OAuth scope a token must carry. Empty string = no scope requirement, which is
+   * the correct setting for WorkOS AuthKit: it authorizes MCP access by the
+   * Resource Indicator (the `aud` binding below), and rejects any custom scope in
+   * the authorization request with `invalid_scope`. Requiring one here would make
+   * the connector unusable — Claude would ask AuthKit for a scope it cannot issue,
+   * and the sign-in would fail before a token is ever minted. Only set this for an
+   * IdP that actually issues the scope.
+   */
   requiredScope: string;
 }
 
@@ -32,7 +41,11 @@ export type AuthOutcome =
 export const protectedResourceMetadata = (config: McpAuthConfig) => ({
   resource: config.resourceUri,
   authorization_servers: [config.issuer],
-  scopes_supported: [config.requiredScope],
+  // Only advertise a scope when one is actually required. A client reads this list
+  // and requests exactly these scopes from the authorization server, so advertising
+  // a scope the IdP cannot issue (e.g. a custom scope against WorkOS AuthKit) makes
+  // the sign-in fail with `invalid_scope`.
+  ...(config.requiredScope ? { scopes_supported: [config.requiredScope] } : {}),
   bearer_methods_supported: ['header'],
 });
 
@@ -66,9 +79,9 @@ const challenge = (
   config: McpAuthConfig,
   extra: Record<string, string> = {},
 ): void => {
-  const params = {
+  const params: Record<string, string> = {
     resource_metadata: metadataUrlFor(config),
-    scope: config.requiredScope,
+    ...(config.requiredScope ? { scope: config.requiredScope } : {}),
     ...extra,
   };
   const value = `Bearer ${Object.entries(params)
@@ -118,7 +131,10 @@ export async function authorizeMcpRequest(
   }
 
   const scopes = String(payload.scope ?? '').split(/\s+/).filter(Boolean);
-  if (!scopes.includes(config.requiredScope)) {
+  // Enforce a scope only when one is configured. With WorkOS AuthKit no scope is
+  // required (see McpAuthConfig.requiredScope); the audience check above is the
+  // authorization boundary.
+  if (config.requiredScope && !scopes.includes(config.requiredScope)) {
     challenge(response, 403, config, { error: 'insufficient_scope' });
     return { ok: false };
   }
@@ -137,6 +153,9 @@ export const mcpAuthConfigFromEnv = (): McpAuthConfig | null => {
     resourceUri: MCP_RESOURCE_URI,
     issuer: MCP_OAUTH_ISSUER,
     jwksUri: MCP_OAUTH_JWKS_URI || new URL('/oauth2/jwks', MCP_OAUTH_ISSUER).toString(),
-    requiredScope: process.env.MCP_REQUIRED_SCOPE || 'circuits:use',
+    // Default: no scope requirement. WorkOS AuthKit (the supported IdP) cannot
+    // issue a custom scope, so requiring one breaks sign-in. Set MCP_REQUIRED_SCOPE
+    // only for an IdP that mints the scope into its tokens.
+    requiredScope: process.env.MCP_REQUIRED_SCOPE ?? '',
   };
 };

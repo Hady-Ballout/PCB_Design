@@ -32,7 +32,11 @@ users.
 1. Create a WorkOS account and an **AuthKit** environment (Production).
 2. **Configuration → register a Resource Indicator**: `https://mcp.impedo.ai/api/mcp`.
    AuthKit stamps this as the `aud` on issued tokens.
-3. Define the scope **`circuits:use`**.
+3. **Do not define a custom scope.** AuthKit authorizes MCP by the Resource
+   Indicator above and rejects any custom scope (e.g. `circuits:use`) in the
+   authorization request with `invalid_scope` — which Claude surfaces as the
+   misleading error `state: Field required`. The server runs scope-less by default
+   (`MCP_REQUIRED_SCOPE` unset); the `aud` binding is the authorization boundary.
 4. Enable **Dynamic Client Registration (DCR)** so Claude can self-register.
    (The MCP spec now prefers CIMD, but claude.ai's connector flow still uses DCR;
    AuthKit supports both — enabling DCR covers both clients.)
@@ -102,8 +106,8 @@ identical — only ever fast-forward.
    ```bash
    curl -i -X POST https://mcp.impedo.ai/api/mcp
    ```
-   Expect `401` with a `WWW-Authenticate: Bearer resource_metadata="…", scope="circuits:use"`
-   header.
+   Expect `401` with a `WWW-Authenticate: Bearer resource_metadata="…"` header
+   (no `scope=` unless you deliberately configured one — see step 1.3).
 3. **Real client round-trip:** in Claude (Settings → Connectors → Add custom connector)
    paste `https://mcp.impedo.ai/api/mcp`, or run
    `claude mcp add --transport http pcb-pilot https://mcp.impedo.ai/api/mcp`. Complete

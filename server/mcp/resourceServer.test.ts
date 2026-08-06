@@ -196,3 +196,40 @@ describe('authorizeMcpRequest', () => {
     expect(result.ok && result.subject).toBe('mcp:42');
   });
 });
+
+describe('with no required scope (WorkOS AuthKit default)', () => {
+  // AuthKit rejects a custom scope in the authorization request with
+  // `invalid_scope`, so the hosted connector runs scope-less: authorization is the
+  // audience binding alone. requiredScope: '' must therefore neither advertise nor
+  // enforce a scope.
+  const noScope = (): McpAuthConfig => ({ ...config, requiredScope: '' });
+
+  it('omits scopes_supported from the metadata', () => {
+    expect(protectedResourceMetadata(noScope())).not.toHaveProperty('scopes_supported');
+  });
+
+  it('omits scope from the 401 challenge', async () => {
+    const { request, response, written } = fakeExchange();
+
+    await authorizeMcpRequest(request, response, noScope());
+
+    expect(written.status).toBe(401);
+    expect(written.headers['WWW-Authenticate']).not.toContain('scope=');
+    expect(written.headers['WWW-Authenticate']).toContain('resource_metadata=');
+  });
+
+  it('accepts a valid token that carries no scope at all', async () => {
+    const token = await mintToken({ scope: '' });
+    const { request, response } = fakeExchange({ authorization: `Bearer ${token}` });
+
+    expect((await authorizeMcpRequest(request, response, noScope())).ok).toBe(true);
+  });
+
+  it('still enforces audience even without a scope', async () => {
+    const token = await mintToken({ scope: '', aud: 'https://other-service.example.com/api/mcp' });
+    const { request, response, written } = fakeExchange({ authorization: `Bearer ${token}` });
+
+    expect((await authorizeMcpRequest(request, response, noScope())).ok).toBe(false);
+    expect(written.status).toBe(401);
+  });
+});
