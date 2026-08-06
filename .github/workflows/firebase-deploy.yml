@@ -26,6 +26,12 @@ jobs:
         run: npm run build
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          # The hosted MCP endpoint lives on its own subdomain, not on VITE_API_URL.
+          # This is what the "Connect to Claude" page shows the user to paste into
+          # Claude; it must exactly match the MCP_RESOURCE_URI on the API and the
+          # WorkOS Resource Indicator, or the audience check rejects the token.
+          # Public value (it is displayed for users to copy), so it is not a secret.
+          VITE_MCP_BASE_URL: https://mcp.impedo.ai
 
       - name: Deploy to Firebase
         uses: FirebaseExtended/action-hosting-deploy@v0

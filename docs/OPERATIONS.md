@@ -39,13 +39,13 @@ the frontend expects `VITE_API_URL` (see below) or same-origin `/api`.
 | `STRIPE_PRICE_PRO_MONTHLY`, `STRIPE_PRICE_PRO_YEARLY`, `STRIPE_PRICE_TEAM_MONTHLY`, `STRIPE_PRICE_TEAM_YEARLY` | the four recurring price IDs (`price_...`) from the Stripe dashboard |
 | `APP_URL` | canonical frontend URL used in Checkout success/cancel and Portal return URLs (e.g. `https://impedo.ai`) |
 | `MCP_HTTP_ENABLED` | `1` mounts the hosted MCP endpoint at `/api/mcp`; **unset = off**. With `NODE_ENV=production` the server refuses to start if this is on without the OAuth vars below, rather than exposing the tools unauthenticated |
-| `MCP_RESOURCE_URI` | canonical URI of this MCP server (e.g. `https://impedo.ai/api/mcp`). Tokens must carry it as `aud` — this is the audience binding that stops a token issued for another service being replayed here |
+| `MCP_RESOURCE_URI` | canonical URI of this MCP server. **Production: `https://mcp.impedo.ai/api/mcp`** (the MCP endpoint has its own subdomain — see `docs/MCP_DEPLOYMENT.md`). Tokens must carry it as `aud` — this is the audience binding that stops a token issued for another service being replayed here. Must match the WorkOS Resource Indicator and `VITE_MCP_BASE_URL` exactly |
 | `MCP_OAUTH_ISSUER` | the authorization server's issuer URL (WorkOS AuthKit) |
 | `MCP_OAUTH_JWKS_URI` | JWKS endpoint; defaults to `<issuer>/oauth2/jwks` |
 | `MCP_REQUIRED_SCOPE` | scope a token must carry (default `circuits:use`) |
 | `MCP_MAX_CONCURRENT_SIMULATIONS` | simultaneous ngspice runs per user (default `1`) |
 | `NGSPICE_TIMEOUT_MS` | wall-clock cap on a single ngspice run before it is killed (default `30000`) |
-| `VITE_MCP_BASE_URL` | frontend override for the URL shown on the Connect page, when the API is not same-origin |
+| `VITE_MCP_BASE_URL` | frontend override for the base URL shown on the Connect page (it appends `/api/mcp`). **Production: `https://mcp.impedo.ai`**, set at build time in `.github/workflows/firebase-deploy.yml`. Needed because the MCP endpoint is on its own subdomain, not on `VITE_API_URL` |
 
 Real `.env*` files are gitignored; `.env.local` and `.env.production` exist locally but
 aren't tracked content-wise beyond `.env.production/env.production`.
