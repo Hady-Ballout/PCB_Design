@@ -156,8 +156,11 @@ try {
   const challengeHeader = unauthorized.headers.get('www-authenticate') ?? '';
   check('unauthenticated MCP call is challenged with 401', unauthorized.status === 401,
     String(unauthorized.status));
+  // No scope= expected here: MCP_REQUIRED_SCOPE is unset in this spawn and the
+  // default became "none required" for WorkOS AuthKit compatibility, so the
+  // challenge advertises only where to authenticate.
   check('challenge points at the metadata document',
-    challengeHeader.includes('resource_metadata=') && challengeHeader.includes('scope='),
+    challengeHeader.includes('resource_metadata='),
     challengeHeader);
 
   const badToken = await fetch(`${authBase}/api/mcp`, {
