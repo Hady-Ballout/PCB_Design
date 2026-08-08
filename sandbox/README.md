@@ -244,9 +244,12 @@ Read these as an order of magnitude, not a quote. Three caveats that matter:
 
 ## Configuration
 
-Credentials come from one file, `.env.deepseek` (git-ignored), and nowhere else.
-Point elsewhere with `SANDBOX_ENV_FILE`. `ANTHROPIC_MODEL` in that file selects
-the model.
+Credentials come from one env file (git-ignored) named by `SANDBOX_ENV_FILE` —
+the default is `.env.deepseek`; this repo's current setup is `.env.glm` (GLM
+5.2 through Z.ai's Anthropic-compatible endpoint, see `.env.example`).
+`ANTHROPIC_MODEL` in that file selects the model. When the file does not exist
+the process environment is used as-is, which is how production supplies the
+`ANTHROPIC_*` variables.
 
 ## Moving execution off this machine
 

@@ -21,12 +21,13 @@ the frontend expects `VITE_API_URL` (see below) or same-origin `/api`.
 
 | Var | Purpose |
 |---|---|
-| `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_API_KEY` | local/hosted Ollama connection |
-| `OLLAMA_NUM_CTX`, `OLLAMA_NUM_PREDICT` | context/output size for circuit generation |
-| `OLLAMA_NUM_PREDICT_CLARIFY`, `OLLAMA_NUM_PREDICT_ASSIST` | output budgets for the clarify round (default 512) and Plan/Ask replies (default 1024) |
-| `OLLAMA_CONTEXT_DIAGNOSTICS` | `1` to log per-request turn count/revision flag |
-| `AI_PROVIDER`, `AI_API_URL`, `AI_MODEL`, `AI_API_KEY`, `AI_MAX_TOKENS` | switch to an OpenAI-compatible provider (e.g. Z.ai/GLM) instead of Ollama. `AI_MAX_TOKENS` overrides the request's `max_tokens`; unset, it defaults to 4096, or for Z.ai providers 12000 (30000 when `ZAI_THINKING_TYPE=enabled` — reasoning and JSON output share that one budget, so thinking mode needs the larger default to avoid `finish_reason: length` truncation) |
-| `ZAI_THINKING_TYPE`, `ZAI_REASONING_EFFORT` | Z.ai-specific tuning; `ZAI_THINKING_TYPE` is `disabled` (default) or `enabled` — enabling it raises the `AI_MAX_TOKENS` default from 12000 to 30000 (see above) |
+| `ANTHROPIC_BASE_URL` | Anthropic-compatible endpoint the sandbox agent talks to. GLM 5.2 via Z.ai: `https://open.bigmodel.cn/api/anthropic` |
+| `ANTHROPIC_AUTH_TOKEN` | API key for that endpoint. **Required in production** for `/api/sandbox/generate` to work |
+| `ANTHROPIC_MODEL` | the design model, e.g. `glm-5.2` |
+| `ANTHROPIC_SMALL_FAST_MODEL` | side-task model for the Agent SDK; pin it to the same model so nothing routes to an unavailable one |
+| `SANDBOX_ENV_FILE` | dev only: repo-root-relative file the sandbox reads the `ANTHROPIC_*` vars from (e.g. `.env.glm`). Absent the file, the process environment is used — which is how production supplies them |
+| `CLAUDE_STREAM_IDLE_TIMEOUT_MS` | stream watchdog: a provider that goes silent this long fails the run instead of hanging it (default 180000) |
+| `DAILY_TOKEN_LIMIT` | per-user daily allowance. Metered as fresh input + cache writes + output; cache reads are free to the meter. An implement run bills ~20–120k, so `300000` ≈ 4–8 boards/day (default 100000) |
 | `PORT`, `HOST`, `CORS_ORIGIN` | API server bind + allowed frontend origin(s); `CORS_ORIGIN` accepts a comma-separated allowlist (`server/cors.ts`) — the matching request origin is echoed back per-response, and the **first** entry is the canonical frontend URL used in verification-email links |
 | `JWT_SECRET` | **required** — the server refuses to start if it is unset |
 | `MAX_BODY_BYTES` | max request body size before a `413` is returned (default `4 MiB`) |
@@ -136,11 +137,16 @@ failing opaquely; the rest of the app (including non-firmware simulation) is una
   Render's auto-deploy (backend). Never let the branches diverge — as of the 2026-07
   reconciliation merge they carry identical content.
 - **`Dockerfile`** — `node:20-slim` + `apt-get install ngspice`. Installs all deps
-  (devDependencies included, needed for `tsc`), copies `server/` and `src/core/`, runs
-  `npm run build:server` (compiles the TS server to `dist/server` and copies `src/core`
-  beside it), then `npm prune --omit=dev` and runs the compiled
-  `dist/server/server/index.js` on port 8787 with `HOST=0.0.0.0`. No frontend build step
-  inside this image.
+  (devDependencies included, needed for `tsc`), copies `server/`, `src/core/`, `mcp/`,
+  `sandbox/`, `knowledge/` and `CLAUDE.md`, runs `npm run build:server` (compiles the TS
+  server to `dist/server` and stages the engine, knowledge base, sandbox and CLAUDE.md
+  beside it via `scripts/stage-server-assets.mjs`), then `npm prune --omit=dev` and runs
+  the compiled `dist/server/server/index.js` on port 8787 with `HOST=0.0.0.0`. No
+  frontend build step inside this image.
+- **Sandbox runs are ephemeral in the container.** Run workspaces land in
+  `dist/server/sandbox/runs/` on the container filesystem, so a deploy or restart drops
+  them: an in-flight generation dies and a chat's "resume" of an old run answers
+  `No run "<id>"`. Accepted for now — a run is a few minutes long and reproducible.
 - **`firebase.json`** — hosts the static `dist/` build (Vite frontend) with an SPA rewrite
   (`**` -> `/index.html`). Deployed via `.github/workflows/firebase-deploy.yml`.
 - So the frontend (Firebase Hosting, static) and API (Docker container, wherever it's run)
