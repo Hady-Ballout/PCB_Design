@@ -1,0 +1,9 @@
+# Keep run snapshots, eval output, credentials and local build state out of the
+# image context — sandbox/runs/ alone can be gigabytes of workspace copies.
+sandbox/runs/
+sandbox/results/
+.env
+.env.*
+node_modules
+dist
+local/

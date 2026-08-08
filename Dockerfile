@@ -16,10 +16,17 @@ RUN npm ci
 # (mcp/registerTools, mcp/artifactSink, mcp/limits, …), so that must be copied too
 # or `tsc` cannot resolve them and the build fails. mcp/ itself imports only
 # src/core beyond its own tree, which is already copied below.
+# The sandbox agent is plain ESM reached at runtime from dist/server/, and every
+# run workspace is seeded from knowledge/ + src/core/ + CLAUDE.md — the staging
+# script (run by build:server) copies all of them under dist/server/.
 COPY tsconfig.server.json ./
 COPY server/ ./server/
 COPY src/core/ ./src/core/
 COPY mcp/ ./mcp/
+COPY sandbox/ ./sandbox/
+COPY knowledge/ ./knowledge/
+COPY CLAUDE.md ./
+COPY scripts/stage-server-assets.mjs ./scripts/
 RUN npm run build:server
 
 # Drop devDependencies now that the build is done
