@@ -16,6 +16,7 @@
 
 import {
   COMPOUND_SPICE_KINDS,
+  CONNECTOR_KINDS,
   DEFAULT_PIN_COUNT_BY_KIND,
   FIXED_PIN_NAMES,
   MCU_KINDS,
@@ -62,7 +63,9 @@ const SUPPLY_PIN_NAMES = new Set(['5V', '3V3', 'VIN', 'VCC', 'GND', 'VS', 'EN'])
 const E24 = [1.0, 1.1, 1.2, 1.3, 1.5, 1.6, 1.8, 2.0, 2.2, 2.4, 2.7, 3.0, 3.3, 3.6, 3.9, 4.3, 4.7, 5.1, 5.6, 6.2, 6.8, 7.5, 8.2, 9.1];
 
 // Canonical positional pin roles for kinds without a fixedPins contract.
-const ROLE_PINS = {
+// Exported so the component knowledge base (knowledge/components) can document
+// one pin order per kind rather than keeping a second copy that drifts.
+export const ROLE_PINS = {
   opamp: ['IN+', 'IN-', 'OUT', 'V+', 'V-'],
   comparator: ['IN+', 'IN-', 'OUT', 'V+', 'V-'],
   bjt_npn: ['collector', 'base', 'emitter'],
@@ -996,6 +999,11 @@ const TOPOLOGY_RULES = [
       const found = [];
       for (const part of circuit.components) {
         if (!MCU_KINDS.has(part.kind) && !WIRING_ONLY_KINDS.has(part.kind)) continue;
+        // A power connector legitimately touches nothing but power and ground:
+        // that IS its job. Without this the rule fires on any barrel jack or
+        // terminal block, but only on boards that also carry an MCU (which is
+        // what populates graph.supplyNets) — inconsistent as well as wrong.
+        if (CONNECTOR_KINDS.has(part.kind)) continue;
         const live = (part.nodes ?? [])
           .map((node, index) => ({ net: String(node), index }))
           .filter(({ net, index }) => net && !isUnconnectedTerminal(net, part.ref, index + 1));

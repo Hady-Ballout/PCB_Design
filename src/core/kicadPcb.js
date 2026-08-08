@@ -174,6 +174,13 @@ const footprintBlock = (component, netNumberFor) => {
     // orientation; omitting it makes non-square pads (e.g. a TO-220's 2mm x
     // 1.905mm pad) render with their raw local size instead of the layout's
     // board-space size. See kicadPcb.test.js's pad-angle test.
+    // Surface-mount: copper, mask and paste on one side, and no drill token —
+    // a `(drill 0)` on an smd pad is malformed, not merely redundant.
+    if (pad.type === 'smd') {
+      const side = pad.layer === 'bottom' ? 'B' : 'F';
+      const smdLayers = `"${side}.Cu" "${side}.Paste" "${side}.Mask"`;
+      return `      (pad ${q(pad.padNumber)} smd ${shape} (at ${fmt(x)} ${fmt(y)}${angle ? ` ${fmt(angle)}` : ''}) (size ${fmt(w)} ${fmt(h)}) (layers ${smdLayers})${netNode} (tstamp ${uuid}))`;
+    }
     return `      (pad ${q(pad.padNumber)} thru_hole ${shape} (at ${fmt(x)} ${fmt(y)}${angle ? ` ${fmt(angle)}` : ''}) (size ${fmt(w)} ${fmt(h)}) (drill ${fmt(pad.drill)}) (layers "*.Cu" "*.Mask")${netNode} (tstamp ${uuid}))`;
   });
 

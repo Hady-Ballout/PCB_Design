@@ -1,0 +1,10 @@
+{
+  "name": "led-bar",
+  "prompt": "Build a 5 V indicator bar: six LEDs in a row, each with its own series resistor, all driven from a pin header so an external board can switch them. Power comes in on screw terminals.",
+  "notes": "Repetition and fan-out. Six independent legs plus a wide pin header exercise the router more than the design; `led_no_series_resistor` fires per LED if the agent economises.",
+  "assertions": [
+    "count(led) == 6",
+    "count(resistor) >= 6",
+    "count(pin_header) >= 1"
+  ]
+}

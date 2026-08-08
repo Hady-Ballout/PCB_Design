@@ -436,8 +436,54 @@ h3 {
   border-bottom: 2px solid var(--color-ink);
   display: grid;
   gap: 8px;
-  grid-template-columns: auto minmax(0, 1fr);
+  /* back · title · new — the title takes whatever is left so a long one
+     truncates instead of pushing the new-design button off the panel. */
+  grid-template-columns: auto minmax(0, 1fr) auto;
   padding-bottom: 10px;
+}
+
+/* Matches the back button's shape so the header reads as one control row. */
+.chat-new-button {
+  align-items: center;
+  background: var(--color-chip);
+  border: 2px solid var(--color-ink);
+  border-radius: 6px;
+  color: var(--color-text);
+  cursor: pointer;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 0;
+  padding: 4px;
+}
+
+.chat-new-button:hover:not(:disabled) {
+  background: var(--color-hover-tint);
+}
+
+.chat-new-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* Primary action on the history page: it sits above Import JSON, which is the
+   fallback for a circuit you already have. */
+.chat-new-design {
+  align-items: center;
+  background: var(--nb-yellow);
+  border: 2px solid var(--color-ink);
+  border-radius: 6px;
+  color: var(--color-on-accent);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 6px 10px;
+}
+
+.chat-new-design:hover {
+  filter: brightness(0.96);
 }
 
 .chat-conversation-title {
@@ -572,6 +618,11 @@ h3 {
   align-self: flex-start;
   animation: message-in 300ms cubic-bezier(0.2, 1, 0.5, 1) both;
   display: grid;
+  /* Grid tracks size to their content by default (min-width: auto), so one wide
+     child — a parts table — stretched the whole message past its max-width and
+     clipped the prose around it. minmax(0, 1fr) lets the track shrink so the
+     table scrolls inside the bubble instead of dragging it wider. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   max-width: 92%;
   padding: 2px;
@@ -1004,6 +1055,10 @@ h3 {
   border-radius: 0;
   height: 72px;
   min-height: 0;
+  /* Keep text and placeholder clear of the mode chip and send button, which are
+     absolutely positioned along the bottom edge. Without this a wrapped
+     placeholder renders straight through them. */
+  padding-bottom: 26px;
 }
 
 /* Drop the mode dropdown and send button to the bottom edge so they clear
@@ -1087,6 +1142,194 @@ h3 {
   padding: 6px 8px;
   text-align: left;
   width: 100%;
+}
+
+/* Assistant replies arrive as markdown: parts tables, solved-value lists, fenced
+   assertion blocks. These styles keep that readable at chat-bubble scale — tight
+   vertical rhythm, nothing that stretches the panel. */
+.chat-markdown {
+  /* Same reason as .chat-message: without this the block refuses to shrink
+     below its widest child and the paragraphs get clipped. */
+  min-width: 0;
+}
+
+.chat-markdown > :first-child { margin-top: 0; }
+.chat-markdown > :last-child { margin-bottom: 0; }
+
+/* Long identifiers in prose — net names, kinds, file paths in inline code —
+   must be allowed to break rather than set the width of the whole message. */
+.chat-markdown p,
+.chat-markdown li,
+.chat-markdown code {
+  overflow-wrap: anywhere;
+}
+
+.chat-markdown p,
+.chat-markdown ul,
+.chat-markdown ol {
+  margin: 0 0 8px;
+}
+
+.chat-markdown ul,
+.chat-markdown ol {
+  padding-left: 20px;
+}
+
+.chat-markdown li {
+  margin-bottom: 2px;
+}
+
+/* Headings are flattened into emphasis: a reply is not a document, and the
+   page's heading scale would dwarf the bubble. */
+.chat-md-heading {
+  display: block;
+  font-size: 13px;
+  margin: 12px 0 4px;
+}
+
+.chat-markdown code {
+  background: var(--color-hover-tint);
+  border-radius: 3px;
+  font-size: 11px;
+  padding: 1px 4px;
+}
+
+.chat-markdown pre {
+  background: var(--color-hover-tint);
+  border-radius: 6px;
+  margin: 0 0 8px;
+  overflow-x: auto;
+  padding: 8px 10px;
+}
+
+.chat-markdown pre code {
+  background: none;
+  padding: 0;
+}
+
+/* A parts table is the densest thing in a reply, and the panel is 420px at its
+   widest. Two rules make that work:
+
+   1. Cells wrap. They used to be `nowrap`, which forced a five-column parts
+      list far past the panel and was the reason tables ran off screen at all.
+      Wrapping lets the table compress to whatever room there is, which is
+      enough for almost every table the agent writes.
+   2. What still does not fit scrolls, inside the bubble only. */
+.chat-md-table-wrap {
+  margin: 0 0 8px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.chat-markdown table {
+  border-collapse: collapse;
+  font-size: 11px;
+  /* Divide the space evenly rather than letting one long cell dominate. */
+  table-layout: auto;
+  width: 100%;
+}
+
+.chat-markdown th,
+.chat-markdown td {
+  border: 1px solid var(--color-ink);
+  overflow-wrap: anywhere;
+  padding: 3px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+
+/* Inline code inside a cell must not set the column width: `voltage_source` and
+   `missing_supply_decoupling` are common and long. */
+.chat-markdown td code,
+.chat-markdown th code {
+  font-size: 10px;
+  padding: 0 2px;
+  white-space: normal;
+}
+
+.chat-markdown th {
+  background: var(--color-hover-tint);
+  font-weight: 700;
+}
+
+.chat-markdown hr {
+  border: none;
+  border-top: 1px solid var(--color-ink);
+  margin: 12px 0;
+  opacity: 0.3;
+}
+
+.chat-markdown blockquote {
+  border-left: 3px solid var(--color-ink);
+  margin: 0 0 8px;
+  opacity: 0.8;
+  padding-left: 10px;
+}
+
+/* The live tool line: what the agent is reading or running at this moment.
+   Truncated to one line — it changes every few seconds and must not reflow the
+   thread while the user is reading it. */
+.generation-activity {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  margin: 4px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A repeat verification means a gate failed and the board is being fixed. */
+.generation-attempts {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-style: italic;
+  margin: 4px 0 0;
+}
+
+/* Ask answers a question, so it gets a thinking indicator and nothing else —
+   no stage trail for a pipeline it never enters. */
+.generation-status-ask p {
+  margin: 0;
+}
+
+/* Stop replaces Send while a board is building. It must never look disabled:
+   it is the only way out of a run that has stalled on the provider's side. */
+.composer-stop-button {
+  background: var(--color-chip);
+}
+
+.composer-stop-button:hover {
+  background: var(--color-hover-tint);
+}
+
+.error-boundary {
+  margin: 0 auto;
+  max-width: 560px;
+  padding: 64px 24px;
+}
+
+.error-boundary pre {
+  background: var(--color-hover-tint);
+  border-radius: 8px;
+  overflow-x: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+}
+
+/* Each option carries a one-line hint: the labels alone do not say that Ask and
+   Plan skip the build, which is the whole difference between them. */
+.composer-mode-option em {
+  color: var(--color-text-muted);
+  display: block;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 500;
+  margin-top: 2px;
+}
+
+.composer-mode-option.selected em {
+  color: inherit;
+  opacity: 0.75;
 }
 
 .composer-mode-option:hover {

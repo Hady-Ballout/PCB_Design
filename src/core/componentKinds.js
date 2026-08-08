@@ -548,6 +548,33 @@ export const COMPONENT_KINDS = {
     aliases: ['mcp3008', 'adc'],
     keywords: ['analog', 'digital', 'converter', 'spi', 'channels'],
   },
+  // ---- Connectors -------------------------------------------------
+  // How a board meets the outside world. All wiringOnly: a connector is copper
+  // and a mating face, never a SPICE element. pin_header takes its pin count
+  // from the nodes array (2-8 map to real 1xNN library footprints; more falls
+  // through to the synthesized header), so it has no fixedPins contract.
+  pin_header: {
+    spicePrefix: 'J', pins: 2, symbolType: 'generic', label: 'Pin header',
+    category: 'connector',
+    aliases: ['header', 'jumper', 'breakout header', 'dupont'],
+    keywords: ['connector', 'io', 'expansion', 'breakout', 'pins', 'off-board'],
+    wiringOnly: true,
+  },
+  terminal_block: {
+    spicePrefix: 'J', pins: 2, symbolType: 'generic', label: 'Screw terminal block',
+    category: 'connector',
+    aliases: ['screw terminal', 'terminal', 'bornier', 'wire clamp'],
+    keywords: ['connector', 'power in', 'screw', 'wire', 'mains'],
+    wiringOnly: true,
+  },
+  barrel_jack: {
+    spicePrefix: 'J', pins: 2, symbolType: 'generic', label: 'DC barrel jack',
+    fixedPins: ['VIN', 'GND'],
+    category: 'connector',
+    aliases: ['dc jack', 'power jack', 'dc socket', '2.1mm jack'],
+    keywords: ['connector', 'power in', 'wall adapter', '5.5mm'],
+    wiringOnly: true,
+  },
   arduino_uno: {
     spicePrefix: 'U', pins: 24, symbolType: 'generic', label: 'Arduino Uno',
     wiringOnly: true, mcu: true,
@@ -600,6 +627,15 @@ export const FIXED_PIN_NAMES = Object.fromEntries(
   entries.filter(([, info]) => info.fixedPins).map(([kind, info]) => [kind, info.fixedPins]),
 );
 
+// Board-to-world connectors. Wired to nothing but power and ground is their
+// normal, correct state — a barrel jack has no signal pin to participate — so
+// the dead_active_device rule has to skip them.
+export const CONNECTOR_KINDS = new Set(
+  Object.entries(COMPONENT_KINDS)
+    .filter(([, spec]) => spec.category === 'connector')
+    .map(([kind]) => kind),
+);
+
 export const WIRING_ONLY_KINDS = new Set(
   entries.filter(([, info]) => info.wiringOnly).map(([kind]) => kind),
 );
@@ -639,6 +675,7 @@ export const COMPONENT_CATEGORIES = [
   { id: 'display', title: 'Displays' },
   { id: 'actuator', title: 'Actuators & motors' },
   { id: 'driver-ic', title: 'Drivers & interface ICs' },
+  { id: 'connector', title: 'Connectors' },
   { id: 'module', title: 'Modules' },
   { id: 'microcontroller', title: 'Boards' },
 ];

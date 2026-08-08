@@ -123,6 +123,9 @@ describe('exportNetlist', () => {
       'rc-low-pass.GTS', 'rc-low-pass.GBS',
       'rc-low-pass.GTO', 'rc-low-pass.GBO',
       'rc-low-pass.GKO', 'rc-low-pass.DRL',
+      // Paste layers are always emitted (even all-THT boards) so the layer set
+      // is constant — added with the engine's SMD support.
+      'rc-low-pass.GTP', 'rc-low-pass.GBP',
       'PCB-README.txt',
     ]);
     expect(result.summary.componentCount).toBe(3);

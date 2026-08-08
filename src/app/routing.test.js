@@ -12,11 +12,6 @@ describe('pageFromHash', () => {
     expect(pageFromHash()).toBe('signup');
   });
 
-  it('routes #connect to the MCP connection page', () => {
-    window.location.hash = '#connect';
-    expect(pageFromHash()).toBe('connect');
-  });
-
   it('routes #verify (with a token query) to the verify page', () => {
     window.location.hash = '#verify?token=abc123';
     expect(pageFromHash()).toBe('verify');
@@ -34,6 +29,11 @@ describe('pageFromHash', () => {
   it('keeps the waveform page', () => {
     window.location.hash = '#waveform';
     expect(pageFromHash()).toBe('waveform');
+  });
+
+  it('routes #connect to the MCP connection page', () => {
+    window.location.hash = '#connect';
+    expect(pageFromHash()).toBe('connect');
   });
 });
 

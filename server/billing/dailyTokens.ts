@@ -5,7 +5,7 @@
 //
 // The counter lives on the users row (usage_tokens + usage_day) and resets
 // lazily when the stored UTC day differs from today, so no cron is needed.
-// Tokens are the counts Z.ai reports (see server/ai/tokenUsage.ts); providers
+// Tokens are the counts the model provider reports; providers
 // that report nothing (local Ollama) simply never advance the meter.
 import { getBillingUser, setDailyTokens } from './store.js';
 

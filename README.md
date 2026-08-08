@@ -1,119 +1,174 @@
-# Prompt-to-PCB Generator MVP
+# PCB Pilot
 
-A React-based prototype that turns electronics prompts into an AI-generated structured circuit model, validates it, generates a SPICE deck, runs Ngspice for waveform data, and exports a KiCad-compatible netlist.
+Turns a circuit description into a manufacturable two-layer PCB — placed,
+routed, ground-poured and design-rule-checked — and exports it as Gerbers or a
+KiCad project. No KiCad installation required.
 
-## Run
+## Status
+
+**Circuit generation runs in a sandbox.** The old three-stage tool-calling
+pipeline has been replaced by the sandbox agent below. The hosted MCP connector
+that exposes the engine to external agents (Claude, etc.) remains — see
+[docs/MCP_DEPLOYMENT.md](docs/MCP_DEPLOYMENT.md) and the in-app `#connect`
+page. Everything downstream of the circuit JSON works: schematic, breadboard,
+board editor, 3D view, simulation, and exports.
+
+> **Note on `CLAUDE.md`:** the file at the repo root is the sandbox agent's
+> system prompt, seeded verbatim into every run workspace
+> (`sandbox/workspace.mjs` SEED, `buildSystemPrompt`). Claude Code sessions on
+> this repo will load it as project instructions — a known side effect. Do not
+> move it or turn it into a repo guide; it must stay a portable circuit prompt.
+
+An LLM now builds circuits in a disposable workspace with a real shell and a
+snapshot of the engine — see [sandbox/README.md](sandbox/README.md):
+
+```bash
+node sandbox/cli.mjs new "blink an LED once per second from a 9 V battery"
+```
+
+It is wired into the workspace: type a request into the chat composer and the
+board streams in. **Import JSON** still works for a circuit you already have.
+
+The composer's three modes differ in what the agent is allowed to do —
+**Implement** designs and verifies a board, **Ask** answers a question about the
+current one, **Plan** proposes an approach. Only Implement pays for the
+place-route-verify loop: a measured Ask turn was 1 request and 11 seconds against
+Implement's 7 and 86.
+
+Measured cost is **≈$0.02 per board** on DeepSeek V4 Pro, tracked per request by
+`node sandbox/cli.mjs cost`. Note that the Agent SDK's own `total_cost_usd`
+overstates this by 20× on a non-Anthropic endpoint, because it prices from its
+internal rate table — [sandbox/README.md](sandbox/README.md) has the numbers and
+a per-provider comparison.
+
+[CLAUDE.md](CLAUDE.md) is the procedure for building circuit JSON — the domain
+task, deliberately free of repository specifics so it can be lifted whole into a
+sandboxed agent's prompt. Everything about running *this* repo is here.
+
+## Run it
 
 ```bash
 npm install
+echo 'JWT_SECRET=any-long-random-string' > .env.local
 npm run dev
 ```
 
-`npm run dev` starts both the React frontend and the local API server.
+Vite on `127.0.0.1:5174`, API on `127.0.0.1:8787`. `JWT_SECRET` is the only
+required variable — with `DATABASE_URL` unset the server seeds an in-memory
+account, `admin@local.test` / `PcbPilotLocal!2026`. Stripe, Brevo and Postgres
+are optional and degrade cleanly.
 
-Frontend:
+## Try it
 
-```text
-http://127.0.0.1:5174
+Open the app, click **Import JSON**, and paste:
+
+```json
+{
+  "title": "RC low-pass",
+  "supplyVoltage": 5,
+  "components": [
+    { "ref": "V1", "kind": "voltage_source", "value": "5V",    "nodes": ["VIN", "0"] },
+    { "ref": "R1", "kind": "resistor",       "value": "1k",    "nodes": ["VIN", "VOUT"] },
+    { "ref": "C1", "kind": "capacitor",      "value": "100nF", "nodes": ["VOUT", "0"] }
+  ]
+}
 ```
 
-API:
-
-```text
-http://127.0.0.1:8787
-```
-
-## Repository structure
-
-The code is organized into independent **feature chunks** so different areas can be
-worked on in parallel. Each chunk lives in its own folder and depends only on the
-shared `core` (never on another feature chunk).
+## Layout
 
 ```
-src/
-  core/        Shared circuit engine + shared config/utils (schematicLayout ->
-               pcbGenerator -> circuitSync, lineDiff, config.js, download.js).
-               Depended on by everything; change only when the circuit model changes.
-  app/         App shell: App.jsx (layout + page routing + workspace state),
-               routing.js, generationStream.js. The integration point.
-  features/
-    auth/      auth.jsx + auth.css (self-contained; talks to /api/auth/*)
-    chat/      chatStore.js, chatFormat.js, ChatPanel.jsx
-    schematic/ CircuitDiagram.jsx, symbols.jsx, geometry.js
-    editors/   editorConfig.js (Code + Breadboard tabs; retired SPICE/JSON/Canvas render code stays in app/App.jsx)
-    waveform/  WaveformChart.jsx
-
-server/
-  index.ts     HTTP hub (routes) + env.ts + types.ts (shared foundation)
-  auth/        auth.ts, db.ts, brevo.ts
-  ai/          ollamaProvider.ts, chatMemory.ts, circuitKnowledge.ts
-  circuit/     circuitResponse.ts, streamingCircuit.ts   (imports ../../src/core)
-  simulation/  simulator.ts
+src/core/      the engine — place, route, pour, DRC, Gerber, KiCad, SPICE
+src/features/  UI features, one directory each
+src/app/       app shell, routing, theme
+server/        auth, billing, ngspice simulation, firmware compilation
+knowledge/     component and pattern reference for building circuits
+scripts/       doc generator, dev runner, KiCad extractors
 ```
 
-**Rule:** a feature chunk may import from `core` (frontend) / `types` (backend) but
-not from another feature chunk — cross-feature wiring goes through `app/App.jsx`
-(frontend) or `server/index.ts` (backend).
+`src/core` is dependency-free — the whole engine runs under plain `node`.
 
-## Ollama setup
+## The pipeline
 
-Copy `.env.example` to `.env.local` and adjust the model if needed:
+`buildPcbLayout(circuit)` runs five stages and returns its own verdict:
 
-```env
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=llama3.2:latest
-OLLAMA_API_KEY=
-```
+1. **footprints** — real KiCad geometry per part
+2. **place** — netlist-aware placement with courtyard clearance
+3. **route** — clearance-aware two-layer A* maze routing
+4. **pour** — bottom-copper ground pour
+5. **DRC** — an independent measurement of the finished copper
 
-Local Ollama usually does not require an API key. The key exists for hosted Ollama-compatible APIs and is intentionally read only by the Node API server, never by browser code. Real `.env` files are ignored by git.
+If routing leaves nets unfinished, the board is re-placed on a roomier outline
+and routed again, up to four attempts. The result carries `routing`, `drc` and
+`connectivity`, so a caller never has to guess whether the board is fabricable.
 
-Start Ollama separately before generating AI circuits:
+## Scripts
 
 ```bash
-ollama serve
-ollama pull llama3.2
+npm run dev              # vite + API together
+npm test                 # 1118 tests
+npm run knowledge        # regenerate knowledge/components from src/core
+npm run knowledge:check  # fail if they have drifted
+npm run sandbox -- new "…"   # run the generation sandbox
+npm run sandbox:eval     # score the sandbox against suite/
+npm run build            # production frontend bundle
 ```
 
-If Ollama is not reachable or returns invalid JSON, generation fails with a visible error. The app does not substitute a local hardcoded circuit.
+## Component reference
 
-## Ngspice simulation
+`knowledge/components/` documents all 69 component kinds — one markdown file
+each, plus an index. The frontmatter is generated from `src/core`, so the
+`pin_order` you read there is the order the validator actually expects. See
+[knowledge/README.md](knowledge/README.md).
 
-The AI generates the circuit model, but waveform simulation is handled by the local program through Ngspice.
+Frontmatter is regenerated by `scripts/build-component-docs.mjs`, which never
+overwrites a file's prose. Run `npm run knowledge` after editing
+`componentKinds.js` or `topologyRules.js`; `npm run knowledge:check` fails on
+drift and is what CI should run. A test in `knowledge/components/` asserts every
+generated field against the engine.
 
-Install Ngspice and make sure `ngspice` is available on PATH. After generating a circuit, open the Simulation tab and click `Run simulation`.
+Note the limit of that guarantee: generation prevents the docs from drifting
+away from the engine, not from being wrong when the engine's own table is wrong.
+`switch_spdt` is a live example — `ROLE_PINS` disagrees with the simulator, so
+the generated pin order is faithfully wrong. The ✅ in the index means
+"consistent with the engine", not "correct".
 
-The backend writes the current SPICE deck to a temporary folder, runs:
+## Where the circuit generator plugs in
 
-```bash
-ngspice -b simulation.cir
-```
+The sandbox produces `circuit.json`; these are the seams that would carry it
+into the app automatically instead of through a paste. All three are still
+unwired — see [sandbox/README.md](sandbox/README.md) for the event stream a
+route would forward.
 
-Then it parses the waveform output and returns chart-ready data to the frontend. If Ngspice is missing or the generated SPICE deck cannot be simulated, the UI shows the simulator error without replacing the AI-generated circuit.
+1. **`buildImportedResult()`** in `src/features/importCircuit/importCircuit.js`
+   builds the complete result package — validation, simulation, schematic
+   diagram, SVG, SPICE deck, KiCad netlist — from a bare circuit, in the
+   browser. **This is the contract.** Produce a circuit that flows through it
+   and every downstream view works unchanged.
+2. **The chat composer** in `src/features/chat/ChatPanel.jsx` is rendered but
+   disabled, with placeholder text pointing at Import JSON. Wire it back when
+   there is something to send to.
+3. **`generatingChatId`** in `src/app/App.jsx` drives the workspace's busy
+   state; every editor already disables itself off it.
 
-## AI circuit model
+## Conventions
 
-The API asks Ollama for a JSON circuit object with:
+- Comments explain *why*, not *what*. Match the density of the surrounding file.
+- Tests live beside their source as `<name>.test.js`.
+- `src/core` must stay dependency-free — it is what makes the engine runnable in
+  a bare sandbox.
+- Scratch circuit JSON goes in `local/`, which is git-ignored.
 
-- `title`
-- `type`
-- `supplyVoltage`
-- `nodes`
-- `components`
-- `notes`
+## Known gaps
 
-Each component includes `ref`, `kind`, `value`, `nodes`, and `footprint`. The app validates this model and uses it to generate SPICE and KiCad netlist exports.
-
-## Exported files
-
-- `generated.cir`: Ngspice-ready SPICE deck
-- `generated.net`: KiCad XML netlist
-- `circuit.json`: structured intermediate circuit model
-- `README-export.json`: export manifest and instructions
-
-The MVP now supports waveform simulation from the generated SPICE deck, but KiCad remains the place to inspect footprints, edit the schematic, place parts, route the board, and run design-rule checks.
-
-## Test
-
-```bash
-npm test
-```
+- **The schematic router fails on circuits the board router handles.** A 555
+  astable with a `CTRL` capacitor, and some MCU circuits, throw
+  `DiagramLayoutError` after 9 attempts; callers fall back to
+  `buildFallbackCircuitDiagram`. Recorded as `it.fails` in
+  `src/core/pcbGenerator.test.js`, so when it is fixed that test starts failing.
+- **Pin assignment is unvalidated** — only pin count is checked. The fix is
+  named connections (`{ "TRIG": "CT1" }`) instead of positional arrays, which
+  would turn a wrong pin into a schema error.
+- Five further engine defects found while writing the component docs are listed
+  in [CLAUDE.md](CLAUDE.md#known-engine-defects), including a regulator value
+  parser that reads `AMS1117-3.3` as 1117 V.
+- There is no architecture documentation; `knowledge/` covers circuit work only.

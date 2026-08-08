@@ -1,13 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   COMPOSER_MODES,
-  buildAssistContext,
-  buildConversationContext,
-  chatTitleFromPrompt,
-  composeClarifiedPrompt,
-  composePlanBuildPrompt,
   createChat,
-  formatClarificationSummary,
   loadChatStore,
   migrateChatDiagram,
   saveChatStore,
@@ -30,9 +24,10 @@ import { layoutCircuitDiagram } from '../core/schematicLayout.js';
 import { API_BASE } from '../core/config.js';
 import { downloadBlob, downloadText } from '../core/download.js';
 import { AUTH_PAGES, PUBLIC_PAGES, pageFromHash } from './routing.js';
-import { markSpiceAsProvisional, readGenerationStream } from './generationStream.js';
 import { messageId } from '../features/chat/chatFormat.js';
 import { ChatPanel } from '../features/chat/ChatPanel.jsx';
+import { ImportCircuitDialog } from '../features/importCircuit/ImportCircuitDialog.jsx';
+import { buildImportedResult, createImportedChat } from '../features/importCircuit/importCircuit.js';
 import { EDITOR_SPLIT_STORAGE_KEY, EDITOR_VIEW_LABELS, loadEditorSplit } from '../features/editors/editorConfig.js';
 import { firmwareTargetForCircuit } from '../features/editors/firmwareInfo.js';
 import { WaveformChart } from '../features/waveform/WaveformChart.jsx';
@@ -62,6 +57,21 @@ import { applyTheme, loadTheme, saveTheme } from './theme.js';
 import { ThemeToggle } from './ThemeToggle.jsx';
 import '../features/auth/auth.css';
 
+/**
+ * One sentence describing a finished board.
+ *
+ * Shared by both delivery paths — the live stream and the reconnect — because a
+ * board is the same board whichever way it reaches the page, and having two
+ * wordings is what made a normal build announce itself as "recovered".
+ */
+const describeBoard = (circuit, verify) => {
+  const parts = circuit?.components?.length ?? 0;
+  const board = verify?.board;
+  return `${circuit?.title || 'Circuit'} — ${parts} component${parts === 1 ? '' : 's'}`
+    + `${board ? `, ${board.width} x ${board.height} mm` : ''}.`
+    + `${verify?.pass ? ' Routing complete, DRC clean.' : ''}`;
+};
+
 function App() {
   const { user, loading, logout } = useAuth();
   const authHeaders = () => ({
@@ -80,16 +90,25 @@ function App() {
   const [editorSplit, setEditorSplit] = useState(loadEditorSplit);
   const [resizingAxis, setResizingAxis] = useState(null);
   const [chatPanelView, setChatPanelView] = useState('conversation');
-  const [newChatPrompt, setNewChatPrompt] = useState('');
+  const [importOpen, setImportOpen] = useState(false);
   const [page, setPage] = useState(pageFromHash);
+  // Generation drives these: `generatingChatId` disables every editor while a
+  // board is being produced, `generationStage` lights the trail in the chat
+  // panel, and `thinkingText` carries whatever the agent is doing right now.
   const [generatingChatId, setGeneratingChatId] = useState(null);
   const [generationStage, setGenerationStage] = useState(null);
-  const [clarifyingChatId, setClarifyingChatId] = useState(null);
-  const [assistingChatId, setAssistingChatId] = useState(null);
-  // Live model reasoning for the single in-flight AI request. Ephemeral: reset
-  // whenever the attempt changes (generation correction retry) and cleared
-  // when the request settles — never written to the chat store.
-  const [thinkingState, setThinkingState] = useState(null);
+  const [thinkingText, setThinkingText] = useState('');
+  // The mode the running turn was sent with, held separately from the composer
+  // so changing the dropdown mid-run does not rewrite what the progress claims.
+  const [generationMode, setGenerationMode] = useState('implement');
+  const [verifyAttempts, setVerifyAttempts] = useState(0);
+  // Which chat this tab is actively streaming, if any. Held in a ref so the
+  // recovery effect can check it synchronously — state would be stale inside an
+  // effect that does not depend on it.
+  const streamingChatRef = useRef(null);
+  // Lets the Stop button abort the in-flight request. Aborting the fetch closes
+  // the connection, which is what tells the server to stop the agent.
+  const generationAbortRef = useRef(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [theme, setTheme] = useState(loadTheme);
   const [userBarOpen, setUserBarOpen] = useState(false);
@@ -117,20 +136,7 @@ function App() {
   const kicadSyncError = activeChat?.kicadSyncError || '';
   const circuitJsonSyncError = activeChat?.circuitJsonSyncError || '';
   const isGenerating = generatingChatId === activeChat?.id;
-  const isClarifying = clarifyingChatId === activeChat?.id;
-  const isAssisting = assistingChatId === activeChat?.id;
-  const generationBusy = Boolean(generatingChatId || clarifyingChatId || assistingChatId);
-  const thinkingText = thinkingState?.chatId === activeChat?.id ? thinkingState.text : '';
-
-  const appendThinking = (chatId, delta, attempt = 0) => {
-    if (!delta) return;
-    setThinkingState((prev) => (
-      prev && prev.chatId === chatId && prev.attempt === attempt
-        ? { chatId, attempt, text: prev.text + delta }
-        : { chatId, attempt, text: delta }
-    ));
-  };
-  const clearThinking = () => setThinkingState(null);
+  const generationBusy = Boolean(generatingChatId);
   const composerMode = activeChat?.draftMode || 'implement';
   const sortedChats = useMemo(
     () => [...chatStore.chats].sort((a, b) => b.updatedAt - a.updatedAt),
@@ -595,462 +601,6 @@ function App() {
     setResizingAxis(null);
   };
 
-  const generate = async () => {
-    const submittedPrompt = prompt.trim();
-    if (!submittedPrompt) {
-      setError('Enter a circuit prompt before sending.');
-      return;
-    }
-    await beginPrompt(activeChat, submittedPrompt);
-  };
-
-  // Phase 1 of every prompt: append the user message, then ask the AI for a
-  // round of clarifying questions. Generation only starts after the user
-  // answers (or skips) — unless the clarify call fails, in which case we fall
-  // back to direct generation so the feature can never block a prompt.
-  const beginPrompt = async (chat, submittedPrompt) => {
-    const chatId = chat.id;
-    const mode = COMPOSER_MODES.includes(chat.draftMode) ? chat.draftMode : 'implement';
-    const priorMessages = chat.messages;
-    const currentDesign = chat.result
-      ? {
-          circuit: chat.result.circuit,
-          spice: chat.editableSpice,
-          kicadNetlist: chat.editableKicadNetlist,
-          code: chat.editableCode,
-        }
-      : null;
-    const previousSpice = chat.editableSpice;
-    const memory = chat.memory;
-    const userMessage = {
-      id: messageId(),
-      role: 'user',
-      content: submittedPrompt,
-      createdAt: Date.now(),
-    };
-
-    window.location.hash = 'app';
-    setPage('workspace');
-    updateChat(chatId, (chat) => ({
-      ...chat,
-      title: chat.messages.length ? chat.title : chatTitleFromPrompt(submittedPrompt),
-      updatedAt: Date.now(),
-      draft: '',
-      error: '',
-      // A new Plan/Implement prompt supersedes any question round still
-      // waiting for answers; an Ask question leaves the round answerable.
-      messages: [
-        ...chat.messages.map((message) => (
-          mode !== 'ask' && message.clarification?.status === 'pending'
-            ? { ...message, clarification: { ...message.clarification, status: 'skipped' } }
-            : message
-        )),
-        userMessage,
-      ],
-    }));
-
-    if (mode !== 'implement') {
-      await runAssist(chatId, mode, submittedPrompt, priorMessages, currentDesign, memory);
-      return;
-    }
-
-    setClarifyingChatId(chatId);
-    try {
-      const controller = new AbortController();
-      // Idle timeout: stream activity (thinking tokens) resets the clock, so
-      // a model that is visibly reasoning is not cut off at a fixed deadline.
-      let timeoutId = setTimeout(() => controller.abort(), 20000);
-      const resetIdleTimeout = () => {
-        clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => controller.abort(), 20000);
-      };
-      let questions = [];
-      try {
-        const response = await fetch(`${API_BASE}/api/clarify-circuit`, {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify({
-            prompt: submittedPrompt,
-            messages: buildConversationContext(priorMessages),
-            currentDesign,
-            memory,
-          }),
-          signal: controller.signal,
-        });
-        if (response.ok) {
-          const contentType = response.headers.get('content-type') || '';
-          const data = contentType.includes('application/x-ndjson')
-            ? await readGenerationStream(response, (event) => {
-                resetIdleTimeout();
-                if (event.type === 'thinking') appendThinking(chatId, event.delta);
-              })
-            : await response.json();
-          questions = Array.isArray(data.questions) ? data.questions : [];
-        }
-      } finally {
-        clearTimeout(timeoutId);
-      }
-
-      if (questions.length) {
-        updateChat(chatId, (chat) => ({
-          ...chat,
-          updatedAt: Date.now(),
-          messages: [
-            ...chat.messages,
-            {
-              id: messageId(),
-              role: 'assistant',
-              content: 'A few quick questions before I design this:',
-              createdAt: Date.now(),
-              clarification: { forPrompt: submittedPrompt, questions, answers: {}, status: 'pending' },
-            },
-          ],
-        }));
-        return;
-      }
-    } catch (clarifyError) {
-      console.error(`Clarify round failed, generating directly: ${clarifyError.message}`);
-    } finally {
-      setClarifyingChatId(null);
-      clearThinking();
-    }
-
-    await runGeneration(chatId, submittedPrompt, priorMessages, currentDesign, previousSpice, memory);
-  };
-
-  // Plan/Ask modes: one conversational AI call, no clarify round, and no
-  // artifacts — the design, editors, and chat memory are never touched.
-  const runAssist = async (chatId, mode, submittedPrompt, priorMessages, currentDesign, memory) => {
-    setAssistingChatId(chatId);
-    try {
-      const controller = new AbortController();
-      // Plans run longer than clarify's 512 tokens, so 20s would be too
-      // tight. Idle timeout: stream activity (thinking tokens) resets the
-      // clock instead of capping the total request time.
-      let timeoutId = setTimeout(() => controller.abort(), 60000);
-      const resetIdleTimeout = () => {
-        clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => controller.abort(), 60000);
-      };
-      let data;
-      try {
-        const response = await fetch(`${API_BASE}/api/assist-circuit`, {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify({
-            mode,
-            prompt: submittedPrompt,
-            messages: buildAssistContext(priorMessages),
-            currentDesign,
-            memory,
-          }),
-          signal: controller.signal,
-        });
-        const contentType = response.headers.get('content-type') || '';
-        if (response.ok && contentType.includes('application/x-ndjson')) {
-          data = await readGenerationStream(response, (event) => {
-            resetIdleTimeout();
-            if (event.type === 'thinking') appendThinking(chatId, event.delta);
-          });
-        } else {
-          data = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            throw new Error(data.error || `Request failed with HTTP ${response.status}.`);
-          }
-        }
-      } finally {
-        clearTimeout(timeoutId);
-      }
-      const reply = String(data.reply || '').trim();
-      if (!reply) throw new Error('The assistant returned an empty reply.');
-      updateChat(chatId, (chat) => ({
-        ...chat,
-        updatedAt: Date.now(),
-        error: '',
-        messages: [
-          ...chat.messages,
-          {
-            id: messageId(),
-            role: 'assistant',
-            content: reply,
-            createdAt: Date.now(),
-            mode,
-            ...(mode === 'plan' ? { plan: { forPrompt: submittedPrompt, status: 'proposed' } } : {}),
-          },
-        ],
-      }));
-    } catch (assistError) {
-      updateChat(chatId, (chat) => ({
-        ...chat,
-        updatedAt: Date.now(),
-        error: assistError.message,
-        messages: [
-          ...chat.messages,
-          {
-            id: messageId(),
-            role: 'assistant',
-            content: `I couldn't ${mode === 'plan' ? 'draft a plan for' : 'answer'} that. Nothing was changed. (${assistError.message})`,
-            createdAt: Date.now(),
-          },
-        ],
-      }));
-    } finally {
-      setAssistingChatId(null);
-      clearThinking();
-      refreshUsage();
-    }
-  };
-
-  // "Build this" on a plan message: fold the plan into the generation prompt
-  // and run the normal circuit pipeline against the design as it is NOW (the
-  // click-time snapshot), skipping the clarify round — the plan already
-  // settled the open decisions.
-  const buildFromPlan = async (planMessageId) => {
-    const chat = activeChat;
-    if (!chat || generationBusy) return;
-    const message = chat.messages.find((entry) => entry.id === planMessageId);
-    if (!message?.plan || message.plan.status !== 'proposed') return;
-
-    const priorMessages = chat.messages;
-    const currentDesign = chat.result
-      ? {
-          circuit: chat.result.circuit,
-          spice: chat.editableSpice,
-          kicadNetlist: chat.editableKicadNetlist,
-          code: chat.editableCode,
-        }
-      : null;
-    const previousSpice = chat.editableSpice;
-    const memory = chat.memory;
-
-    updateChat(chat.id, (current) => ({
-      ...current,
-      updatedAt: Date.now(),
-      messages: [
-        ...current.messages.map((entry) => (
-          entry.id === planMessageId
-            ? { ...entry, plan: { ...entry.plan, status: 'built' } }
-            : entry
-        )),
-        {
-          id: messageId(),
-          role: 'user',
-          content: 'Build this plan.',
-          createdAt: Date.now(),
-        },
-      ],
-    }));
-
-    await runGeneration(
-      chat.id,
-      composePlanBuildPrompt(message.plan.forPrompt, message.content),
-      priorMessages,
-      currentDesign,
-      previousSpice,
-      memory,
-    );
-  };
-
-  const answerClarification = (clarificationMessageId, questionId, answer) => {
-    updateActiveChat((chat) => ({
-      ...chat,
-      messages: chat.messages.map((message) => (
-        message.id === clarificationMessageId && message.clarification?.status === 'pending'
-          ? {
-              ...message,
-              clarification: {
-                ...message.clarification,
-                answers: {
-                  ...message.clarification.answers,
-                  [questionId]: String(answer || '').slice(0, 200),
-                },
-              },
-            }
-          : message
-      )),
-    }));
-  };
-
-  // Phase 2: fold the answers into the generation prompt and run the normal
-  // circuit pipeline. Skipping submits every question as "No preference".
-  const submitClarificationAnswers = async (clarificationMessageId, skip = false) => {
-    const chat = activeChat;
-    if (!chat || generationBusy) return;
-    const message = chat.messages.find((entry) => entry.id === clarificationMessageId);
-    const clarification = message?.clarification;
-    if (!clarification || clarification.status !== 'pending') return;
-
-    const answers = skip ? {} : clarification.answers;
-    const priorMessages = chat.messages;
-    const currentDesign = chat.result
-      ? {
-          circuit: chat.result.circuit,
-          spice: chat.editableSpice,
-          kicadNetlist: chat.editableKicadNetlist,
-          code: chat.editableCode,
-        }
-      : null;
-    const previousSpice = chat.editableSpice;
-    const memory = chat.memory;
-
-    updateChat(chat.id, (current) => ({
-      ...current,
-      updatedAt: Date.now(),
-      messages: [
-        ...current.messages.map((entry) => (
-          entry.id === clarificationMessageId
-            ? { ...entry, clarification: { ...entry.clarification, answers, status: skip ? 'skipped' : 'answered' } }
-            : entry
-        )),
-        {
-          id: messageId(),
-          role: 'user',
-          content: formatClarificationSummary(clarification.questions, answers),
-          createdAt: Date.now(),
-        },
-      ],
-    }));
-
-    await runGeneration(
-      chat.id,
-      composeClarifiedPrompt(clarification.forPrompt, clarification.questions, answers),
-      priorMessages,
-      currentDesign,
-      previousSpice,
-      memory,
-    );
-  };
-
-  const runGeneration = async (chatId, generationPrompt, priorMessages, currentDesign, previousSpice, memory) => {
-    const isRevision = Boolean(currentDesign);
-
-    setGeneratingChatId(chatId);
-    setGenerationStage(null);
-    openEditorView('realisticSchematic');
-    updateChat(chatId, (chat) => ({
-      ...chat,
-      updatedAt: Date.now(),
-      error: '',
-      editableSpice: isRevision
-        ? chat.editableSpice
-        : '* AI is preparing the circuit...\n* Components will appear here as they are generated.',
-      editableCircuitJson: isRevision ? chat.editableCircuitJson : '',
-      pendingSpiceChange: null,
-      pendingKicadChange: null,
-      simulationRun: null,
-      simulationError: '',
-      circuitJsonSyncError: '',
-    }));
-
-    try {
-      const response = await fetch(`${API_BASE}/api/generate-circuit`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({
-          prompt: generationPrompt,
-          messages: buildConversationContext(priorMessages),
-          currentDesign,
-          memory,
-        }),
-      });
-
-      if (!response.ok) {
-        const failed = await response.json().catch(() => ({}));
-        throw new Error(failed.error || `Generation failed with HTTP ${response.status}.`);
-      }
-      const contentType = response.headers.get('content-type') || '';
-      const data = contentType.includes('application/x-ndjson')
-        ? await readGenerationStream(response, (event) => {
-            if (event.type === 'thinking') {
-              // A new attempt (correction retry) restarts the reasoning, so
-              // appendThinking replaces the window instead of appending.
-              appendThinking(chatId, event.delta, event.attempt || 0);
-              return;
-            }
-            if (event.type === 'stage') {
-              setGenerationStage(event.stage);
-              return;
-            }
-            if (event.type !== 'spice') return;
-            updateChat(chatId, (chat) => ({
-              ...chat,
-              editableSpice: event.provisional
-                ? markSpiceAsProvisional(event.spice, event.correcting)
-                : event.spice,
-              updatedAt: Date.now(),
-            }));
-          })
-        : await response.json();
-      if (data.error) throw new Error(data.error);
-      const fallbackReply = `${isRevision ? 'Updated' : 'Generated'} ${data.circuit.title} with ${data.circuit.components.length} components. The latest circuit package is open in the workspace.`;
-      const issueErrors = (data.issues || []).filter((issue) => issue.severity === 'error');
-      const issueNote = issueErrors.length
-        ? `\n\nNote: ${issueErrors.length} design issue${issueErrors.length === 1 ? '' : 's'} remain${issueErrors.length === 1 ? 's' : ''} — open the breadboard view for details and suggested fixes.`
-        : '';
-      const assistantMessage = {
-        id: messageId(),
-        role: 'assistant',
-        content: (String(data.reply || '').trim() || fallbackReply) + issueNote,
-        circuit: data.circuit,
-        issues: data.issues || [],
-        createdAt: Date.now(),
-      };
-      updateChat(chatId, (chat) => ({
-        ...chat,
-        updatedAt: Date.now(),
-        messages: [...chat.messages, assistantMessage],
-        memory: data.memory || chat.memory,
-        result: data,
-        editableSpice: data.spice || '',
-        pendingSpiceChange: currentDesign && currentDesign.spice !== data.spice
-          ? { previous: currentDesign.spice, proposed: data.spice || '' }
-          : null,
-        editableKicadNetlist: data.kicadNetlist || '',
-        pendingKicadChange: currentDesign && currentDesign.kicadNetlist !== data.kicadNetlist
-          ? { previous: currentDesign.kicadNetlist, proposed: data.kicadNetlist || '' }
-          : null,
-        editableCircuitJson: JSON.stringify(data.circuit, null, 2),
-        editableCode: data.code || '',
-        pendingCodeChange: currentDesign && (currentDesign.code || '') !== (data.code || '')
-          ? { previous: currentDesign.code || '', proposed: data.code || '' }
-          : null,
-        editedDiagram: cloneDiagram(data.diagram),
-        simulationRun: null,
-        simulationError: '',
-        spiceSyncError: '',
-        kicadSyncError: '',
-        circuitJsonSyncError: '',
-        error: '',
-      }));
-      window.location.hash = 'app';
-      setPage('workspace');
-    } catch (requestError) {
-      updateChat(chatId, (chat) => ({
-        ...chat,
-        updatedAt: Date.now(),
-        editableSpice: currentDesign ? currentDesign.spice : previousSpice,
-        editableCircuitJson: currentDesign
-          ? JSON.stringify(currentDesign.circuit, null, 2)
-          : chat.editableCircuitJson,
-        error: requestError.message,
-        messages: [
-          ...chat.messages,
-          {
-            id: messageId(),
-            role: 'assistant',
-            content: `I couldn't produce a valid version of that request, so nothing was changed. Try rephrasing or simplifying the request. (${requestError.message})`,
-            createdAt: Date.now(),
-          },
-        ],
-      }));
-    } finally {
-      setGeneratingChatId(null);
-      setGenerationStage(null);
-      clearThinking();
-      refreshUsage();
-    }
-  };
-
   const runSimulation = async () => {
     if (!result) return;
     const chatId = activeChat.id;
@@ -1173,36 +723,270 @@ function App() {
     setPage('workspace');
   };
 
-  const startChatFromHistory = async () => {
-    const submittedPrompt = newChatPrompt.trim();
-    if (!submittedPrompt) return;
-
-    let chat = activeChat;
-    if (!chat || chat.messages.length > 0 || chat.result) {
-      chat = createChat();
-      setChatStore((current) => ({
-        chats: [chat, ...current.chats],
-        activeChatId: chat.id,
-      }));
+  // Imported circuits get their own chat carrying a fully built result package,
+  // so every downstream view (schematic, breadboard, board, 3D, exports) reads
+  // exactly what it would after a generation — no AI call involved.
+  const importCircuit = (circuit, sourceLabel) => {
+    let chat;
+    try {
+      chat = createImportedChat(circuit, { sourceLabel });
+    } catch (importError) {
+      // Valid JSON can still fail to lay out; report it in the dialog rather
+      // than on a chat that may not exist yet.
+      return `Could not build that circuit: ${importError.message}`;
     }
-
-    setNewChatPrompt('');
+    setChatStore((current) => ({
+      chats: [chat, ...current.chats],
+      activeChatId: chat.id,
+    }));
+    setImportOpen(false);
     setChatPanelView('conversation');
     openEditorView('realisticSchematic');
-    await beginPrompt(chat, submittedPrompt);
+    window.location.hash = 'app';
+    setPage('workspace');
+    return null;
   };
 
-  const handleComposerKeyDown = (event) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      if (!generationBusy) generate();
-    }
+  /**
+   * Open an empty chat and switch to it.
+   *
+   * A follow-up message resumes the same sandbox run, which is what makes
+   * "make it 5 seconds instead" cheap — but it also means an unrelated request
+   * would inherit the previous board as context. A new chat has no run id, so
+   * the next prompt starts a clean workspace.
+   */
+  /** Abort the in-flight generation. The server stops the agent on disconnect. */
+  const stopGeneration = () => {
+    generationAbortRef.current?.abort();
   };
 
-  const handleNewChatComposerKeyDown = (event) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      if (!generationBusy) startChatFromHistory();
+  const startNewChat = () => {
+    // Deliberately not blocked while a run is in flight. Being unable to start
+    // a new design because an earlier one hung is a trap, and a hang is exactly
+    // when you most want out — the running board is stopped on the way.
+    stopGeneration();
+    const chat = createChat();
+    setChatStore((current) => ({ chats: [chat, ...current.chats], activeChatId: chat.id }));
+    setChatPanelView('conversation');
+  };
+
+  // Reattach to a run that outlived the page.
+  //
+  // The agent runs server-side and writes into its own workspace, so a reload or
+  // a closed tab costs the event stream but not the board. Any chat that started
+  // a run and has no result yet is reconciled here: finished runs are packaged,
+  // still-running ones are polled until they land. Without this a two-minute
+  // generation is silently thrown away by an accidental refresh.
+  useEffect(() => {
+    const chat = chatStore.chats.find((entry) => entry.sandboxRunId && !entry.result);
+    // `streamingChatRef`, not `generatingChatId`: this effect keys on the chat
+    // awaiting a run, and the `run` event sets that id mid-stream — so the
+    // effect fired during a live generation while its closure still held the
+    // pre-run `generatingChatId` of null. It then polled alongside the stream
+    // and its own completion path wrote the reply, which is why a board built
+    // while watching announced itself as "recovered". A ref is read at call
+    // time and cannot go stale.
+    if (!chat || streamingChatRef.current) return undefined;
+
+    let cancelled = false;
+    let timer = null;
+
+    const reattach = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/sandbox/run/${encodeURIComponent(chat.sandboxRunId)}`, {
+          headers: authHeaders(),
+        });
+        if (!response.ok || cancelled) return;
+        const run = await response.json();
+        if (cancelled) return;
+
+        if (run.status === 'running') {
+          setGeneratingChatId(chat.id);
+          timer = setTimeout(reattach, 5000);
+          return;
+        }
+        setGeneratingChatId(null);
+        if (!run.circuit) return;
+
+        const result = buildImportedResult(run.circuit);
+        updateChat(chat.id, (current) => ({
+          ...current,
+          result,
+          sandboxReport: run.report || '',
+          editableSpice: result.spice || '',
+          editableKicadNetlist: result.kicadNetlist || '',
+          editableCircuitJson: JSON.stringify(run.circuit, null, 2),
+          messages: current.messages.some((message) => message.circuit)
+            ? current.messages
+            : [...current.messages, {
+              id: messageId(),
+              role: 'assistant',
+              // Same shape as a normal completion — this *is* the board being
+              // delivered, just later than the page expected. Claiming it was
+              // "recovered from a run that finished after the page closed"
+              // asserted something the app cannot know: a reload, a background
+              // tab and a closed window all look identical from here.
+              content: `${describeBoard(run.circuit, run.verify)} Picked up after the page reconnected.`,
+              circuit: run.circuit,
+              createdAt: Date.now(),
+            }],
+        }));
+      } catch {
+        // A failed reattach is not worth surfacing: the run folder still holds
+        // the board, and the next reload tries again.
+        setGeneratingChatId(null);
+      }
+    };
+
+    reattach();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on which chat is awaiting a run
+  }, [chatStore.chats.find((entry) => entry.sandboxRunId && !entry.result)?.id]);
+
+  // Generation: stream a sandbox run and land its circuit in the active chat.
+  //
+  // The board takes a couple of minutes to design, so the run is streamed rather
+  // than awaited — every tool the agent calls becomes a line of progress. The
+  // circuit it returns goes through `buildImportedResult`, the same function
+  // Import JSON uses, so a generated chat and an imported one are the same shape
+  // and no downstream view can tell them apart.
+  const generateCircuit = async () => {
+    const request = prompt.trim();
+    const chatId = chatStore.activeChatId;
+    if (!request || generationBusy) return;
+
+    const now = Date.now();
+    updateChat(chatId, (chat) => ({
+      ...chat,
+      draft: '',
+      error: '',
+      title: chat.messages.length ? chat.title : request.slice(0, 60),
+      messages: [...chat.messages, { id: messageId(), role: 'user', content: request, createdAt: now }],
+    }));
+    streamingChatRef.current = chatId;
+    setGeneratingChatId(chatId);
+    setGenerationMode(composerMode);
+    setGenerationStage('design');
+    setThinkingText('');
+    setVerifyAttempts(0);
+
+    const finish = (message, extra = {}) => {
+      updateChat(chatId, (chat) => ({
+        ...chat,
+        ...extra,
+        messages: [...chat.messages, {
+          id: messageId(), role: 'assistant', content: message, createdAt: Date.now(), ...(extra.circuit ? { circuit: extra.circuit } : {}),
+        }],
+      }));
+    };
+
+    const controller = new AbortController();
+    generationAbortRef.current = controller;
+
+    try {
+      const response = await fetch(`${API_BASE}/api/sandbox/generate`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: authHeaders(),
+        // A run resumes when the chat already has one, so a follow-up keeps the
+        // context that produced the board instead of restating it as JSON.
+        body: JSON.stringify({
+          prompt: request,
+          mode: composerMode,
+          runId: activeChat?.sandboxRunId ?? null,
+        }),
+      });
+      if (!response.ok || !response.body) {
+        throw new Error(`The generator returned ${response.status}.`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let done = null;
+      let failure = null;
+
+      // Server-Sent Events: one JSON object per `data:` line, blank-line
+      // separated. A chunk can split a line, so only whole lines are parsed.
+      for (;;) {
+        const { value, done: finished } = await reader.read();
+        if (finished) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let event;
+          try {
+            event = JSON.parse(line.slice(6));
+          } catch {
+            continue;
+          }
+          if (event.type === 'run') {
+            updateChat(chatId, (chat) => ({ ...chat, sandboxRunId: event.runId }));
+          } else if (event.type === 'tool') {
+            setThinkingText(event.detail || event.tool);
+            if (event.detail?.includes('verif')) {
+              setGenerationStage('verify');
+              // Each verify run is one attempt. More than one means a gate
+              // failed and the agent went back to fix the board — the single
+              // most useful thing to show while waiting.
+              setVerifyAttempts((count) => count + 1);
+            } else if (event.detail?.includes('component values')) {
+              setGenerationStage('solve');
+            } else {
+              setGenerationStage('design');
+            }
+          } else if (event.type === 'done') {
+            done = event;
+          } else if (event.type === 'error' || event.type === 'cancelled') {
+            failure = event.message;
+          }
+        }
+      }
+
+      if (failure) throw new Error(failure);
+      if (!done) throw new Error('The run ended without a result.');
+
+      // Ask and Plan deliberately do not build a board, so there is nothing to
+      // package — show the answer and leave the workspace as it was.
+      if (done.mode !== 'implement') {
+        finish(done.reply || 'No answer was returned.');
+        return;
+      }
+      if (!done.circuit) throw new Error('The run finished without producing a circuit.');
+
+      // Building the package is synchronous CPU work that blocks paint, so let
+      // the browser show the last progress frame before it starts.
+      await new Promise((resolve) => { requestAnimationFrame(() => requestAnimationFrame(resolve)); });
+      const result = buildImportedResult(done.circuit);
+      finish(
+        describeBoard(done.circuit, done.verify),
+        {
+          circuit: done.circuit,
+          result,
+          sandboxReport: done.report || '',
+          editableSpice: result.spice || '',
+          editableKicadNetlist: result.kicadNetlist || '',
+          editableCircuitJson: JSON.stringify(done.circuit, null, 2),
+          error: '',
+        },
+      );
+      openEditorView('realisticSchematic');
+    } catch (generationError) {
+      // Stopping is a choice, not a failure — say so plainly instead of
+      // reporting the abort as an error.
+      const stopped = generationError.name === 'AbortError';
+      if (stopped) finish('Stopped. The workspace is kept, so you can pick this up again or start over.');
+      else updateChat(chatId, (chat) => ({ ...chat, error: generationError.message }));
+    } finally {
+      generationAbortRef.current = null;
+      streamingChatRef.current = null;
+      setGeneratingChatId(null);
+      setGenerationStage(null);
+      setThinkingText('');
+      setVerifyAttempts(0);
+      refreshUsage();
     }
   };
 
@@ -2040,35 +1824,34 @@ function App() {
           <button type="button" onClick={logout}>Log out</button>
         </div>
       </div>
+      <ImportCircuitDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImport={importCircuit}
+      />
       <section className="workspace">
         <ChatPanel
           chatPanelView={chatPanelView}
           setChatPanelView={setChatPanelView}
-          newChatPrompt={newChatPrompt}
-          setNewChatPrompt={setNewChatPrompt}
-          startChatFromHistory={startChatFromHistory}
-          handleNewChatComposerKeyDown={handleNewChatComposerKeyDown}
+          openImportCircuit={() => setImportOpen(true)}
           chatStore={chatStore}
           sortedChats={sortedChats}
           activeChat={activeChat}
           openChat={openChat}
           isGenerating={isGenerating}
           generationStage={generationStage}
-          isClarifying={isClarifying}
-          isAssisting={isAssisting}
           composerMode={composerMode}
           setComposerMode={setComposerMode}
-          buildFromPlan={buildFromPlan}
+          generationMode={generationMode}
+          verifyAttempts={verifyAttempts}
           thinkingText={thinkingText}
-          answerClarification={answerClarification}
-          submitClarification={(clarificationMessageId) => submitClarificationAnswers(clarificationMessageId, false)}
-          skipClarification={(clarificationMessageId) => submitClarificationAnswers(clarificationMessageId, true)}
           messagesEndRef={messagesEndRef}
           prompt={prompt}
           setPrompt={setPrompt}
-          handleComposerKeyDown={handleComposerKeyDown}
-          generate={generate}
           generationBusy={generationBusy}
+          onSubmit={generateCircuit}
+          onNewChat={startNewChat}
+          onStop={stopGeneration}
           error={error}
         />
 

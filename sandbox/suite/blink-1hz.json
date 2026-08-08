@@ -1,0 +1,12 @@
+{
+  "name": "blink-1hz",
+  "prompt": "Build a circuit that blinks an LED once per second, running from a 9 V battery.",
+  "notes": "The baseline. A 555 astable is the expected topology; local/blinker-1hz.json is a known-good answer at 0.99 Hz. Note RESET is compared to the timer's own VCC pin rather than to a net literally named VCC — an earlier version asserted `RESET == VCC` and failed a correct board whose supply rail was called V9. Net names are the designer's choice; only ground is fixed, at \"0\".",
+  "assertions": [
+    "count(timer_555) == 1",
+    "timer_555[0].TRIG == timer_555[0].THRES",
+    "timer_555[0].RESET == timer_555[0].VCC",
+    "timer_555[0].GND == 0",
+    "count(led) >= 1"
+  ]
+}

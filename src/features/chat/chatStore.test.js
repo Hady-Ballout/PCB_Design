@@ -2,14 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   CHAT_STORAGE_KEY,
   COMPOSER_MODES,
-  NO_PREFERENCE_ANSWER,
-  buildAssistContext,
-  buildConversationContext,
   chatTitleFromPrompt,
-  composeClarifiedPrompt,
-  composePlanBuildPrompt,
   createChat,
-  formatClarificationSummary,
   loadChatStore,
   migrateChatDiagram,
   saveChatStore,
@@ -83,21 +77,6 @@ describe('chat store', () => {
     expect(loaded.chats[1].editableCode).toBe('// my edit');
   });
 
-  it('builds AI context from prior prompts, circuits, and assistant replies', () => {
-    const messages = [
-      { role: 'user', content: 'Make a filter' },
-      { role: 'assistant', content: 'Ready', circuit: { title: 'Filter' } },
-      { role: 'assistant', content: 'Temporary error' },
-      { role: 'assistant', content: '   ' },
-    ];
-
-    expect(buildConversationContext(messages)).toEqual([
-      { role: 'user', content: 'Make a filter' },
-      { role: 'assistant', content: 'Ready', circuit: { title: 'Filter' } },
-      { role: 'assistant', content: 'Temporary error' },
-    ]);
-  });
-
   it('migrates legacy chats with empty memory and persists updated memory', () => {
     const storage = memoryStorage();
     const legacy = { ...createChat({ id: 'legacy', now: 10 }) };
@@ -114,20 +93,11 @@ describe('chat store', () => {
     expect(loadChatStore(storage).chats[0].memory).toEqual(chat.memory);
   });
 
-  it('leaves history truncation to the server', () => {
-    const messages = Array.from({ length: 8 }, (_, index) => ({
-      role: 'user',
-      content: `Requirement ${index + 1}`,
-    }));
-
-    expect(buildConversationContext(messages)).toHaveLength(8);
-  });
-
   it('persists clarification rounds on assistant messages and drops malformed ones', () => {
     const storage = memoryStorage();
     const clarification = {
       forPrompt: 'blink an LED',
-      questions: [{ id: 'q1', question: 'Supply?', options: ['USB 5V', NO_PREFERENCE_ANSWER] }],
+      questions: [{ id: 'q1', question: 'Supply?', options: ['USB 5V', 'No preference (you decide)'] }],
       answers: { q1: 'USB 5V', ghost: 'dropped' },
     };
     const chat = {
@@ -150,43 +120,6 @@ describe('chat store', () => {
     });
     expect(malformed.clarification).toBeUndefined();
     expect(userTurn.clarification).toBeUndefined();
-  });
-
-  it('excludes clarification-only assistant messages from AI context', () => {
-    const messages = [
-      { role: 'user', content: 'blink an LED' },
-      {
-        role: 'assistant',
-        content: 'Questions:',
-        clarification: { questions: [{ id: 'q1', question: 'Supply?', options: ['5V'] }] },
-      },
-      { role: 'assistant', content: 'Done', circuit: { title: 'Blinker' } },
-    ];
-
-    expect(buildConversationContext(messages)).toEqual([
-      { role: 'user', content: 'blink an LED' },
-      { role: 'assistant', content: 'Done', circuit: { title: 'Blinker' } },
-    ]);
-  });
-
-  it('composes the clarified generation prompt and the compact chat summary', () => {
-    const questions = [
-      { id: 'q1', question: 'What supply?', options: ['USB 5V', NO_PREFERENCE_ANSWER] },
-      { id: 'q2', question: 'Blink rate?', options: ['1 Hz', NO_PREFERENCE_ANSWER] },
-    ];
-    const answers = { q1: 'USB 5V' };
-
-    expect(composeClarifiedPrompt('blink an LED', questions, answers)).toBe([
-      'Original request: blink an LED',
-      'User clarifications:',
-      '- What supply? -> USB 5V',
-      `- Blink rate? -> ${NO_PREFERENCE_ANSWER}`,
-      'Design the circuit now honoring these clarifications.',
-    ].join('\n'));
-
-    expect(formatClarificationSummary(questions, answers)).toBe(
-      `Clarifications: What supply? -> USB 5V; Blink rate? -> ${NO_PREFERENCE_ANSWER}`,
-    );
   });
 
   it('persists the composer mode per chat and coerces junk to implement', () => {
@@ -230,31 +163,6 @@ describe('chat store', () => {
     expect(notPlan.plan).toBeUndefined();
     expect(userTurn.plan).toBeUndefined();
     expect(userTurn.mode).toBeUndefined();
-  });
-
-  it('composes the build-this generation prompt from the approved plan', () => {
-    expect(composePlanBuildPrompt('blink an LED', ' - 555 timer\n - R1 10k ')).toBe([
-      'Original request: blink an LED',
-      'Approved design plan:',
-      '- 555 timer\n - R1 10k',
-      'Build this circuit now, following the approved plan.',
-    ].join('\n'));
-  });
-
-  it('keeps assistant text-only turns in both assist and generation contexts', () => {
-    const messages = [
-      { role: 'user', content: 'Make a filter' },
-      { role: 'assistant', content: 'Here is a plan.', mode: 'plan' },
-      { role: 'assistant', content: 'Ready', circuit: { title: 'Filter' } },
-    ];
-    const expected = [
-      { role: 'user', content: 'Make a filter' },
-      { role: 'assistant', content: 'Here is a plan.' },
-      { role: 'assistant', content: 'Ready', circuit: { title: 'Filter' } },
-    ];
-
-    expect(buildAssistContext(messages)).toEqual(expected);
-    expect(buildConversationContext(messages)).toEqual(expected);
   });
 
   it('migrates and repairs saved diagrams without changing the circuit model', () => {

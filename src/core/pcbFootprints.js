@@ -4,6 +4,11 @@
 // instead of schematic pins: KIND_TO_FOOTPRINT[kind].padOrder[i] is the
 // footprint pad *number* that carries part.nodes[i].
 import { KICAD_FOOTPRINTS } from './kicadFootprintLibrary.js';
+import { SMD_FOOTPRINTS } from './smdFootprintLibrary.js';
+
+// Through-hole (generated) plus surface-mount (hand-authored) in one lookup.
+// Kept separate on disk because kicadFootprintLibrary.js is machine-generated.
+const FOOTPRINTS = { ...KICAD_FOOTPRINTS, ...SMD_FOOTPRINTS };
 
 /**
  * @typedef {{ number: string, x: number, y: number, shape: string,
@@ -76,6 +81,12 @@ const KIND_TO_FOOTPRINT = {
   // Non-polar by default; overridden to CP_Radial for electrolytic values
   // (see isElectrolytic below).
   capacitor: { libId: 'Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P5.00mm', padOrder: ['1', '2'] },
+
+  // Connectors. terminal_block and barrel_jack are both two-terminal power
+  // entries; the bornier-2 screw block is the closest real footprint we
+  // vendor, so the jack borrows it rather than synthesizing a bare header.
+  terminal_block: { libId: 'TerminalBlock:TerminalBlock_bornier-2_P5.08mm', padOrder: ['1', '2'] },
+  barrel_jack: { libId: 'TerminalBlock:TerminalBlock_bornier-2_P5.08mm', padOrder: ['1', '2'] },
 
   inductor: { libId: 'Inductor_THT:L_Axial_L9.5mm_D4.0mm_P15.24mm_Horizontal_Fastron_SMCC', padOrder: ['1', '2'] },
 
@@ -161,6 +172,13 @@ const isElectrolytic = (part) => {
 };
 
 const footprintForKind = (part) => {
+  // A pin header's footprint is its pin count, which only the circuit knows.
+  // 2-8 hit real 1xNN library parts; anything wider falls through to
+  // synthesizedHeaderRecord, which lays out a dual row rather than a strip.
+  if (part?.kind === 'pin_header') {
+    const count = part?.nodes?.length ?? 0;
+    return count >= 2 && count <= 8 ? pinHeader(count) : null;
+  }
   const mapped = KIND_TO_FOOTPRINT[part?.kind];
   if (!mapped) return null;
   if (part.kind === 'capacitor' && isElectrolytic(part)) {
@@ -233,8 +251,8 @@ const synthesizedHeaderRecord = (part) => {
 export const footprintRecordFor = (part) => {
   const nodeCount = part?.nodes?.length ?? 0;
 
-  if (part?.footprint && KICAD_FOOTPRINTS[part.footprint]) {
-    const record = KICAD_FOOTPRINTS[part.footprint];
+  if (part?.footprint && FOOTPRINTS[part.footprint]) {
+    const record = FOOTPRINTS[part.footprint];
     if (record.pads.length >= nodeCount) {
       // If the exactly-matched libId is the same one the kind's resolved
       // default would pick, reuse its polarity-aware padOrder instead of
@@ -252,7 +270,7 @@ export const footprintRecordFor = (part) => {
 
   const mapped = footprintForKind(part);
   if (mapped) {
-    const record = KICAD_FOOTPRINTS[mapped.libId];
+    const record = FOOTPRINTS[mapped.libId];
     if (record && record.pads.length >= nodeCount && mapped.padOrder.length === nodeCount) {
       return { libId: mapped.libId, record, padOrder: mapped.padOrder };
     }
@@ -282,7 +300,7 @@ export const footprintRecordFor = (part) => {
  * @returns {FootprintRecord}
  */
 export const recordForPlacedComponent = (component) => {
-  const direct = KICAD_FOOTPRINTS[component?.libId];
+  const direct = FOOTPRINTS[component?.libId];
   if (direct) return direct;
   const fakePart = {
     kind: component?.kind,

@@ -1,0 +1,11 @@
+{
+  "name": "i2c-sensor",
+  "prompt": "Build a 3.3 V ESP32 board that reads a BMP280 barometric sensor over I2C and shows readings on an I2C OLED display.",
+  "notes": "Two devices on one bus. i2c_missing_pullups wants SDA and SCL pulled to the logic supply, and both modules share the pair — the failure mode is giving each device its own bus nets so nothing is actually shared.",
+  "assertions": [
+    "count(baro_sensor) == 1",
+    "count(oled_display) == 1",
+    "baro_sensor[0].SDA == oled_display[0].SDA",
+    "baro_sensor[0].SCL == oled_display[0].SCL"
+  ]
+}

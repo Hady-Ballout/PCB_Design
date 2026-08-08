@@ -1,25 +1,18 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { loadEnv } from './env.js';
 import { parseAllowedOrigins, resolveCorsOrigin } from './cors.js';
-import { buildCircuitResponse, reconcileCircuitRevision } from './circuit/circuitResponse.js';
-import { normalizeChatMemory, sanitizeConversationHistory, updateChatMemory } from './ai/chatMemory.js';
-import { runCircuitPipeline } from './ai/circuitPipeline.js';
-import { checkCircuitTopology } from '../src/core/topologyRules.js';
-import { generateClarifyingQuestions } from './ai/clarifyProvider.js';
-import { generateAssistReply } from './ai/assistProvider.js';
 import { runNgspiceSimulation } from './simulation/simulator.js';
 import { compileSketch } from './compile/compiler.js';
-import { buildStreamingSpice } from './circuit/streamingCircuit.js';
 import { initDb } from './auth/db.js';
 import { handleSignup, handleLogin, handleVerifyEmail, handleMe, verifyJwt } from './auth/auth.js';
 import { handleBillingStatus, handleCreateCheckout, handleCreatePortal, handleStripeWebhook } from './billing/billing.js';
 import { QuotaError, checkAndConsumeQuota } from './billing/quota.js';
 import { DailyTokenLimitError, dailyLimitMessage, enforceDailyTokenLimit, getDailyTokenStatus, recordDailyTokens } from './billing/dailyTokens.js';
-import { trackTokenUsage } from './ai/tokenUsage.js';
+import { handleSandboxGenerate, handleSandboxRun } from './sandbox/generate.js';
 import { handleArtifactDownload, handleMcpRequest } from './mcp/httpServer.js';
 import { authorizeMcpRequest, mcpAuthConfigFromEnv, protectedResourceMetadata } from './mcp/resourceServer.js';
 import { ArtifactStore } from '../mcp/artifactSink.js';
-import type { ChatMemory, ChatMessage, Circuit, CurrentDesign, JwtPayload, PipelineEvent, StreamState } from './types.js';
+import type { Circuit, JwtPayload } from './types.js';
 
 loadEnv();
 
@@ -57,13 +50,6 @@ if (mcpUnauthenticatedInProduction) {
 } else if (mcpEnabled && !mcpAuth) {
   console.warn('[mcp] Running WITHOUT authorization — local development only.');
 }
-
-const aiProviderName = (): string => process.env.AI_PROVIDER || 'ollama';
-const aiModelName = (): string => (
-  process.env.AI_PROVIDER && process.env.AI_PROVIDER !== 'ollama'
-    ? process.env.AI_MODEL || ''
-    : process.env.OLLAMA_MODEL || 'llama3.2:latest'
-);
 
 const sendJson = (response: ServerResponse, status: number, body: unknown): void => {
   // Access-Control-Allow-Origin is set per-request in the server handler.
@@ -145,47 +131,6 @@ const sendDailyLimitReached = (response: ServerResponse, error: DailyTokenLimitE
   });
 };
 
-const startJsonStream = (response: ServerResponse): void => {
-  // Access-Control-Allow-Origin is set per-request in the server handler.
-  response.writeHead(200, {
-    'Content-Type': 'application/x-ndjson; charset=utf-8',
-    'Cache-Control': 'no-cache, no-transform',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-  });
-};
-
-const writeStreamEvent = (response: ServerResponse, event: unknown): void => {
-  response.write(`${JSON.stringify(event)}\n`);
-};
-
-// Reasoning tokens arrive one word at a time; batching them into ~10 events
-// per second keeps the NDJSON wire and the client's re-render rate sane.
-// Deltas are flushed with the next push after the interval elapses, so a tail
-// shorter than the interval is only dropped when the request finishes — at
-// which point the thinking display disappears anyway.
-const createThinkingBatcher = (write: (delta: string) => void, intervalMs = 100) => {
-  let buffer = '';
-  let lastFlush = 0;
-  return {
-    push(delta: string): void {
-      buffer += delta;
-      const now = Date.now();
-      if (now - lastFlush >= intervalMs) {
-        lastFlush = now;
-        const batched = buffer;
-        buffer = '';
-        write(batched);
-      }
-    },
-    flush(): void {
-      if (!buffer) return;
-      const batched = buffer;
-      buffer = '';
-      write(batched);
-    },
-  };
-};
 
 function getUser(request: IncomingMessage): JwtPayload | null {
   const auth = request.headers.authorization || '';
@@ -207,11 +152,8 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
   }
 
   if (request.url === '/api/health') {
-    sendJson(response, 200, {
-      ok: true,
-      provider: aiProviderName(),
-      model: aiModelName(),
-    });
+    // Circuit generation was removed; this reports only that the API is up.
+    sendJson(response, 200, { ok: true });
     return;
   }
 
@@ -356,225 +298,6 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
     return;
   }
 
-  if (request.url === '/api/clarify-circuit' && request.method === 'POST') {
-    try {
-      const body = await readJsonBody(request);
-      const prompt = String(body.prompt || '').trim();
-      if (!prompt) {
-        sendJson(response, 400, { code: 'clarify_failed', error: 'Prompt is required.' });
-        return;
-      }
-
-      try {
-        await checkAndConsumeQuota(user.id, 'assist');
-      } catch (quotaError) {
-        if (quotaError instanceof QuotaError) {
-          sendQuotaExceeded(response, quotaError);
-          return;
-        }
-        throw quotaError;
-      }
-
-      try {
-        await enforceDailyTokenLimit(user.id);
-      } catch (limitError) {
-        if (limitError instanceof DailyTokenLimitError) {
-          sendDailyLimitReached(response, limitError);
-          return;
-        }
-        throw limitError;
-      }
-
-      const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
-      const currentDesign = (body.currentDesign as CurrentDesign)?.circuit ? body.currentDesign as CurrentDesign : null;
-      const memory = normalizeChatMemory(body.memory as Partial<ChatMemory> | null);
-      startJsonStream(response);
-      const thinking = createThinkingBatcher((delta) => writeStreamEvent(response, { type: 'thinking', delta }));
-      const { result, tokens } = await trackTokenUsage(
-        () => generateClarifyingQuestions(prompt, messages, currentDesign, memory, thinking.push)
-      );
-      await recordDailyTokens(user.id, tokens);
-      writeStreamEvent(response, { type: 'complete', data: result });
-      response.end();
-    } catch (error) {
-      console.error(`[circuit-clarify] ${(error as Error).message}`);
-      if (response.headersSent) {
-        writeStreamEvent(response, { type: 'error', code: 'clarify_failed', error: (error as Error).message });
-        response.end();
-      } else {
-        sendJson(response, statusFor(error), { code: 'clarify_failed', error: (error as Error).message });
-      }
-    }
-    return;
-  }
-
-  if (request.url === '/api/assist-circuit' && request.method === 'POST') {
-    try {
-      const body = await readJsonBody(request);
-      const mode = String(body.mode || '');
-      if (mode !== 'plan' && mode !== 'ask') {
-        sendJson(response, 400, { code: 'assist_failed', error: 'Mode must be "plan" or "ask".' });
-        return;
-      }
-      const prompt = String(body.prompt || '').trim();
-      if (!prompt) {
-        sendJson(response, 400, { code: 'assist_failed', error: 'Prompt is required.' });
-        return;
-      }
-
-      try {
-        await checkAndConsumeQuota(user.id, 'assist');
-      } catch (quotaError) {
-        if (quotaError instanceof QuotaError) {
-          sendQuotaExceeded(response, quotaError);
-          return;
-        }
-        throw quotaError;
-      }
-
-      try {
-        await enforceDailyTokenLimit(user.id);
-      } catch (limitError) {
-        if (limitError instanceof DailyTokenLimitError) {
-          sendDailyLimitReached(response, limitError);
-          return;
-        }
-        throw limitError;
-      }
-
-      const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
-      const currentDesign = (body.currentDesign as CurrentDesign)?.circuit ? body.currentDesign as CurrentDesign : null;
-      const memory = normalizeChatMemory(body.memory as Partial<ChatMemory> | null);
-      startJsonStream(response);
-      const thinking = createThinkingBatcher((delta) => writeStreamEvent(response, { type: 'thinking', delta }));
-      // Assist replies confirm no design, so chat memory is deliberately not updated.
-      const { result, tokens } = await trackTokenUsage(
-        () => generateAssistReply(mode, prompt, messages, currentDesign, memory, thinking.push)
-      );
-      await recordDailyTokens(user.id, tokens);
-      writeStreamEvent(response, { type: 'complete', data: result });
-      response.end();
-    } catch (error) {
-      console.error(`[circuit-assist] ${(error as Error).message}`);
-      if (response.headersSent) {
-        writeStreamEvent(response, { type: 'error', code: 'assist_failed', error: (error as Error).message });
-        response.end();
-      } else {
-        sendJson(response, statusFor(error), { code: 'assist_failed', error: (error as Error).message });
-      }
-    }
-    return;
-  }
-
-  if (request.url === '/api/generate-circuit' && request.method === 'POST') {
-    try {
-      const body = await readJsonBody(request);
-      const prompt = String(body.prompt || '').trim();
-      if (!prompt) {
-        sendJson(response, 400, { error: 'Prompt is required.' });
-        return;
-      }
-
-      try {
-        await checkAndConsumeQuota(user.id, 'generation');
-      } catch (quotaError) {
-        if (quotaError instanceof QuotaError) {
-          sendQuotaExceeded(response, quotaError);
-          return;
-        }
-        throw quotaError;
-      }
-
-      try {
-        await enforceDailyTokenLimit(user.id);
-      } catch (limitError) {
-        if (limitError instanceof DailyTokenLimitError) {
-          sendDailyLimitReached(response, limitError);
-          return;
-        }
-        throw limitError;
-      }
-
-      const messages = Array.isArray(body.messages) ? body.messages as ChatMessage[] : [];
-      const currentDesign = (body.currentDesign as CurrentDesign)?.circuit ? body.currentDesign as CurrentDesign : null;
-      const memory = normalizeChatMemory(body.memory as Partial<ChatMemory> | null);
-      const contextDiagnostics = {
-        contextTurnCount: sanitizeConversationHistory(messages).length,
-        revision: Boolean(currentDesign),
-      };
-      if (process.env.OLLAMA_CONTEXT_DIAGNOSTICS === '1') {
-        console.info(`[circuit-context] turns=${contextDiagnostics.contextTurnCount} revision=${contextDiagnostics.revision}`);
-      }
-      startJsonStream(response);
-      writeStreamEvent(response, {
-        type: 'spice',
-        provisional: true,
-        componentCount: currentDesign?.circuit.components?.length || 0,
-        spice: currentDesign?.spice || '* AI is preparing the circuit...\n* Components will appear here as they are generated.',
-      });
-
-      let lastSpiceEvent = '';
-      const { result: aiResponse, tokens: tokensUsed } = await trackTokenUsage(
-        () => runCircuitPipeline(prompt, messages, currentDesign, memory, (event: PipelineEvent) => {
-          if (event.type === 'stage') {
-            writeStreamEvent(response, { type: 'stage', stage: event.stage });
-            return;
-          }
-          const partial = buildStreamingSpice(event.content, prompt, currentDesign?.circuit ?? null);
-          const eventKey = `${event.attempt}:${partial.spice}`;
-          if (eventKey === lastSpiceEvent) return;
-          lastSpiceEvent = eventKey;
-          writeStreamEvent(response, {
-            type: 'spice',
-            provisional: true,
-            correcting: event.correcting,
-            ...partial,
-          });
-        })
-      );
-      await recordDailyTokens(user.id, tokensUsed);
-      const circuit = reconcileCircuitRevision(aiResponse.circuit as unknown as Record<string, unknown>, prompt, currentDesign?.circuit ?? null);
-      // Reconciliation can merge the candidate with the prior confirmed
-      // design, so run the topology check on what actually ships; the
-      // pipeline's reviewer stage already corrected what it could, so the
-      // checker's surviving findings are surfaced in the UI, never fatal.
-      let issues: Array<Record<string, unknown>> = [];
-      try {
-        issues = (checkCircuitTopology(circuit) as unknown as { violations: typeof issues }).violations;
-      } catch (topologyError) {
-        console.error(`[topology-check] ${(topologyError as Error).message}`);
-      }
-      let updatedMemory: ChatMemory = memory;
-      try {
-        updatedMemory = updateChatMemory(memory, prompt, circuit);
-      } catch (memoryError) {
-        console.error(`[chat-memory] ${(memoryError as Error).message}`);
-      }
-      writeStreamEvent(response, {
-        type: 'complete',
-        data: {
-          ...buildCircuitResponse(circuit, { rawPrompt: prompt, type: circuit.type }, aiProviderName()),
-          reply: aiResponse.reply,
-          code: aiResponse.code || '',
-          memory: updatedMemory,
-          issues,
-          ...(process.env.OLLAMA_CONTEXT_DIAGNOSTICS === '1' ? { contextDiagnostics } : {}),
-        },
-      });
-      response.end();
-    } catch (error) {
-      const errorCode = (error as Error & { code?: string }).code || 'generation_failed';
-      console.error(`[circuit-generation:${errorCode}] ${(error as Error).message}`);
-      if (response.headersSent) {
-        writeStreamEvent(response, { type: 'error', code: errorCode, error: (error as Error).message });
-        response.end();
-      } else {
-        sendJson(response, statusFor(error), { code: errorCode, error: (error as Error).message });
-      }
-    }
-    return;
-  }
-
   if (request.url === '/api/simulate-circuit' && request.method === 'POST') {
     try {
       const body = await readJsonBody(request);
@@ -605,6 +328,44 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
       sendJson(response, compilation.ok ? 200 : 422, compilation);
     } catch (error) {
       sendJson(response, statusFor(error), { error: (error as Error).message });
+    }
+    return;
+  }
+
+  if (request.url?.startsWith('/api/sandbox/run/') && request.method === 'GET') {
+    handleSandboxRun(response, decodeURIComponent(request.url.slice('/api/sandbox/run/'.length)), user.id);
+    return;
+  }
+
+  if (request.url === '/api/sandbox/generate' && request.method === 'POST') {
+    try {
+      const body = await readJsonBody(request);
+      // Quota and the daily token cap are checked before any SSE byte is
+      // written, so a refusal still goes out as plain JSON the client's
+      // upgrade/limit prompts understand. Ask/plan turns skip the engine and
+      // bill as assists; implement runs are generations.
+      const mode = body.mode === 'ask' || body.mode === 'plan' ? String(body.mode) : 'implement';
+      await checkAndConsumeQuota(user.id, mode === 'implement' ? 'generation' : 'assist');
+      await enforceDailyTokenLimit(user.id);
+      await handleSandboxGenerate(request, response, body, {
+        owner: user.id,
+        onUsage: (tokens) => {
+          recordDailyTokens(user.id, tokens).catch(() => {});
+        },
+      });
+    } catch (error) {
+      if (error instanceof QuotaError) {
+        sendQuotaExceeded(response, error);
+        return;
+      }
+      if (error instanceof DailyTokenLimitError) {
+        sendDailyLimitReached(response, error);
+        return;
+      }
+      // The handler owns the response once it has written SSE headers, so only
+      // a failure before that point can still be reported as JSON.
+      if (!response.headersSent) sendJson(response, statusFor(error), { error: (error as Error).message });
+      else response.end();
     }
     return;
   }

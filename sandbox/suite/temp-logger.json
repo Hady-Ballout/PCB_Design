@@ -1,0 +1,12 @@
+{
+  "name": "temp-logger",
+  "prompt": "Build a battery-powered temperature logger: an ESP32 reading an analog temperature sensor, with a real-time clock module, a status LED, and a regulated 3.3 V rail from a 9 V battery.",
+  "notes": "The largest case — four subsystems on one board. Tests whether the agent reads regulator.md (writing value as \"3.3V\" rather than a part number, which the known parser defect turns into 1117 V and a false pullup_exceeds_domain) and rtc_module.md, whose pin order [GND, VCC, SDA, SCL] is reversed from every other I2C module in the library.",
+  "assertions": [
+    "count(esp32) == 1",
+    "count(temp_sensor) == 1",
+    "count(rtc_module) == 1",
+    "count(led) >= 1",
+    "rtc_module[0].GND == 0"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "buck-supply",
+  "prompt": "Build a 12 V to 5 V switching supply using a buck converter, with a barrel jack input and screw terminals on the 5 V output.",
+  "notes": "The hardest pin contract in the library. buck_converter is [VIN, OUT, GND, FB, ON_OFF] where nodes[1] is the SWITCH node, not the rail — the inductor goes there and the catch diode's cathode with it. Four rules police it: buck_missing_inductor, buck_missing_catch_diode, buck_fb_misrouted, buck_insufficient_headroom. Getting this from recall rather than from the component page reliably fails.",
+  "assertions": [
+    "count(buck_converter) == 1",
+    "count(inductor) >= 1",
+    "buck_converter[0].FB != buck_converter[0].OUT"
+  ]
+}
