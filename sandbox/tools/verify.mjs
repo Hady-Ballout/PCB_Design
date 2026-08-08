@@ -51,6 +51,7 @@ const { validateCircuit } = await load('pcbGenerator.js');
 const { checkCircuitTopology, ROLE_PINS } = await load('topologyRules.js');
 const { buildPcbLayout } = await load('pcbLayout.js');
 const { COMPONENT_KINDS } = await load('componentKinds.js');
+const { parseVolts } = await load('sim/simValues.js');
 
 // ---------------------------------------------------------------- pin naming
 
@@ -108,22 +109,57 @@ const check555 = (part) => {
 };
 
 /** Ground on a fixed-pin part must be the literal net "0" — nothing else is ground. */
-const checkGroundPins = (part) => {
+const checkGroundPins = (part, circuit) => {
   const names = pinNamesFor(part.kind);
   if (!names) return [];
+  // V- is only ground in a single-supply build. With a negative rail present,
+  // an op-amp's V- riding that rail is exactly right — hard-failing it sent a
+  // benchmarked agent through 35 turns against a correct ±9 V amplifier.
+  const hasNegativeRail = (circuit.components || []).some(
+    (candidate) => candidate.kind === 'voltage_source' && (parseVolts(candidate.value, 0) ?? 0) < 0,
+  );
   const findings = [];
   names.forEach((name, index) => {
     if (!/^(GND|DGND|AGND|V-)$/i.test(name)) return;
     const net = netsOf(part)[index];
-    if (net && net !== '0' && !net.startsWith('NC_')) {
+    if (!net || net === '0' || net.startsWith('NC_')) return;
+    if (/^V-$/i.test(name) && hasNegativeRail) {
       findings.push({
-        fail: true,
+        fail: false,
         ref: part.ref,
-        message: `${name} (pin ${index + 1}) is "${net}". Ground is the net "0".`,
+        message: `${name} (pin ${index + 1}) rides "${net}" — legal split-supply wiring given the negative `
+          + `voltage_source; confirm "${net}" is the negative rail.`,
       });
+      return;
     }
+    findings.push({
+      fail: true,
+      ref: part.ref,
+      message: /^V-$/i.test(name)
+        ? `${name} (pin ${index + 1}) is "${net}". Ground is the net "0" — unless this is a split-supply `
+          + 'design, in which case add a negative voltage_source (e.g. value "-9V").'
+        : `${name} (pin ${index + 1}) is "${net}". Ground is the net "0".`,
+    });
   });
   return findings;
+};
+
+/**
+ * The value parser reads the FIRST number in the string, so a part number is a
+ * disaster the gates cannot see: "LM7805" becomes 7805 volts in the SPICE deck
+ * and the topology rules, and the board ships looking clean. Both models in the
+ * 20-case benchmark wrote exactly that.
+ */
+const checkRegulatorValue = (part) => {
+  if (part.kind !== 'regulator' && part.kind !== 'buck_converter') return [];
+  const volts = parseVolts(part.value, null);
+  if (volts === null || (volts > 0 && volts <= 50)) return [];
+  return [{
+    fail: true,
+    ref: part.ref,
+    message: `value "${part.value}" parses as ${volts} V output — the engine reads the first number, not `
+      + 'the part name. Write the output voltage ("5V" or "3.3V"), not a part number like "LM7805".',
+  }];
 };
 
 // Node count is deliberately NOT checked here. The topology gate already does
@@ -140,7 +176,8 @@ const checkGroundPins = (part) => {
 const INVARIANTS = { timer_555: check555 };
 
 const runInvariants = (circuit) => (circuit.components || []).flatMap((part) => [
-  ...checkGroundPins(part),
+  ...checkGroundPins(part, circuit),
+  ...checkRegulatorValue(part),
   ...(INVARIANTS[part.kind]?.(part) || []),
 ]);
 

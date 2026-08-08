@@ -6,7 +6,7 @@
 // the engine misses. None of these need the model, so they run in the normal
 // suite at normal speed.
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +31,13 @@ const run = (script, args, cwd = repoRoot) => {
 };
 
 const circuitPath = (name) => resolve(repoRoot, 'local', name);
+
+// The verified-circuit corpus lives in the gitignored local/ directory, which
+// exists only on machines that have accumulated one. The suite below tests
+// verify.mjs against that corpus when present and is skipped cleanly when not —
+// the invariant tests further down carry their own inline fixtures and always
+// run. Follow-up: commit a minimal corpus under sandbox/fixtures/ and repoint.
+const hasLocalCircuits = existsSync(resolve(repoRoot, 'local', 'blinker-1hz.json'));
 
 describe('permission guard', () => {
   const root = '/tmp/ws';
@@ -141,8 +148,14 @@ describe('workspace', () => {
     // in the snapshot is a dead end the agent cannot resolve. topologyRules.js
     // is the trap here: it imports sim/simValues.js, so "just exclude sim/"
     // breaks the verification path, while shipping all of sim/ pulls in avr8js.
-    const files = execFileSync('find', [workspace.path('src/core'), '-name', '*.js'], { encoding: 'utf8' })
-      .trim().split('\n');
+    // Walked with fs rather than `find`: on Windows `find` is the DOS string
+    // matcher, which silently returns nonsense instead of a file list.
+    const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const full = resolve(dir, entry.name);
+      if (entry.isDirectory()) return walk(full);
+      return entry.name.endsWith('.js') ? [full] : [];
+    });
+    const files = walk(workspace.path('src/core'));
     expect(files.length).toBeGreaterThan(20);
     for (const file of files) {
       const bare = [...readFileSync(file, 'utf8').matchAll(/^\s*(?:import|export)[^\n]*?from\s*['"]([^'"$]+)['"]/gm)]
@@ -169,7 +182,7 @@ describe('workspace', () => {
   });
 });
 
-describe('verify.mjs', () => {
+describe.skipIf(!hasLocalCircuits)('verify.mjs', () => {
   let dir;
   beforeAll(() => { dir = mkdtempSync(resolve(tmpdir(), 'verify-')); });
   afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
@@ -292,6 +305,86 @@ describe('verify.mjs', () => {
     const { stdout, code } = run(VERIFY, [circuitPath('blinker-1hz.json'), '--quiet',
       '--assert', 'U1.kind == timer_555', '--assert', 'count(led) >= 1', '--assert', 'U1.RESET == VCC']);
     expect(code, stdout).toBe(0);
+  });
+});
+
+// Invariants added after the 20-case GLM benchmark. These carry their own
+// inline circuits so they run on every machine, unlike the corpus suite above.
+describe('verify.mjs invariants', () => {
+  let dir;
+  beforeAll(() => { dir = mkdtempSync(resolve(tmpdir(), 'verify-inv-')); });
+  afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
+
+  const write = (name, circuit) => {
+    const file = resolve(dir, name);
+    writeFileSync(file, JSON.stringify(circuit, null, 2));
+    return file;
+  };
+
+  const R = 'Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal';
+  const PIN2 = 'Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical';
+
+  const regulatorBoard = (value) => ({
+    title: 'regulator value probe',
+    supplyVoltage: 12,
+    components: [
+      { ref: 'V1', kind: 'voltage_source', value: '12V', nodes: ['VIN', '0'], footprint: PIN2 },
+      { ref: 'U1', kind: 'regulator', value, nodes: ['VIN', '0', 'VOUT'], footprint: 'Package_TO_SOT_THT:TO-220-3_Vertical' },
+      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VOUT', 'LED_A'], footprint: R },
+      { ref: 'D1', kind: 'led', value: 'red', nodes: ['LED_A', '0'], footprint: 'LED_THT:LED_D5.0mm' },
+    ],
+  });
+
+  const splitSupplyAmp = ({ negativeRail }) => ({
+    title: 'split supply amp',
+    supplyVoltage: 9,
+    components: [
+      { ref: 'V1', kind: 'voltage_source', value: '9V', nodes: ['VCC', '0'], footprint: PIN2 },
+      ...(negativeRail
+        ? [{ ref: 'V2', kind: 'voltage_source', value: '-9V', nodes: ['VEE', '0'], footprint: PIN2 }]
+        : []),
+      { ref: 'VSIG1', kind: 'signal_source', value: 'SINE(0 0.1 1k)', nodes: ['VIN', '0'], footprint: PIN2 },
+      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VIN', 'INV'], footprint: R },
+      { ref: 'R2', kind: 'resistor', value: '15k', nodes: ['INV', 'VOUT'], footprint: R },
+      { ref: 'XU1', kind: 'opamp', value: 'LM358', nodes: ['0', 'INV', 'VOUT', 'VCC', 'VEE'], footprint: 'Package_DIP:DIP-8_W7.62mm' },
+    ],
+  });
+
+  it('fails a regulator whose value is a part number', () => {
+    // Both models in the benchmark wrote "LM7805", which the engine reads as
+    // 7805 volts — every gate passed and the board shipped latently wrong.
+    const { stdout, code } = run(VERIFY, [write('lm7805.json', regulatorBoard('LM7805')), '--quiet']);
+    expect(code).toBe(1);
+    expect(stdout).toMatch(/parses as 7805 V/);
+    expect(stdout).toMatch(/not a part number/);
+  });
+
+  it('accepts a regulator value written as a voltage', () => {
+    const { stdout, code } = run(VERIFY, [write('fivev.json', regulatorBoard('5V')), '--quiet']);
+    expect(code).toBe(0);
+    expect(stdout).toMatch(/VERDICT: PASS/);
+  });
+
+  it('accepts V- on a negative rail when a negative supply exists', () => {
+    const { stdout, code } = run(VERIFY, [write('split.json', splitSupplyAmp({ negativeRail: true })), '--quiet']);
+    expect(code).toBe(0);
+    expect(stdout).not.toMatch(/FAIL\s+XU1: V-/);
+  });
+
+  it('still fails V- off ground when no negative supply exists', () => {
+    // Without a negative source, "VEE" floats and V- off ground is the classic
+    // single-supply wiring mistake; the message points at the split-supply fix.
+    const { stdout, code } = run(VERIFY, [write('nosplit.json', splitSupplyAmp({ negativeRail: false })), '--quiet']);
+    expect(code).toBe(1);
+    expect(stdout).toMatch(/add a negative voltage_source/);
+  });
+
+  it('always fails GND pins off the ground net', () => {
+    const board = regulatorBoard('5V');
+    board.components[1].nodes = ['VIN', 'GNDX', 'VOUT'];
+    const { stdout, code } = run(VERIFY, [write('gndx.json', board), '--quiet']);
+    expect(code).toBe(1);
+    expect(stdout).toMatch(/Ground is the net "0"/);
   });
 });
 
