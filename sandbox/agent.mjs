@@ -134,7 +134,12 @@ export const readEnvFile = (file) => {
     .filter(([key]) => key));
 };
 
-export const ENV_FILE = process.env.SANDBOX_ENV_FILE || '.env.deepseek';
+// Resolved lazily, at the moment an agent starts: the server calls loadEnv()
+// (which reads .env into process.env) AFTER module graphs are initialized, so
+// an import-time constant here never saw SANDBOX_ENV_FILE — the sandbox then
+// silently fell through to whatever ANTHROPIC_* credentials the parent shell
+// had, observed live as a dev run billing a Claude Code session's account.
+export const envFileName = () => process.env.SANDBOX_ENV_FILE || '.env.deepseek';
 
 // -------------------------------------------------------------- the prompt
 
@@ -197,7 +202,7 @@ export async function* runAgent({ workspace, prompt, resume, maxTurns = 60, abor
 
   const env = {
     ...process.env,
-    ...readEnvFile(ENV_FILE),
+    ...readEnvFile(envFileName()),
     // A provider can stop sending mid-response and the run then sits forever
     // with no error and no output — observed live: a tool call was approved and
     // nothing happened for seven minutes. The watchdog turns that silence into

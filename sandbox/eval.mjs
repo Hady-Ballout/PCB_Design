@@ -19,7 +19,7 @@ import { readdirSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { create, say, readSession } from './session.mjs';
-import { readEnvFile, ENV_FILE } from './agent.mjs';
+import { readEnvFile, envFileName } from './agent.mjs';
 import { compact, loadPricing, money, runRow } from './cost.mjs';
 
 const sandboxDir = dirname(fileURLToPath(import.meta.url));
@@ -179,7 +179,7 @@ if (!cases.length) {
   process.exit(2);
 }
 
-const model = readEnvFile(ENV_FILE).ANTHROPIC_MODEL || process.env.ANTHROPIC_MODEL || '(default)';
+const model = readEnvFile(envFileName()).ANTHROPIC_MODEL || process.env.ANTHROPIC_MODEL || '(default)';
 console.log(`${BOLD}${cases.length} case${cases.length === 1 ? '' : 's'}${OFF} · ${model}\n`);
 
 const rows = await runAll(cases, {
