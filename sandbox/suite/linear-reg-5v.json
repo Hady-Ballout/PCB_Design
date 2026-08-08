@@ -1,0 +1,12 @@
+{
+  "name": "linear-reg-5v",
+  "prompt": "Build a regulated 5 V rail from a 12 V battery using a linear regulator, with input and output capacitors, powering a green indicator LED with a series resistor.",
+  "notes": "The regulator value-parser landmine as its own case: a value written as a part number (e.g. \"LM7805\" or \"AMS1117-5.0\") is read by the engine as thousands of volts. The accuracy checker parses the regulator value the way the engine does and scores the distance from 5 V.",
+  "assertions": [
+    "count(regulator) == 1",
+    "regulator[0].GND == 0",
+    "count(capacitor) >= 2",
+    "count(led) >= 1",
+    "count(resistor) >= 1"
+  ]
+}

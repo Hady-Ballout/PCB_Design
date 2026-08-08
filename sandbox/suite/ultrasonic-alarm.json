@@ -1,0 +1,12 @@
+{
+  "name": "ultrasonic-alarm",
+  "prompt": "Build a parking distance alarm: an Arduino Uno reads an HC-SR04 ultrasonic sensor and sounds a buzzer when something is close. Drive the buzzer from a transistor, not directly from the pin.",
+  "notes": "Module wiring plus one discrete driver stage. The explicit instruction not to drive the buzzer from the GPIO is the trap: a direct-drive answer is simpler and wrong.",
+  "assertions": [
+    "count(arduino_uno) == 1",
+    "count(ultrasonic_sensor) == 1",
+    "count(buzzer) == 1",
+    "count(bjt_npn) + count(mosfet_n) >= 1",
+    "ultrasonic_sensor[0].GND == 0"
+  ]
+}

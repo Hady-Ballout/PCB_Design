@@ -1,0 +1,12 @@
+{
+  "name": "mosfet-load-switch",
+  "prompt": "Build a circuit where an ESP32 GPIO switches a 12 V resistive heater element (model it as a generic load) using an N-channel MOSFET as a low-side switch. Include a gate series resistor and a gate pulldown so the heater stays off at boot.",
+  "notes": "Same combination rules as motor-driver but a resistive load, so no flyback diode is required — an agent that cargo-cults the motor recipe adds one harmlessly, but one that omits the pulldown fails the assertion.",
+  "assertions": [
+    "count(mosfet_n) == 1",
+    "mosfet_n[0].source == 0",
+    "count(load) == 1",
+    "count(esp32) == 1",
+    "count(resistor) >= 2"
+  ]
+}

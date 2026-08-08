@@ -23,6 +23,7 @@
   "currency": "USD",
   "models": {
     "default": { "input": 5.0, "output": 25.0, "cacheRead": 0.5, "cacheWrite": 6.25, "source": "fallback for an unknown model — deliberately pessimistic" },
+    "glm-5.2": { "input": 1.4, "output": 4.4, "cacheRead": 0.26, "cacheWrite": 1.4, "source": "z.ai official pricing, 2026-08" },
     "deepseek-v4-pro": { "input": 0.435, "output": 0.87, "cacheRead": 0.003625, "cacheWrite": 0.435, "source": "deepseek official pricing" },
     "deepseek-v4-flash": { "input": 0.14, "output": 0.28, "cacheRead": 0.0028, "cacheWrite": 0.14, "source": "deepseek official pricing" },
     "claude-sonnet-4-5": { "input": 3.0, "output": 15.0, "cacheRead": 0.3, "cacheWrite": 3.75, "source": "anthropic list price" },

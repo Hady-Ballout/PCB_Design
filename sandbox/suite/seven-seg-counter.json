@@ -1,0 +1,13 @@
+{
+  "name": "seven-seg-counter",
+  "prompt": "Build a single-digit display: an Arduino Uno drives a common-cathode seven-segment display through a 74HC595 shift register, with a series resistor on every segment line.",
+  "notes": "The pin-heaviest case in the suite: 16 shift-register pins and 9 display pins, with eight resistors in between. Pin-order mistakes have the most room to hide here.",
+  "assertions": [
+    "count(shift_register) == 1",
+    "count(seven_segment) == 1",
+    "count(resistor) >= 7",
+    "shift_register[0].GND == 0",
+    "seven_segment[0].COM == 0",
+    "count(arduino_uno) == 1"
+  ]
+}

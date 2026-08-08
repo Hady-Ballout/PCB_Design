@@ -1,0 +1,12 @@
+{
+  "name": "hall-tach",
+  "prompt": "Build a wheel-speed sensor board: a hall-effect sensor feeding an ESP32 GPIO, with a 10k pull-up on the sensor output (it is open-collector) and a 100 nF decoupling capacitor across the sensor supply.",
+  "notes": "Small but specific: the pull-up on OUT is functionally required (open-collector), and the decoupling cap is explicitly requested rather than left to taste.",
+  "assertions": [
+    "count(hall_sensor) == 1",
+    "count(esp32) == 1",
+    "hall_sensor[0].GND == 0",
+    "count(resistor) >= 1",
+    "count(capacitor) >= 1"
+  ]
+}

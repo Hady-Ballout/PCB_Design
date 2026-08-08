@@ -1,0 +1,10 @@
+{
+  "name": "rc-highpass-500hz",
+  "prompt": "Build a passive RC high-pass filter with a 500 Hz cutoff, driven from a signal source. Use a 5 V supply for any reference you need.",
+  "notes": "The rc-filter case inverted: capacitor in series with the signal, resistor to ground. Tests whether the topology follows the transfer function or just repeats the low-pass shape.",
+  "assertions": [
+    "count(resistor) >= 1",
+    "count(capacitor) >= 1",
+    "count(signal_source) >= 1"
+  ]
+}

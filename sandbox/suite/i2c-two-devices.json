@@ -1,0 +1,13 @@
+{
+  "name": "i2c-two-devices",
+  "prompt": "Build a circuit with an Arduino Uno reading an IMU sensor and showing values on an OLED display, both on the same I2C bus, with 4.7k pull-up resistors on SDA and SCL.",
+  "notes": "Differs from i2c-sensor by demanding a shared bus and explicit pull-ups. The assertion that both devices sit on the same SDA/SCL nets is the point of the case.",
+  "assertions": [
+    "count(arduino_uno) == 1",
+    "count(imu_sensor) == 1",
+    "count(oled_display) == 1",
+    "imu_sensor[0].SDA == oled_display[0].SDA",
+    "imu_sensor[0].SCL == oled_display[0].SCL",
+    "count(resistor) >= 2"
+  ]
+}

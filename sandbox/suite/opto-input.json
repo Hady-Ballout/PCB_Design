@@ -1,0 +1,11 @@
+{
+  "name": "opto-input",
+  "prompt": "Build an isolated input stage: a 12 V signal drives the LED side of an optocoupler through a series resistor, and the phototransistor side pulls an ESP32 GPIO low, with a pull-up resistor from the GPIO net to 3.3 V.",
+  "notes": "Tests four-pin opto orientation (A/K on the input loop, C/E on the MCU loop) and two resistors doing two jobs. Emitter to MCU ground is the low-side convention the knowledge page documents.",
+  "assertions": [
+    "count(optocoupler) == 1",
+    "count(esp32) == 1",
+    "count(resistor) >= 2",
+    "optocoupler[0].E == 0"
+  ]
+}

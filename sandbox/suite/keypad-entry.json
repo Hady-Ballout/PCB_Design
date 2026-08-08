@@ -1,0 +1,13 @@
+{
+  "name": "keypad-entry",
+  "prompt": "Build a door-code entry panel: a 4x4 matrix keypad and a piezo buzzer for key clicks on an Arduino Uno, with the buzzer driven through an NPN transistor with a base resistor.",
+  "notes": "Eight matrix lines to eight distinct digital pins plus a driver stage. The keypad rows/columns must land on eight different pins — shorting two onto one pin passes a naive count but fails the accuracy checker's distinctness test.",
+  "assertions": [
+    "count(keypad) == 1",
+    "count(arduino_uno) == 1",
+    "count(buzzer) == 1",
+    "count(bjt_npn) == 1",
+    "bjt_npn[0].emitter == 0",
+    "count(resistor) >= 1"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "npn-led-driver",
+  "prompt": "Build a circuit where an Arduino Uno digital pin switches a 5 V LED through an NPN transistor used as a low-side switch, with a base resistor and a series resistor for the LED.",
+  "notes": "The classic beginner driver stage. Low-side means the emitter sits on ground and the LED hangs from the 5 V rail into the collector; a correct board needs two resistors doing two different jobs.",
+  "assertions": [
+    "count(bjt_npn) == 1",
+    "bjt_npn[0].emitter == 0",
+    "count(arduino_uno) == 1",
+    "count(led) >= 1",
+    "count(resistor) >= 2"
+  ]
+}

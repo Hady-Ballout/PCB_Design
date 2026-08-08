@@ -1,0 +1,11 @@
+{
+  "name": "astable-4hz",
+  "prompt": "Build a circuit that flashes an LED 4 times per second, powered from a 5 V supply.",
+  "notes": "Same topology family as blink-1hz but a different target and rail, so a memorized 1 Hz answer scores badly. Target period 0.25 s.",
+  "assertions": [
+    "count(timer_555) == 1",
+    "timer_555[0].TRIG == timer_555[0].THRES",
+    "timer_555[0].GND == 0",
+    "count(led) >= 1"
+  ]
+}

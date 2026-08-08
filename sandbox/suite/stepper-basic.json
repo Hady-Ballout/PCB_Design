@@ -1,0 +1,11 @@
+{
+  "name": "stepper-basic",
+  "prompt": "Build a circuit where an Arduino Uno drives a stepper motor through a stepper driver module, with the driver powered from 5 V.",
+  "notes": "Straight module wiring: four control lines in, four coil lines out. Tests reading the stepper_driver pin order rather than inventing one.",
+  "assertions": [
+    "count(stepper_driver) == 1",
+    "count(stepper_motor) == 1",
+    "count(arduino_uno) == 1",
+    "stepper_driver[0].GND == 0"
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "comparator-night-light",
+  "prompt": "Build a night light: a photoresistor senses darkness and a comparator turns an LED on when it gets dark. Use a 5 V supply, with the comparison threshold set at half the supply by a resistive reference divider.",
+  "notes": "Sensor divider into one comparator input, reference divider into the other, LED on the output. The 2.5 V threshold is asserted via the accuracy checker (reference divider ratio 0.5), not the gates.",
+  "assertions": [
+    "count(comparator) == 1",
+    "count(photoresistor) == 1",
+    "count(led) >= 1",
+    "count(resistor) >= 3",
+    "comparator[0].V- == 0"
+  ]
+}

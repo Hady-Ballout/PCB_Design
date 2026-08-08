@@ -1,0 +1,12 @@
+{
+  "name": "monostable-3s",
+  "prompt": "Build a 555 one-shot timer: pressing a pushbutton lights an LED for 3 seconds, then it turns off. Runs from a 9 V supply.",
+  "notes": "The mirror of the astable cases: a correct monostable has TRIG and THRES on different nets, so an agent that pattern-matches to the astable wiring fails the assertion. Pulse width 1.1*R*C = 3 s.",
+  "assertions": [
+    "count(timer_555) == 1",
+    "timer_555[0].TRIG != timer_555[0].THRES",
+    "timer_555[0].GND == 0",
+    "count(pushbutton) == 1",
+    "count(led) >= 1"
+  ]
+}

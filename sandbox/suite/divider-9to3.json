@@ -1,0 +1,9 @@
+{
+  "name": "divider-9to3",
+  "prompt": "Build a resistive voltage divider that produces 3.0 V from a 9 V battery, drawing no more than 1 mA from the battery, with the output on a net named VOUT.",
+  "notes": "Two constraints at once: the ratio (1/3) and the total resistance (>= 9 kOhm). A stock 10k/10k answer fails the ratio; a 1k/2k answer fails the current budget.",
+  "assertions": [
+    "count(resistor) >= 2",
+    "count(voltage_source) >= 1"
+  ]
+}

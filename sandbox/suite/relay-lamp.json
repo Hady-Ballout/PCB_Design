@@ -1,0 +1,11 @@
+{
+  "name": "relay-lamp",
+  "prompt": "Build a circuit where an Arduino Uno controls a relay module that switches a 12 V lamp (model the lamp as a load) through the relay's normally-open contact.",
+  "notes": "Module wiring plus a switched power path. The lamp must sit in a loop through COM/NO and the 12 V source, which is a different shape from everything else in the suite.",
+  "assertions": [
+    "count(relay_module) == 1",
+    "relay_module[0].GND == 0",
+    "count(arduino_uno) == 1",
+    "count(load) == 1"
+  ]
+}

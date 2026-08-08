@@ -1,0 +1,10 @@
+{
+  "name": "led-12ma",
+  "prompt": "Build an indicator: a single red LED running at approximately 12 mA from a 12 V supply, with a correctly sized series resistor.",
+  "notes": "One resistor, one LED, one arithmetic step: R = (12 - Vf) / 0.012 with Vf around 2 V gives roughly 830 ohms (E24: 820). A 330-ohm reflex answer runs the LED at 30 mA.",
+  "assertions": [
+    "count(led) == 1",
+    "count(resistor) == 1",
+    "led[0].cathode == 0"
+  ]
+}

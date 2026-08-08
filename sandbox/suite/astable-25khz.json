@@ -1,0 +1,10 @@
+{
+  "name": "astable-25khz",
+  "prompt": "Build a 555 astable oscillator running at 25 kHz from a 9 V supply, with the output brought to a labelled net called PWM_OUT.",
+  "notes": "Same equation as the blinkers but three decades up in frequency, so the component-value regime changes (nF and single-digit kilohms). A stock blinker answer misses by orders of magnitude.",
+  "assertions": [
+    "count(timer_555) == 1",
+    "timer_555[0].TRIG == timer_555[0].THRES",
+    "timer_555[0].GND == 0"
+  ]
+}

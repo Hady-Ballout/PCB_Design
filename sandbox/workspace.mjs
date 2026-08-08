@@ -107,7 +107,12 @@ export class Workspace {
 
   path(relativePath = '.') {
     const full = resolve(this.root, relativePath);
-    if (full !== this.root && !full.startsWith(`${this.root}/`)) {
+    // Resolve the root and compare with separators normalized so the
+    // containment check holds on win32, where resolve() returns backslash
+    // paths (and absolutizes a bare POSIX root onto the current drive).
+    const fullNorm = full.replace(/\\/g, '/');
+    const rootNorm = resolve(this.root).replace(/\\/g, '/');
+    if (fullNorm !== rootNorm && !fullNorm.startsWith(`${rootNorm}/`)) {
       throw new Error(`Path escapes the workspace: ${relativePath}`);
     }
     return full;

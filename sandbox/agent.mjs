@@ -69,11 +69,15 @@ export const makeGuard = (workspaceRoot, log = () => {}) => {
   const checkPath = (rawPath, { write }) => {
     if (!rawPath) return null;
     const full = isAbsolute(rawPath) ? resolve(rawPath) : resolve(root, rawPath);
-    if (full !== root && !full.startsWith(`${root}/`)) {
+    // Normalize separators so the containment and prefix checks hold on win32,
+    // where resolve() returns backslash paths.
+    const fullNorm = full.replace(/\\/g, '/');
+    const rootNorm = root.replace(/\\/g, '/');
+    if (fullNorm !== rootNorm && !fullNorm.startsWith(`${rootNorm}/`)) {
       return `Path is outside the workspace: ${rawPath}. Work only inside the current directory.`;
     }
     if (!write) return null;
-    const relativePath = full.slice(root.length + 1);
+    const relativePath = fullNorm.slice(rootNorm.length + 1);
     if (READ_ONLY_PREFIXES.some((prefix) => relativePath === prefix || relativePath.startsWith(`${prefix}/`))) {
       return `${relativePath} is read-only. The engine, the knowledge base and the tools are fixed inputs — `
         + 'write your circuit to circuit.json instead.';

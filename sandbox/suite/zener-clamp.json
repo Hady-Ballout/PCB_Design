@@ -1,0 +1,10 @@
+{
+  "name": "zener-clamp",
+  "prompt": "Build an input protection clamp: a sensor signal that can spike above 12 V feeds a 5.1 V zener clamp through a series resistor before reaching a net named PROTECTED_OUT, powered against a 12 V source.",
+  "notes": "Diode orientation is the whole case: the zener clamps with the cathode on the signal and the anode on ground. Backwards, it conducts at 0.7 V and the output never rises.",
+  "assertions": [
+    "count(zener) == 1",
+    "zener[0].anode == 0",
+    "count(resistor) >= 1"
+  ]
+}

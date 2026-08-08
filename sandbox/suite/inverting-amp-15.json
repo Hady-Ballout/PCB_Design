@@ -1,0 +1,10 @@
+{
+  "name": "inverting-amp-15",
+  "prompt": "Build an inverting op-amp amplifier with a voltage gain of 15, powered from ±9 V split supplies (both rails are available). The input comes from a signal source.",
+  "notes": "Complement to opamp-preamp (which was non-inverting, single supply). Gain is Rf/Rin = 15, which is not a clean single E24 pair (e.g. 15k/1k works exactly; austerity in value choice is measurable). The split supply removes the bias-network excuse: V+ and V- both have rails.",
+  "assertions": [
+    "count(opamp) + count(ua741) >= 1",
+    "count(resistor) >= 2",
+    "count(signal_source) >= 1"
+  ]
+}
