@@ -729,6 +729,17 @@ describe('fixed_pin_node_count', () => {
     ]));
     expect(idsOf(result)).not.toContain('fixed_pin_node_count');
   });
+
+  it('flags a usb_c written with a collapsed 6-node contract', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VBUS', '0'] },
+      { ref: 'J1', kind: 'usb_c', value: 'USB-C', nodes: ['VBUS', '0', 'CC1', 'CC2', 'DP', 'DM'] },
+      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VBUS', '0'] },
+    ]));
+    const hit = result.violations.find((entry) => entry.id === 'fixed_pin_node_count');
+    expect(hit).toBeDefined();
+    expect(hit.message).toContain('17');
+  });
 });
 
 describe('opamp_input_floating', () => {
@@ -987,6 +998,17 @@ describe('orphan_supply', () => {
     ]));
     expect(idsOf(result)).not.toContain('orphan_supply');
   });
+
+  it('still fires when the rail feeds only a TVS clamp — protection is filter, not load', () => {
+    const result = checkCircuitTopology(circuitOf([
+      ...buckSubcircuit(),
+      { ref: 'D_TVS1', kind: 'tvs', value: '12V', nodes: ['0', 'VOUT'] },
+      // Unrelated live load so the circuit as a whole is doing something.
+      { ref: 'V2', kind: 'voltage_source', value: '9V', nodes: ['VIN9', '0'] },
+      mcuPart('arduino_uno', 'U2', { '5V': 'VIN9', GND: '0' }),
+    ]));
+    expect(idsOf(result)).toContain('orphan_supply');
+  });
 });
 
 describe('dead_active_device', () => {
@@ -1022,6 +1044,17 @@ describe('dead_active_device', () => {
     // onto the canvas shouldn't be flagged before the user has wired anything.
     const result = checkCircuitTopology(circuitOf([
       mcuPart('esp32', 'U1', {}),
+    ]));
+    expect(idsOf(result)).not.toContain('dead_active_device');
+  });
+
+  it('stays silent for a usb_c wired only to VBUS and ground — a connector\'s normal state', () => {
+    const result = checkCircuitTopology(circuitOf([
+      { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VBUS', '0'] },
+      { ref: 'J1', kind: 'usb_c', value: 'USB-C',
+        nodes: ['0', 'VBUS', 'NC_J1_3', 'NC_J1_4', 'NC_J1_5', 'NC_J1_6', 'VBUS', '0',
+          '0', 'VBUS', 'NC_J1_11', 'NC_J1_12', 'NC_J1_13', 'NC_J1_14', 'VBUS', '0', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VBUS', '0'] },
     ]));
     expect(idsOf(result)).not.toContain('dead_active_device');
   });

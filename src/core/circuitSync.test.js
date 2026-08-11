@@ -542,6 +542,12 @@ describe('tier-2 synchronization', () => {
     expect(parsed.circuit.components.find((part) => part.ref === 'DS9').kind).toBe('schottky');
   });
 
+  it('recognizes a DTVS line as a tvs even without a base circuit', () => {
+    const parsed = parseSpiceNetlist('* deck\nV1 VCC 0 DC 5\nD3 0 VCC DTVS_12\nR1 VCC 0 1k\n.end', null);
+    expect(parsed.ok).toBe(true);
+    expect(parsed.circuit.components.find((part) => part.ref === 'D3').kind).toBe('tvs');
+  });
+
   it('keeps plain DC sources as voltage_source and waveforms as signal_source', () => {
     // The V-branch base-kind preservation must not disturb existing behavior:
     // a hand-added V line with no base is a voltage_source, and a base

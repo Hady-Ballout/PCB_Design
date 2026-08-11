@@ -6,6 +6,7 @@
 import { MCU_KINDS, WIRING_ONLY_KINDS, kindLabel } from '../componentKinds.js';
 import {
   buckVolts,
+  chargeVolts,
   parseAmps,
   parseFarads,
   parseHenries,
@@ -13,6 +14,7 @@ import {
   parseSourceWaveform,
   parseVolts,
   regulatorVolts,
+  tvsVolts,
   zenerVolts,
 } from './simValues.js';
 
@@ -203,7 +205,9 @@ export const buildSimNetlist = (circuit, options = {}) => {
   const addDiode = (id, owner, kind, anodeNet, cathodeNet, modelName, channel = null) => {
     const model = modelName.startsWith('DZEN')
       ? { is: 1e-14, n: 1, rs: 1, bv: zenerVolts(modelName.replace('DZEN:', '')), ibv: 5e-3 }
-      : DIODE_MODELS[modelName];
+      : modelName.startsWith('DTVS')
+        ? { is: 1e-14, n: 1, rs: 0.5, bv: tvsVolts(modelName.replace('DTVS:', '')), ibv: 1e-3 }
+        : DIODE_MODELS[modelName];
     const anode = indexOf(anodeNet);
     const cathode = indexOf(cathodeNet);
     if (model.rs > 0) {
@@ -361,6 +365,12 @@ export const buildSimNetlist = (circuit, options = {}) => {
         Object.assign(devices.at(-1), { inNode: inConnected ? indexOf(a) : null, vnom, headroom: 2 });
         break;
       }
+      case 'charge_controller':
+        // TP4056 module with protection: one ideal DC source on OUT+ at the
+        // full-charge voltage. No dropout sensing on purpose — OUT follows
+        // the battery, so an unpowered IN+ does not collapse the output.
+        addVsource(ref, ref, kind, indexOf(nodes[4]), GROUND, parseSourceWaveform(`DC ${chargeVolts(value)}`));
+        break;
       case 'diode':
         addDiode(ref, ref, kind, a, b, 'DGEN');
         break;
@@ -375,6 +385,11 @@ export const buildSimNetlist = (circuit, options = {}) => {
         break;
       case 'zener':
         addDiode(ref, ref, kind, a, b, `DZEN:${value ?? ''}`);
+        break;
+      case 'tvs':
+        // Unidirectional clamp: same junction as a zener but a harder knee
+        // (lower rs, earlier ibv) so a surge pins near the standoff voltage.
+        addDiode(ref, ref, kind, a, b, `DTVS:${value ?? ''}`);
         break;
       case 'rgb_led': {
         const models = { R: 'DRED', G: 'DGRN', B: 'DBLU' };

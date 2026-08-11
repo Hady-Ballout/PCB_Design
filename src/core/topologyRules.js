@@ -23,7 +23,7 @@ import {
   WIRING_ONLY_KINDS,
   kindLabel,
 } from './componentKinds.js';
-import { buckVolts, parseVolts } from './sim/simValues.js';
+import { buckVolts, chargeVolts, parseVolts } from './sim/simValues.js';
 
 // ICs that need local supply decoupling: expected to have a bypass cap from
 // their supply net to ground somewhere on the board.
@@ -47,16 +47,18 @@ const DRIVER_MODULE_OUTPUT_PINS = {
 const ISOLATOR_OUTPUT_PINS = {
   optocoupler: new Set(['E', 'C']),
 };
-const DIODE_KINDS = new Set(['diode', 'led', 'ir_led', 'zener', 'schottky']);
+const DIODE_KINDS = new Set(['diode', 'led', 'ir_led', 'zener', 'schottky', 'tvs']);
 // Kinds that belong to a regulator's own filter, not to its load.
-const SUPPLY_FILTER_KINDS = new Set(['capacitor', 'inductor', 'schottky', 'diode', 'resistor']);
-const GPIO_PIN_PATTERN = /^(D\d+|A\d+|GPIO\d+)$/;
-const MCU_LOGIC_VOLTS = { arduino_uno: 5, raspberry_pi: 3.3, esp32: 3.3 };
+// tvs is here so a clamp across a rail never counts as the rail's load.
+const SUPPLY_FILTER_KINDS = new Set(['capacitor', 'inductor', 'schottky', 'diode', 'resistor', 'tvs']);
+// IO\d+ is the ESP32-S3-WROOM-1's datasheet naming for the same GPIO pads.
+const GPIO_PIN_PATTERN = /^(D\d+|A\d+|GPIO\d+|IO\d+)$/;
+const MCU_LOGIC_VOLTS = { arduino_uno: 5, raspberry_pi: 3.3, esp32: 3.3, esp32_s3_wroom: 3.3 };
 // 3.3V-only parts whose bare silicon is not 5V tolerant AND whose catalog
 // entry already steers them to 3V3. Deliberately short: breakouts with onboard
 // regulators/level circuitry (imu_sensor, oled_display, ...) stay out so the
 // rule never false-positives on a tolerant module.
-const MAX_INPUT_VOLTS = { raspberry_pi: 3.6, esp32: 3.6, rfid_reader: 3.6, mouse_sensor: 3.6 };
+const MAX_INPUT_VOLTS = { raspberry_pi: 3.6, esp32: 3.6, esp32_s3_wroom: 3.6, rfid_reader: 3.6, mouse_sensor: 3.6 };
 const SUPPLY_PIN_NAMES = new Set(['5V', '3V3', 'VIN', 'VCC', 'GND', 'VS', 'EN']);
 // E24 standard resistor mantissas (5% series) — used to flag values that
 // aren't purchasable off the shelf.
@@ -77,6 +79,7 @@ export const ROLE_PINS = {
   ir_led: ['anode', 'cathode'],
   zener: ['anode', 'cathode'],
   schottky: ['anode', 'cathode'],
+  tvs: ['anode', 'cathode'],
   vibration_motor: ['+', '−'],
   solar_panel: ['+', '−'],
   rgb_led: ['red', 'green', 'blue', 'common'],
@@ -244,6 +247,7 @@ const buildNetVolts = (graph, circuit) => {
     if (part.kind === 'voltage_source' || part.kind === 'solar_panel') claim(String(part.nodes[0] ?? ''), parseVolts(part.value, null));
     if (part.kind === 'regulator') claim(String(part.nodes[2] ?? ''), parseVolts(part.value, null));
     if (part.kind === 'buck_converter') claim(String(part.nodes[1] ?? ''), buckVolts(part.value));
+    if (part.kind === 'charge_controller') claim(String(part.nodes[4] ?? ''), chargeVolts(part.value));
   }
   return volts;
 };

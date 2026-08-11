@@ -122,6 +122,18 @@ export const COMPONENT_KINDS = {
     aliases: ['buck', 'step-down', 'lm2596', 'dc-dc'],
     keywords: ['switching', 'regulator', 'power', 'supply', 'converter'],
   },
+  // TP4056 charging module with onboard DW01 protection: IN± from a 5V
+  // source, B± to the cell, OUT± to the load. SPICE/sim image is an ideal DC
+  // source on OUT+ (4.2V full-charge default) like the other power bricks.
+  // No dropout sensing on purpose: a protected module's OUT follows the
+  // battery, so an unpowered IN does not collapse OUT.
+  charge_controller: {
+    spicePrefix: 'V', pins: 6, symbolType: 'generic', label: 'Li-ion charger (TP4056)',
+    fixedPins: ['IN+', 'IN-', 'B+', 'B-', 'OUT+', 'OUT-'],
+    category: 'power',
+    aliases: ['tp4056', 'lipo charger', 'battery charger', 'charging module'],
+    keywords: ['power', 'battery', 'li-ion', 'lipo', 'charge', 'protection', 'usb'],
+  },
   voltage_source: {
     spicePrefix: 'V', pins: 2, symbolType: 'voltage_source', label: 'Voltage source',
     category: 'source',
@@ -163,6 +175,15 @@ export const COMPONENT_KINDS = {
     category: 'diode',
     aliases: ['schottky diode', '1n5819'],
     keywords: ['rectifier', 'low drop', 'fast', 'flyback', 'catch'],
+  },
+  // Unidirectional transient suppressor, simulated as a hard zener-style
+  // clamp (DTVS model). Value is the standoff/clamp voltage ("5V").
+  tvs: {
+    spicePrefix: 'D', pins: 2, symbolType: 'diode', label: 'TVS diode',
+    category: 'diode',
+    aliases: ['tvs diode', 'transient suppressor', 'esd diode', 'surge suppressor'],
+    keywords: ['protection', 'transient', 'surge', 'esd', 'clamp', 'spike'],
+    preferredValues: ['5V', '12V', '24V'],
   },
   // Simulated as a tiny series resistance ("1A" ratings fall back to 0.05Ω).
   fuse: {
@@ -575,6 +596,33 @@ export const COMPONENT_KINDS = {
     keywords: ['connector', 'power in', 'wall adapter', '5.5mm'],
     wiringOnly: true,
   },
+  usb_c: {
+    spicePrefix: 'J', pins: 17, symbolType: 'generic', label: 'USB-C connector (USB 2.0)',
+    wiringOnly: true,
+    // Full 16-pin USB 2.0 Type-C receptacle in physical order (A1→A12 then
+    // B12→B1) plus SHIELD. Repeated roles carry their pin position (VBUS_A4);
+    // CC1/CC2/SBU1/SBU2 appear once each so they keep their bare names.
+    fixedPins: ['GND_A1', 'VBUS_A4', 'CC1', 'DP_A6', 'DM_A7', 'SBU1', 'VBUS_A9', 'GND_A12',
+      'GND_B12', 'VBUS_B9', 'SBU2', 'DM_B7', 'DP_B6', 'CC2', 'VBUS_B4', 'GND_B1', 'SHIELD'],
+    category: 'connector',
+    aliases: ['usb-c', 'type-c', 'usb c', 'type c receptacle', 'usb connector'],
+    keywords: ['connector', 'usb', 'power in', 'data', '5v', 'charging', 'cc'],
+  },
+  terminal_block_3: {
+    spicePrefix: 'J', pins: 3, symbolType: 'generic', label: 'Screw terminal block (3-pos)',
+    category: 'connector',
+    aliases: ['3-pin screw terminal', '3-position terminal', 'bornier 3'],
+    keywords: ['connector', 'screw', 'wire', 'power', 'three'],
+    wiringOnly: true,
+  },
+  battery_connector: {
+    spicePrefix: 'J', pins: 2, symbolType: 'generic', label: 'Battery connector (JST-PH)',
+    fixedPins: ['BAT+', 'BAT-'],
+    category: 'connector',
+    aliases: ['jst', 'jst-ph', 'lipo connector', 'battery jack'],
+    keywords: ['connector', 'battery', 'lipo', 'li-ion', 'power in', '2mm'],
+    wiringOnly: true,
+  },
   arduino_uno: {
     spicePrefix: 'U', pins: 24, symbolType: 'generic', label: 'Arduino Uno',
     wiringOnly: true, mcu: true,
@@ -604,6 +652,19 @@ export const COMPONENT_KINDS = {
     category: 'microcontroller',
     aliases: ['esp', 'wroom', 'devkit'],
     keywords: ['microcontroller', 'wifi', 'bluetooth', 'board', 'mcu'],
+  },
+  esp32_s3_wroom: {
+    spicePrefix: 'U', pins: 41, symbolType: 'generic', label: 'ESP32-S3-WROOM-1',
+    wiringOnly: true, mcu: true,
+    // Bare ESP32-S3-WROOM-1 module — pins 1-41 in the Espressif datasheet's
+    // own order, names as printed there (IOn rather than GPIOn). RXD0/TXD0 are
+    // GPIO44/GPIO43; EPAD is the bottom thermal pad and belongs on ground.
+    // IO35/IO36/IO37 are unavailable on octal-PSRAM (R8) variants — the pins
+    // exist on every module, so they stay in the contract.
+    fixedPins: ['GND', '3V3', 'EN', 'IO4', 'IO5', 'IO6', 'IO7', 'IO15', 'IO16', 'IO17', 'IO18', 'IO8', 'IO19', 'IO20', 'IO3', 'IO46', 'IO9', 'IO10', 'IO11', 'IO12', 'IO13', 'IO14', 'IO21', 'IO47', 'IO48', 'IO45', 'IO0', 'IO35', 'IO36', 'IO37', 'IO38', 'IO39', 'IO40', 'IO41', 'IO42', 'RXD0', 'TXD0', 'IO2', 'IO1', 'GND', 'EPAD'],
+    category: 'microcontroller',
+    aliases: ['esp32-s3', 'esp32s3', 's3 wroom', 'wroom-1'],
+    keywords: ['microcontroller', 'wifi', 'bluetooth', 'module', 'mcu', 'usb otg', 'castellated'],
   },
 };
 

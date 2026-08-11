@@ -56,6 +56,7 @@ export const MCU_BOARD_TITLES = {
   arduino_uno: 'Arduino UNO R3',
   raspberry_pi: 'Raspberry Pi',
   esp32: 'ESP32 DevKit',
+  esp32_s3_wroom: 'ESP32-S3-WROOM-1',
 };
 
 export const validateCircuit = (circuit) => {
@@ -145,6 +146,17 @@ const resistiveValue = (value, fallback) => {
 
 const zenerVoltage = (value) => String(value || '').match(/\d+(?:\.\d+)?/)?.[0] || '5.1';
 const zenerModelName = (value) => `DZEN_${zenerVoltage(value).replace('.', 'R')}`;
+
+const tvsVoltage = (value) => String(value || '').match(/\d+(?:\.\d+)?/)?.[0] || '5';
+const tvsModelName = (value) => `DTVS_${tvsVoltage(value).replace('.', 'R')}`;
+
+// Mirrors chargeVolts in sim/simValues.js. The TP4056 part number is stripped
+// first so its digits ("4056") never get mistaken for the charge voltage.
+const chargeVoltage = (value) => {
+  const text = String(value || '').toLowerCase().replace(/tp4\d\d\d[a-z]*/g, '');
+  const match = text.match(/\d+(?:\.\d+)?/)?.[0];
+  return match ? String(Number(match)) : '4.2';
+};
 
 // Half of a plain resistance value ("10k" -> "5k") for the potentiometer's
 // 50%-position two-resistor model.
@@ -742,7 +754,13 @@ export const toSpice = (circuit) => {
     if (part.kind === 'optocoupler') lines.push(`${ref} ${part.nodes.join(' ')} PC817`);
     if (part.kind === 'regulator') lines.push(`${ref} ${regulatorOutputNode(part.nodes)} 0 DC ${regulatorVoltage(part.value)}`);
     if (part.kind === 'buck_converter') lines.push(`${ref} ${b} 0 DC ${buckVoltage(part.value)}`);
+    // TP4056 module: ideal DC source on OUT+ at the full-charge voltage, the
+    // same approximation as the regulator/buck. Round-trips as voltage_source
+    // from a hand-edited deck, like those two (circuitSync keeps 2-pin V
+    // kinds only).
+    if (part.kind === 'charge_controller') lines.push(`${ref} ${part.nodes[4]} 0 DC ${chargeVoltage(part.value)}`);
     if (part.kind === 'zener') lines.push(`${ref} ${a} ${b} ${zenerModelName(part.value)}`);
+    if (part.kind === 'tvs') lines.push(`${ref} ${a} ${b} ${tvsModelName(part.value)}`);
     if (part.kind === 'photoresistor' || part.kind === 'thermistor' || part.kind === 'ir_phototransistor') lines.push(`${ref} ${a} ${b} ${resistiveValue(part.value, '10k')}`);
     if (part.kind === 'buzzer') lines.push(`${ref} ${a} ${b} ${resistiveValue(part.value, '1k')}`);
     if (part.kind === 'crystal') lines.push(`${ref} ${a} ${b} 20p`);
@@ -803,6 +821,8 @@ export const toSpice = (circuit) => {
   lines.push('.model Q2N2222 NPN(IS=1e-14 BF=200 VAF=100)');
   [...new Set(circuit.components.filter((part) => part.kind === 'zener').map((part) => zenerVoltage(part.value)))]
     .forEach((voltage) => lines.push(`.model DZEN_${voltage.replace('.', 'R')} D(IS=1e-14 RS=1 N=1 BV=${voltage} IBV=5m)`));
+  [...new Set(circuit.components.filter((part) => part.kind === 'tvs').map((part) => tvsVoltage(part.value)))]
+    .forEach((voltage) => lines.push(`.model DTVS_${voltage.replace('.', 'R')} D(IS=1e-14 RS=0.5 N=1 BV=${voltage} IBV=1m)`));
   if (circuit.components.some((part) => part.kind === 'rgb_led')) {
     lines.push('.model DGRN D(IS=1e-20 N=2 RS=10 CJO=2p BV=5 IBV=10u)');
     lines.push('.model DBLU D(IS=1e-20 N=2 RS=10 CJO=2p BV=5 IBV=10u)');

@@ -275,10 +275,12 @@ export const parseSpiceNetlist = (source, baseCircuit) => {
         ? 'schottky'
         : /DZEN/i.test(model) || base?.kind === 'zener'
           ? 'zener'
-          // Anchored: "DIR" must not shadow longer model names that contain it.
-          : /^DIR$/i.test(model) || base?.kind === 'ir_led'
-            ? 'ir_led'
-            : /DRED/i.test(model) || base?.kind === 'led' ? 'led' : 'diode';
+          : /DTVS/i.test(model) || base?.kind === 'tvs'
+            ? 'tvs'
+            // Anchored: "DIR" must not shadow longer model names that contain it.
+            : /^DIR$/i.test(model) || base?.kind === 'ir_led'
+              ? 'ir_led'
+              : /DRED/i.test(model) || base?.kind === 'led' ? 'led' : 'diode';
       record = {
         kind: diodeKind,
         nodes: tokens.slice(1, 3),

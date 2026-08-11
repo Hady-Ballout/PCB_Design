@@ -27,12 +27,14 @@ To add a component that does not exist yet, see
 | [`arduino_uno`](arduino_uno.md) | Arduino Uno | Boards | `5V, 3V3, GND, VIN, D0, D1, D2, D3, D4, D5, D6, D7, D8, D9, D10, D11, D12, D13, A0, A1, A2, A3, A4, A5` | ✅ |
 | [`baro_sensor`](baro_sensor.md) | Barometric sensor (BMP280, I2C) | Sensors | `VCC, GND, SCL, SDA` | ✅ |
 | [`barrel_jack`](barrel_jack.md) | DC barrel jack | Connectors | `VIN, GND` | — |
+| [`battery_connector`](battery_connector.md) | Battery connector (JST-PH) | Connectors | `BAT+, BAT-` | — |
 | [`bjt_npn`](bjt_npn.md) | NPN transistor | Transistors | `collector, base, emitter` | ✅ |
 | [`bjt_pnp`](bjt_pnp.md) | PNP transistor | Transistors | `collector, base, emitter` | ✅ |
 | [`bridge_rectifier`](bridge_rectifier.md) | Bridge rectifier | Diodes & LEDs | `AC1, AC2, V+, V-` | ✅ |
 | [`buck_converter`](buck_converter.md) | Buck converter (LM2596) | Power | `VIN, OUT, GND, FB, ON_OFF` | ✅ |
 | [`buzzer`](buzzer.md) | Buzzer | Actuators & motors | 2 pins, no contract | ✅ |
 | [`capacitor`](capacitor.md) | Capacitor | Passives | 2 pins, no contract | ✅ |
+| [`charge_controller`](charge_controller.md) | Li-ion charger (TP4056) | Power | `IN+, IN-, B+, B-, OUT+, OUT-` | ✅ |
 | [`comparator`](comparator.md) | Comparator | Analog ICs | `IN+, IN-, OUT, V+, V-` | ✅ |
 | [`crystal`](crystal.md) | Crystal | Passives | 2 pins, no contract | ✅ |
 | [`current_sensor`](current_sensor.md) | Current sensor (ACS712) | Sensors | `IP+, IP-, VCC, OUT, GND` | ✅ |
@@ -40,6 +42,7 @@ To add a component that does not exist yet, see
 | [`dht_sensor`](dht_sensor.md) | DHT temperature/humidity sensor | Sensors | `VCC, DATA, GND` | ✅ |
 | [`diode`](diode.md) | Diode | Diodes & LEDs | `anode, cathode` | ✅ |
 | [`esp32`](esp32.md) | ESP32 | Boards | `3V3, GND, VIN, EN, GPIO2, GPIO4, GPIO5, GPIO13, GPIO18, GPIO19, GPIO21, GPIO22` | ✅ |
+| [`esp32_s3_wroom`](esp32_s3_wroom.md) | ESP32-S3-WROOM-1 | Boards | `GND, 3V3, EN, IO4, IO5, IO6, IO7, IO15, IO16, IO17, IO18, IO8, IO19, IO20, IO3, IO46, IO9, IO10, IO11, IO12, IO13, IO14, IO21, IO47, IO48, IO45, IO0, IO35, IO36, IO37, IO38, IO39, IO40, IO41, IO42, RXD0, TXD0, IO2, IO1, GND, EPAD` | ✅ |
 | [`fuse`](fuse.md) | Fuse | Passives | 2 pins, no contract | ✅ |
 | [`gas_sensor`](gas_sensor.md) | Gas sensor (MQ-2) | Sensors | `VCC, GND, DO, AO` | ✅ |
 | [`hall_sensor`](hall_sensor.md) | Hall sensor (A3144) | Sensors | `VCC, GND, OUT` | ✅ |
@@ -88,12 +91,15 @@ To add a component that does not exist yet, see
 | [`switch_spdt`](switch_spdt.md) | SPDT switch | Switches | `common, throw A, throw B` | ✅ |
 | [`temp_sensor`](temp_sensor.md) | Temperature sensor | Sensors | `VCC, OUT, GND` | ✅ |
 | [`terminal_block`](terminal_block.md) | Screw terminal block | Connectors | 2 pins, no contract | — |
+| [`terminal_block_3`](terminal_block_3.md) | Screw terminal block (3-pos) | Connectors | 3 pins, no contract | — |
 | [`thermistor`](thermistor.md) | Thermistor | Sensors | 2 pins, no contract | ✅ |
 | [`timer_555`](timer_555.md) | 555 timer | Analog ICs | `GND, TRIG, OUT, RESET, CTRL, THRES, DISCH, VCC` | ✅ |
+| [`tvs`](tvs.md) | TVS diode | Diodes & LEDs | `anode, cathode` | ✅ |
 | [`ua741`](ua741.md) | Op amp (uA741) | Analog ICs | `OFS1, IN-, IN+, V-, OFS2, OUT, V+, NC` | ✅ |
 | [`ultrasonic_sensor`](ultrasonic_sensor.md) | Ultrasonic sensor (HC-SR04) | Sensors | `VCC, TRIG, ECHO, GND` | ✅ |
+| [`usb_c`](usb_c.md) | USB-C connector (USB 2.0) | Connectors | `GND_A1, VBUS_A4, CC1, DP_A6, DM_A7, SBU1, VBUS_A9, GND_A12, GND_B12, VBUS_B9, SBU2, DM_B7, DP_B6, CC2, VBUS_B4, GND_B1, SHIELD` | ✅ |
 | [`vibration_motor`](vibration_motor.md) | Vibration motor | Actuators & motors | `+, −` | ✅ |
 | [`voltage_source`](voltage_source.md) | Voltage source | Sources | 2 pins, no contract | ✅ |
 | [`zener`](zener.md) | Zener diode | Diodes & LEDs | `anode, cathode` | ✅ |
 
-72 kinds.
+78 kinds.

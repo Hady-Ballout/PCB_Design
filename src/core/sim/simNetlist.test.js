@@ -305,4 +305,27 @@ describe('buildSimNetlist', () => {
     const junction = netlist.devices.find((device) => device.owner === 'D1' && device.type === 'diode');
     expect(junction.model.bv).toBe(9.1);
   });
+
+  it('maps the TVS standoff voltage into a hard clamp model', () => {
+    const netlist = buildSimNetlist(circuitOf(withSupply([
+      { ref: 'D1', kind: 'tvs', value: '12V', nodes: ['0', 'VCC'] },
+    ])));
+    const junction = netlist.devices.find((device) => device.owner === 'D1' && device.type === 'diode');
+    expect(junction.model.bv).toBe(12);
+    expect(junction.model.rs).toBe(0.5);
+    expect(netlist.warnings.some((w) => w.code === 'kind_not_simulated')).toBe(false);
+  });
+
+  it('models the charge controller as an ideal source on its OUT+ pin', () => {
+    const netlist = buildSimNetlist(circuitOf(withSupply([
+      { ref: 'V2', kind: 'charge_controller', value: 'TP4056', nodes: ['VCC', '0', 'BATP', '0', 'VLOAD', '0'] },
+    ])));
+    expect(netlist.ok).toBe(true);
+    const source = netlist.devices.find((device) => device.id === 'V2' && device.type === 'vsource');
+    expect(source.np).toBe(netlist.nodeIndex.get('VLOAD'));
+    expect(source.nm).toBe(GROUND);
+    expect(source.waveform.volts).toBe(4.2);
+    // No dropout sensing on purpose: OUT follows the battery, not IN.
+    expect(source.inNode).toBeUndefined();
+  });
 });

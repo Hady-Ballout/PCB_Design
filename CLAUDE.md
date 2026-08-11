@@ -72,7 +72,7 @@ approach that survives scale.
 
 ## 3. Open the page for every multi-pin part, and copy `pin_order` verbatim
 
-**This is the step that matters most.** For 48 of 69 kinds, `nodes` is
+**This is the step that matters most.** For 62 of 78 kinds, `nodes` is
 positional and its order carries the entire electrical meaning. Copy the array
 from the component file. Never type it from memory.
 

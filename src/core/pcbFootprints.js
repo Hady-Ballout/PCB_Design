@@ -54,13 +54,16 @@ const BODY_BY_LIBID = {
 // Module-ish kinds that get the synthesized fallback's larger silk body and
 // the 3D viewer's "module" body (sub-board + header strips), matching the
 // old FOOTPRINTS catalogue's arduino_uno/raspberry_pi/esp32 entries.
-const MODULE_KINDS = new Set(['arduino_uno', 'raspberry_pi', 'esp32']);
+const MODULE_KINDS = new Set(['arduino_uno', 'raspberry_pi', 'esp32', 'esp32_s3_wroom']);
 
 /** Body dims (mm) for the synthesized fallback's silk rectangle / 3D sub-board. */
 const BODY_SIZES = {
   arduino_uno: { width: 46, height: 34 },
   raspberry_pi: { width: 50, height: 36 },
   esp32: { width: 44, height: 26 },
+  // Real module outline is 18 x 25.5 mm; the synthesized dual-row header's pad
+  // extent wins when it is wider, so this only sets the minimum silk body.
+  esp32_s3_wroom: { width: 18, height: 25.5 },
   generic: { width: 10, height: 8 },
 };
 
@@ -95,6 +98,7 @@ const KIND_TO_FOOTPRINT = {
   diode: { libId: 'Diode_THT:D_DO-41_SOD81_P10.16mm_Horizontal', padOrder: ['2', '1'] },
   zener: { libId: 'Diode_THT:D_DO-41_SOD81_P10.16mm_Horizontal', padOrder: ['2', '1'] },
   schottky: { libId: 'Diode_THT:D_DO-41_SOD81_P10.16mm_Horizontal', padOrder: ['2', '1'] },
+  tvs: { libId: 'Diode_THT:D_DO-41_SOD81_P10.16mm_Horizontal', padOrder: ['2', '1'] },
 
   // Same (anode, cathode) SPICE order as diode; LED_D5.0mm pad 1 is the
   // square (keyed) pad, matching the DO-41 cathode convention.
@@ -138,6 +142,12 @@ const KIND_TO_FOOTPRINT = {
   buzzer: { libId: 'TerminalBlock:TerminalBlock_bornier-2_P5.08mm', padOrder: ['1', '2'] },
 
   // N-pin breakout-style connectors: header pin N carries node N.
+  // 2.54mm header stand-ins: a real JST-PH is 2.0mm and a bornier-3 is
+  // 5.08mm — buildable with wires; vendoring the true footprints is a
+  // follow-up. usb_c deliberately has no entry (synthesized dual-row).
+  terminal_block_3: pinHeader(3),
+  battery_connector: pinHeader(2),
+  charge_controller: pinHeader(6),
   temp_sensor: pinHeader(3),
   ultrasonic_sensor: pinHeader(4),
   dht_sensor: pinHeader(3),

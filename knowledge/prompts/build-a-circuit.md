@@ -15,8 +15,8 @@ If the part you want is not in the index, read
 
 ## 2. Open the page for every multi-pin part you use
 
-**Copy `pin_order` from the component's file. Do not recall it.** For 48 of the
-69 kinds, `nodes` is a positional array whose order carries the entire meaning,
+**Copy `pin_order` from the component's file. Do not recall it.** For 62 of the
+78 kinds, `nodes` is a positional array whose order carries the entire meaning,
 and a wrong order produces a circuit that validates clean, routes clean, passes
 DRC, and does not work. This is the single highest-frequency failure.
 

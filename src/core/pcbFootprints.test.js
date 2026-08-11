@@ -64,6 +64,23 @@ describe('footprintRecordFor', () => {
     expect(padOrder).toEqual(['2', '1']);
   });
 
+  it('maps the tvs onto the shared DO-41 with the diode polarity padOrder', () => {
+    const { libId, padOrder } = footprintRecordFor({ ref: 'D1', kind: 'tvs', nodes: ['ANODE', 'CATHODE'] });
+
+    expect(libId).toBe('Diode_THT:D_DO-41_SOD81_P10.16mm_Horizontal');
+    expect(padOrder).toEqual(['2', '1']);
+  });
+
+  it('synthesizes a dual-row header with all 17 pads for the usb_c connector', () => {
+    const part = partWithNodes('usb_c', 17);
+    const { libId, record, padOrder } = footprintRecordFor(part);
+
+    expect(libId.startsWith('Synthesized:')).toBe(true);
+    expect(record.pads).toHaveLength(17);
+    expect(padOrder).toHaveLength(17);
+    expect(new Set(record.pads.map((pad) => pad.y)).size).toBe(2);
+  });
+
   it('maps electrolytic capacitor positive node to pad 2 and negative to pad 1', () => {
     const { padOrder } = footprintRecordFor({ ref: 'C1', kind: 'capacitor', value: '100uF', nodes: ['POS', 'NEG'] });
 

@@ -140,6 +140,30 @@ describe('prompt-to-pcb generator', () => {
     expect(spice).toContain('R_LOAD1 VIN 0 1k');
   });
 
+  it('emits TVS clamps with deduped per-voltage models and the charger as an ideal source', () => {
+    const spice = toSpice({
+      title: 'Protected charger',
+      type: 'ai_generated',
+      supplyVoltage: 5,
+      components: [
+        { ref: 'V1', kind: 'voltage_source', value: '5V', nodes: ['VBUS', '0'] },
+        { ref: 'D1', kind: 'tvs', value: '5V', nodes: ['0', 'VBUS'] },
+        { ref: 'D2', kind: 'tvs', value: '5V', nodes: ['0', 'VBUS'] },
+        { ref: 'V2', kind: 'charge_controller', value: 'TP4056', nodes: ['VBUS', '0', 'BATP', '0', 'VLOAD', '0'] },
+        { ref: 'R1', kind: 'resistor', value: '1k', nodes: ['VLOAD', '0'] },
+      ],
+      notes: [],
+    });
+
+    expect(spice).toContain('D1 0 VBUS DTVS_5');
+    expect(spice).toContain('D2 0 VBUS DTVS_5');
+    // Two same-voltage parts share one model card.
+    expect(spice.match(/\.model DTVS_5 /g)).toHaveLength(1);
+    expect(spice).toContain('.model DTVS_5 D(IS=1e-14 RS=0.5 N=1 BV=5 IBV=1m)');
+    // TP4056 digits must not parse as the charge voltage.
+    expect(spice).toContain('V2 VLOAD 0 DC 4.2');
+  });
+
   it('returns generic simulation metadata for AI-generated circuits', () => {
     const simulation = simulateCircuit(aiCircuit);
 

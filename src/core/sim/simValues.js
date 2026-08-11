@@ -75,6 +75,17 @@ export const regulatorVolts = (value) => {
 
 export const zenerVolts = (value) => firstNumber(value) ?? 5.1;
 
+export const tvsVolts = (value) => firstNumber(value) ?? 5;
+
+// Mirrors chargeVoltage in pcbGenerator.js so the live sim and the SPICE deck
+// agree on a charger's full-charge output. The part number is stripped first
+// so "TP4056" never parses as 4056 volts (the LM2596 trap all over again).
+export const chargeVolts = (value) => {
+  const text = String(value ?? '').toLowerCase().replace(/tp4\d\d\d[a-z]*/g, '');
+  const match = text.match(/\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : 4.2;
+};
+
 // Mirrors buckVoltage in pcbGenerator.js so the live sim and the SPICE deck
 // agree on what an "LM2596-5.0" puts out. The part number is stripped first
 // so its digits ("2596") never get mistaken for the output voltage.

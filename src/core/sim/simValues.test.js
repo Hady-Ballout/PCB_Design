@@ -7,7 +7,9 @@ import {
   parseSourceWaveform,
   parseVolts,
   buckVolts,
+  chargeVolts,
   regulatorVolts,
+  tvsVolts,
   zenerVolts,
 } from './simValues.js';
 
@@ -95,6 +97,21 @@ describe('regulatorVolts / zenerVolts', () => {
     expect(zenerVolts('5.1V')).toBe(5.1);
     expect(zenerVolts('unknown')).toBe(5.1);
     expect(zenerVolts('12V 1W')).toBe(12);
+  });
+
+  it('extracts TVS standoff voltage with a 5V fallback', () => {
+    expect(tvsVolts('5V')).toBe(5);
+    expect(tvsVolts('6.8V')).toBe(6.8);
+    expect(tvsVolts('unknown')).toBe(5);
+  });
+});
+
+describe('chargeVolts', () => {
+  it('strips the TP4056 part number before matching the charge voltage', () => {
+    expect(chargeVolts('TP4056')).toBe(4.2);
+    expect(chargeVolts('TP4056 4.2V')).toBe(4.2);
+    expect(chargeVolts('TP4056A 4.35V')).toBe(4.35);
+    expect(chargeVolts('')).toBe(4.2);
   });
 });
 
