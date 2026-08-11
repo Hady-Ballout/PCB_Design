@@ -107,9 +107,12 @@ const render = (kind, spec, existingBody) => {
   return `---\n${frontmatterFor(kind, spec).join('\n')}\n---\n${body}`;
 };
 
-/** Split a file into its frontmatter block and everything after it. */
+/** Split a file into its frontmatter block and everything after it.
+ * CRLF is normalized away first: on a Windows checkout with autocrlf the
+ * working copy is CRLF, and without this every file reads as "no frontmatter"
+ * and gets its prose replaced by a stub. */
 const splitDoc = (text) => {
-  const match = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text);
+  const match = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text.replaceAll('\r\n', '\n'));
   return match ? { frontmatter: match[1], body: match[2] } : null;
 };
 
@@ -177,7 +180,7 @@ ${kinds.length} kinds.
 
 const indexFile = resolve(dir, 'README.md');
 if (checkOnly) {
-  if (!existsSync(indexFile) || readFileSync(indexFile, 'utf8') !== index) drifted.push('README.md');
+  if (!existsSync(indexFile) || readFileSync(indexFile, 'utf8').replaceAll('\r\n', '\n') !== index) drifted.push('README.md');
   if (drifted.length) {
     console.error(`Component docs are out of date (${drifted.length}): ${drifted.slice(0, 10).join(', ')}`);
     console.error('Run: node scripts/build-component-docs.mjs');
