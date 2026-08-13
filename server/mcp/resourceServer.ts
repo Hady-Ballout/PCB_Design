@@ -73,6 +73,23 @@ const bearerFrom = (request: IncomingMessage): string => {
   return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
 };
 
+/**
+ * Decodes a JWT's claims WITHOUT verifying it — strictly for the rejection log
+ * below, never for an authorization decision. Reading unverified claims is only
+ * safe because nothing branches on the result; it just makes the operator's log
+ * say "token aud=X, expected Y" instead of "token rejected".
+ */
+const claimsWithoutVerifying = (token: string): { aud?: unknown; iss?: unknown } => {
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return {};
+    return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  } catch {
+    // A token so malformed it has no readable payload: the log simply says so.
+    return {};
+  }
+};
+
 const challenge = (
   response: ServerResponse,
   status: number,
@@ -123,9 +140,20 @@ export async function authorizeMcpRequest(
       // resource issued would be accepted here.
       audience: config.resourceUri,
     }));
-  } catch {
-    // Signature, issuer, audience, and expiry failures are all one outcome to the
-    // caller: 401 with no detail about which check failed.
+  } catch (error) {
+    // The client still learns nothing — the response is a bare 401 either way,
+    // so this leaks no detail to an attacker. But the operator needs to know
+    // WHICH check failed: "connected, no tools" looks identical whether the aud
+    // is wrong, the issuer is wrong, or the token expired, and without this the
+    // only way to tell them apart is guesswork. `jose` names the failed claim in
+    // its error code (e.g. ERR_JWT_CLAIM_VALIDATION_FAILED on `aud`).
+    const reason = (error as { code?: string }).code ?? (error as Error).name;
+    console.warn(
+      `[mcp-auth] token rejected (${reason}): ${(error as Error).message} `
+      + `| expected aud=${config.resourceUri} iss=${config.issuer} `
+      + `| token aud=${JSON.stringify(claimsWithoutVerifying(token).aud)} `
+      + `iss=${JSON.stringify(claimsWithoutVerifying(token).iss)}`,
+    );
     challenge(response, 401, config);
     return { ok: false };
   }
