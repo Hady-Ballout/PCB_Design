@@ -103,6 +103,94 @@ describe('SMD pads occupy one layer', () => {
   });
 });
 
+describe('ESP32-S3-WROOM-1 castellated module', () => {
+  const modulePart = { kind: 'esp32_s3_wroom', nodes: Array.from({ length: 41 }, (_, i) => `N${i + 1}`) };
+  const resolved = footprintRecordFor(modulePart);
+  const padByNumber = Object.fromEntries(resolved.record.pads.map((pad) => [pad.number, pad]));
+
+  it('resolves to the real RF_Module record with an identity 41-pad order', () => {
+    expect(resolved.libId).toBe('RF_Module:ESP32-S3-WROOM-1');
+    expect(resolved.record.pads).toHaveLength(41);
+    expect(resolved.padOrder).toEqual(Array.from({ length: 41 }, (_, i) => String(i + 1)));
+  });
+
+  it('puts the corner pads where the datasheet land pattern does', () => {
+    // Left column 1-14 top->bottom, bottom row 15-26 left->right, right
+    // column 27-40 bottom->top (the datasheet's CCW numbering), EPAD centred.
+    expect(padByNumber['1']).toMatchObject({ x: -8.75, y: -5.08, size: { w: 1.5, h: 0.9 } });
+    expect(padByNumber['14']).toMatchObject({ x: -8.75, y: 11.43 });
+    expect(padByNumber['15']).toMatchObject({ x: -6.985, y: 12.68, size: { w: 0.9, h: 1.5 } });
+    expect(padByNumber['26']).toMatchObject({ x: 6.985, y: 12.68 });
+    expect(padByNumber['27']).toMatchObject({ x: 8.75, y: 11.43 });
+    expect(padByNumber['40']).toMatchObject({ x: 8.75, y: -5.08 });
+    expect(padByNumber['41']).toMatchObject({ x: 0, y: 3.175, size: { w: 3.9, h: 3.9 } });
+  });
+
+  it('keeps every pitch-axis coordinate on the routing grid', () => {
+    // This is what guarantees a grid-snapped placement puts a routing cell
+    // dead-centre in every pad, so escapes never neck below the widest rung.
+    for (const pad of resolved.record.pads) {
+      const number = Number(pad.number);
+      if (number === 41) continue;
+      const along = number >= 15 && number <= 26 ? pad.x : pad.y;
+      expect(Math.abs(along / 0.635 - Math.round(along / 0.635)), `pad ${pad.number}`).toBeLessThan(1e-9);
+    }
+  });
+
+  it('leaves the antenna zone bare', () => {
+    // Top ~7 mm of the body is the printed antenna: no pad may reach above
+    // the pin-1/40 row.
+    for (const pad of resolved.record.pads) {
+      expect(pad.y - pad.size.h / 2, `pad ${pad.number}`).toBeGreaterThanOrEqual(-5.53 - 1e-9);
+    }
+  });
+
+  // The worked example from knowledge/components/esp32_s3_wroom.md: regulated
+  // 3.3V in, EN and BOOT pull-ups, an LED on IO48 (position 25), the rest NC.
+  const nc = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => `NC_U1_${from + i}`);
+  const workedExample = {
+    title: 'S3 module minimal boot',
+    supplyVoltage: 3.3,
+    components: [
+      { ref: 'U1', kind: 'esp32_s3_wroom', value: 'ESP32-S3-WROOM-1-N8',
+        nodes: ['0', '3V3', 'EN', ...nc(4, 24), 'LED1', 'NC_U1_26', 'BOOT', ...nc(28, 39), '0', '0'] },
+      { ref: 'R1', kind: 'resistor', value: '10k', nodes: ['EN', '3V3'] },
+      { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['BOOT', '3V3'] },
+      { ref: 'R3', kind: 'resistor', value: '330', nodes: ['LED1', 'LED1K'] },
+      { ref: 'D1', kind: 'led', value: 'red', nodes: ['LED1K', '0'] },
+    ],
+  };
+
+  it('lays out, routes and passes DRC with the doc worked example', () => {
+    const layout = buildPcbLayout(workedExample);
+    expect(layout.routing.complete).toBe(true);
+    expect(layout.drc.ok).toBe(true);
+    expect(layout.connectivity.ok).toBe(true);
+
+    // Pad -> net, the assignment no gate checks (CLAUDE.md step 8): the
+    // easiest 41-entry array to shift by one, so pin the named signals.
+    const u1 = layout.components.find((component) => component.ref === 'U1');
+    const net = (number) => u1.pads.find((pad) => pad.padNumber === number).net;
+    expect(net('1')).toBe('0');
+    expect(net('2')).toBe('3V3');
+    expect(net('3')).toBe('EN');
+    expect(net('25')).toBe('LED1');
+    expect(net('27')).toBe('BOOT');
+    expect(net('40')).toBe('0');
+    expect(net('41')).toBe('0');
+    expect(u1.pads.every((pad) => pad.type === 'smd' && pad.drill === 0)).toBe(true);
+  });
+
+  it('exports the EPAD as a drill-less smd pad token', () => {
+    const layout = buildPcbLayout(workedExample);
+    const pcb = toKiCadPcb(layout, workedExample);
+    expect(pcb).toContain('RF_Module:ESP32-S3-WROOM-1');
+    expect(pcb).toMatch(/\(pad "41" smd rect/);
+    const drillLines = pcb.split('\n').filter((line) => / smd /.test(line) && line.includes('(drill'));
+    expect(drillLines).toEqual([]);
+  });
+});
+
 describe('connector kinds', () => {
   // dead_active_device fires on wiring-only parts whose live pins are all
   // power or ground. That is a connector's normal state, and the rule used to

@@ -70,6 +70,64 @@ const dualRow = (libId, { count, pitch, rowSpan, padW, padH, courtX, courtY }) =
   };
 };
 
+/**
+ * Castellated RF module: perimeter pads on three edges (left top->bottom,
+ * bottom left->right, right bottom->top — the counter-clockwise numbering
+ * Espressif uses), an exposed thermal pad, and an antenna keep-out across the
+ * top edge (no pads, hatched on silk). Geometry follows the KiCad 6
+ * RF_Module originals but is authored with every pitch-axis coordinate a
+ * multiple of the 0.635 mm routing grid (a pure origin shift from the KiCad
+ * frame), so grid-snapped placement puts a routing cell dead-centre in every
+ * pad and escapes never neck below the widest rung.
+ */
+const castellatedModule = (libId, {
+  sideCount, bottomCount, pitch, rowSpan, sideFirstY, bottomY, padLong, padShort,
+  epad, body, antennaY, courtyard,
+}) => {
+  // Accumulated pitch steps pick up float noise (-5.08 + 13*1.27 =
+  // 11.430000000000001); round so coordinates stay exact in tests and exports.
+  const round = (value) => Math.round(value * 1e6) / 1e6;
+  const pad = (number, x, y, w, h) => ({
+    number: String(number), x: round(x), y: round(y), shape: 'rect', size: { w, h },
+    drill: 0, angle: 0, type: 'smd', layer: 'top',
+  });
+  const pads = [];
+  for (let i = 0; i < sideCount; i += 1) {
+    pads.push(pad(i + 1, -rowSpan / 2, sideFirstY + i * pitch, padLong, padShort));
+  }
+  const bottomFirstX = -((bottomCount - 1) / 2) * pitch;
+  for (let i = 0; i < bottomCount; i += 1) {
+    pads.push(pad(sideCount + 1 + i, bottomFirstX + i * pitch, bottomY, padShort, padLong));
+  }
+  for (let i = 0; i < sideCount; i += 1) {
+    pads.push(pad(sideCount + bottomCount + 1 + i, rowSpan / 2, sideFirstY + (sideCount - 1 - i) * pitch, padLong, padShort));
+  }
+  pads.push(pad(pads.length + 1, epad.x, epad.y, epad.w, epad.h));
+
+  const line = (x1, y1, x2, y2) => ({ type: 'line', start: { x: x1, y: y1 }, end: { x: x2, y: y2 }, width: 0.12 });
+  const bodyRect = [
+    line(body.minX, body.minY, body.maxX, body.minY),
+    line(body.maxX, body.minY, body.maxX, body.maxY),
+    line(body.maxX, body.maxY, body.minX, body.maxY),
+    line(body.minX, body.maxY, body.minX, body.minY),
+  ];
+  // Antenna boundary stops short of the pad columns; the hatch marks the
+  // keep-out zone the way module silkscreens usually do.
+  const hatchSpan = (antennaY - body.minY) / 4;
+  const silk = [
+    ...bodyRect,
+    line(body.minX + 1.2, antennaY, body.maxX - 1.2, antennaY),
+    ...[1, 2, 3].map((i) => line(
+      body.minX + 2 + (i - 1) * 5, antennaY - hatchSpan,
+      body.minX + 2 + (i - 1) * 5 + hatchSpan * 2, antennaY - hatchSpan * 3,
+    )),
+    // Pin-1 dot, outboard of pad 1.
+    { type: 'circle', center: { x: -rowSpan / 2 - 1.1, y: sideFirstY }, radius: 0.15, width: 0.12 },
+  ];
+  const fab = [...bodyRect, line(body.minX, antennaY, body.maxX, antennaY)];
+  return { libId, pads, silk, fab, courtyard };
+};
+
 export const SMD_FOOTPRINTS = {
   // Metric 2012 / imperial 0805 — the default hand-solderable chip size.
   'Resistor_SMD:R_0805_2012Metric': chip('Resistor_SMD:R_0805_2012Metric',
@@ -106,6 +164,22 @@ export const SMD_FOOTPRINTS = {
     fab: [],
     courtyard: { minX: -1.92, minY: -1.85, maxX: 1.92, maxY: 1.85 },
   },
+
+  // ESP32-S3-WROOM-1: 18 x 25.5 mm castellated module, 40 perimeter pads at
+  // 1.27 mm pitch (left 1-14 top->bottom, bottom 15-26 left->right, right
+  // 27-40 bottom->up, CCW from the top-left as the datasheet numbers them)
+  // plus the 3.9 mm exposed thermal pad as pad 41. The top ~7.5 mm of the
+  // body is the PCB antenna keep-out — no pads, hatched on silk. The paste
+  // layer emits the EPAD as one solid 3.9 mm aperture; a production stencil
+  // would window-pane it to ~65% coverage — accepted v1 limitation.
+  'RF_Module:ESP32-S3-WROOM-1': castellatedModule('RF_Module:ESP32-S3-WROOM-1', {
+    sideCount: 14, bottomCount: 12, pitch: 1.27, rowSpan: 17.5,
+    sideFirstY: -5.08, bottomY: 12.68, padLong: 1.5, padShort: 0.9,
+    epad: { x: 0, y: 3.175, w: 3.9, h: 3.9 },
+    body: { minX: -9, minY: -12.57, maxX: 9, maxY: 12.93 },
+    antennaY: -5.6,
+    courtyard: { minX: -10.1, minY: -12.82, maxX: 9.75, maxY: 13.68 },
+  }),
 
   // SOIC-8, 1.27 mm pitch — the surface-mount counterpart of DIP-8.
   'Package_SO:SOIC-8_3.9x4.9mm_P1.27mm': dualRow('Package_SO:SOIC-8_3.9x4.9mm_P1.27mm',

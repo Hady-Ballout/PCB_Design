@@ -86,6 +86,22 @@ does not expose them — those pads serve the internal flash/PSRAM.
 Free-form: the ordering code, e.g. `"ESP32-S3-WROOM-1-N16R8"`. Not parsed —
 the kind alone selects the wiring-only symbol.
 
+## Footprint / package
+
+Resolves to the hand-authored `RF_Module:ESP32-S3-WROOM-1` record — the real
+castellated SMD land pattern, not a synthesized header:
+
+- 18 × 25.5 mm body; the top ~7 mm is the PCB antenna keep-out, hatched on
+  silkscreen with no pads or copper.
+- 40 perimeter pads (1.5 × 0.9 mm) at 1.27 mm pitch on three edges — left
+  pins 1–14 top-to-bottom, bottom 15–26 left-to-right, right 27–40
+  bottom-to-top, the datasheet's counter-clockwise numbering — plus the
+  3.9 × 3.9 mm `EPAD` under the body as pad 41. Pin 1 gets a silkscreen dot.
+- All pads are top-layer SMD (drill 0); the KiCad and Gerber exports emit
+  them as `smd` pads and the paste layer covers the EPAD as **one solid
+  aperture** — a production stencil would window-pane it to ~65% coverage,
+  so tell your fab or edit the stencil if you reflow this.
+
 ## Wiring rules
 
 - **There is no VIN and no onboard regulator.** Feed `3V3` from a real 3.3V

@@ -1,0 +1,347 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<export version="D">
+  <design>
+    <source>prompt-to-pcb-generator</source>
+    <date>2026-08-12T14:33:53.236Z</date>
+    <tool>Prompt-to-PCB Generator MVP</tool>
+  </design>
+  <components>
+    <comp ref="J1">
+      <value>USB-C 16-pin</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">usb_c</field>
+      </fields>
+    </comp>
+    <comp ref="R1">
+      <value>5.1k</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">resistor</field>
+      </fields>
+    </comp>
+    <comp ref="R2">
+      <value>5.1k</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">resistor</field>
+      </fields>
+    </comp>
+    <comp ref="V1">
+      <value>5V</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">voltage_source</field>
+      </fields>
+    </comp>
+    <comp ref="D1">
+      <value>6.8V</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">tvs</field>
+      </fields>
+    </comp>
+    <comp ref="V2">
+      <value>3.3V</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">regulator</field>
+      </fields>
+    </comp>
+    <comp ref="C1">
+      <value>10uF</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">capacitor</field>
+      </fields>
+    </comp>
+    <comp ref="C2">
+      <value>100nF</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">capacitor</field>
+      </fields>
+    </comp>
+    <comp ref="C3">
+      <value>10uF</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">capacitor</field>
+      </fields>
+    </comp>
+    <comp ref="C4">
+      <value>100nF</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">capacitor</field>
+      </fields>
+    </comp>
+    <comp ref="C5">
+      <value>1uF</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">capacitor</field>
+      </fields>
+    </comp>
+    <comp ref="R3">
+      <value>10k</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">resistor</field>
+      </fields>
+    </comp>
+    <comp ref="R4">
+      <value>10k</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">resistor</field>
+      </fields>
+    </comp>
+    <comp ref="R5">
+      <value>330</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">resistor</field>
+      </fields>
+    </comp>
+    <comp ref="D2">
+      <value>green</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">led</field>
+      </fields>
+    </comp>
+    <comp ref="R6">
+      <value>Tactile BOOT</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">pushbutton</field>
+      </fields>
+    </comp>
+    <comp ref="R7">
+      <value>Tactile RESET</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">pushbutton</field>
+      </fields>
+    </comp>
+    <comp ref="U2">
+      <value>SRD-05VDC-SL-C</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">relay_module</field>
+      </fields>
+    </comp>
+    <comp ref="J2">
+      <value>Door button parallel tap</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">terminal_block</field>
+      </fields>
+    </comp>
+    <comp ref="U1">
+      <value>ESP32-S3-WROOM-1-N8</value>
+      <footprint></footprint>
+      <fields>
+        <field name="Kind">esp32_s3_wroom</field>
+      </fields>
+    </comp>
+  </components>
+  <nets>
+    <net code="0" name="0">
+      <node ref="J1" pin="1" />
+      <node ref="J1" pin="8" />
+      <node ref="J1" pin="9" />
+      <node ref="J1" pin="16" />
+      <node ref="J1" pin="17" />
+      <node ref="R1" pin="2" />
+      <node ref="R2" pin="2" />
+      <node ref="V1" pin="2" />
+      <node ref="D1" pin="1" />
+      <node ref="V2" pin="2" />
+      <node ref="C1" pin="2" />
+      <node ref="C2" pin="2" />
+      <node ref="C3" pin="2" />
+      <node ref="C4" pin="2" />
+      <node ref="C5" pin="2" />
+      <node ref="D2" pin="2" />
+      <node ref="R6" pin="2" />
+      <node ref="R7" pin="2" />
+      <node ref="U2" pin="2" />
+      <node ref="U1" pin="1" />
+      <node ref="U1" pin="40" />
+      <node ref="U1" pin="41" />
+    </net>
+    <net code="1" name="VBUS">
+      <node ref="J1" pin="2" />
+      <node ref="J1" pin="7" />
+      <node ref="J1" pin="10" />
+      <node ref="J1" pin="15" />
+      <node ref="V1" pin="1" />
+      <node ref="D1" pin="2" />
+      <node ref="V2" pin="1" />
+      <node ref="C1" pin="1" />
+      <node ref="C2" pin="1" />
+      <node ref="U2" pin="1" />
+    </net>
+    <net code="2" name="CC1">
+      <node ref="J1" pin="3" />
+      <node ref="R1" pin="1" />
+    </net>
+    <net code="3" name="USB_DP">
+      <node ref="J1" pin="4" />
+      <node ref="J1" pin="13" />
+      <node ref="U1" pin="14" />
+    </net>
+    <net code="4" name="USB_DM">
+      <node ref="J1" pin="5" />
+      <node ref="J1" pin="12" />
+      <node ref="U1" pin="13" />
+    </net>
+    <net code="5" name="NC_J1_6">
+      <node ref="J1" pin="6" />
+    </net>
+    <net code="6" name="NC_J1_11">
+      <node ref="J1" pin="11" />
+    </net>
+    <net code="7" name="CC2">
+      <node ref="J1" pin="14" />
+      <node ref="R2" pin="1" />
+    </net>
+    <net code="8" name="3V3">
+      <node ref="V2" pin="3" />
+      <node ref="C3" pin="1" />
+      <node ref="C4" pin="1" />
+      <node ref="R3" pin="2" />
+      <node ref="R4" pin="2" />
+      <node ref="U1" pin="2" />
+    </net>
+    <net code="9" name="EN">
+      <node ref="C5" pin="1" />
+      <node ref="R3" pin="1" />
+      <node ref="R7" pin="1" />
+      <node ref="U1" pin="3" />
+    </net>
+    <net code="10" name="BOOT">
+      <node ref="R4" pin="1" />
+      <node ref="R6" pin="1" />
+      <node ref="U1" pin="27" />
+    </net>
+    <net code="11" name="LED_STAT">
+      <node ref="R5" pin="1" />
+      <node ref="U1" pin="25" />
+    </net>
+    <net code="12" name="LED_A">
+      <node ref="R5" pin="2" />
+      <node ref="D2" pin="1" />
+    </net>
+    <net code="13" name="RELAY_IN">
+      <node ref="U2" pin="3" />
+      <node ref="U1" pin="4" />
+    </net>
+    <net code="14" name="DOOR_COM">
+      <node ref="U2" pin="4" />
+      <node ref="J2" pin="1" />
+    </net>
+    <net code="15" name="DOOR_NO">
+      <node ref="U2" pin="5" />
+      <node ref="J2" pin="2" />
+    </net>
+    <net code="16" name="NC_U2_6">
+      <node ref="U2" pin="6" />
+    </net>
+    <net code="17" name="NC_U1_5">
+      <node ref="U1" pin="5" />
+    </net>
+    <net code="18" name="NC_U1_6">
+      <node ref="U1" pin="6" />
+    </net>
+    <net code="19" name="NC_U1_7">
+      <node ref="U1" pin="7" />
+    </net>
+    <net code="20" name="NC_U1_8">
+      <node ref="U1" pin="8" />
+    </net>
+    <net code="21" name="NC_U1_9">
+      <node ref="U1" pin="9" />
+    </net>
+    <net code="22" name="NC_U1_10">
+      <node ref="U1" pin="10" />
+    </net>
+    <net code="23" name="NC_U1_11">
+      <node ref="U1" pin="11" />
+    </net>
+    <net code="24" name="NC_U1_12">
+      <node ref="U1" pin="12" />
+    </net>
+    <net code="25" name="NC_U1_15">
+      <node ref="U1" pin="15" />
+    </net>
+    <net code="26" name="NC_U1_16">
+      <node ref="U1" pin="16" />
+    </net>
+    <net code="27" name="NC_U1_17">
+      <node ref="U1" pin="17" />
+    </net>
+    <net code="28" name="NC_U1_18">
+      <node ref="U1" pin="18" />
+    </net>
+    <net code="29" name="NC_U1_19">
+      <node ref="U1" pin="19" />
+    </net>
+    <net code="30" name="NC_U1_20">
+      <node ref="U1" pin="20" />
+    </net>
+    <net code="31" name="NC_U1_21">
+      <node ref="U1" pin="21" />
+    </net>
+    <net code="32" name="NC_U1_22">
+      <node ref="U1" pin="22" />
+    </net>
+    <net code="33" name="NC_U1_23">
+      <node ref="U1" pin="23" />
+    </net>
+    <net code="34" name="NC_U1_24">
+      <node ref="U1" pin="24" />
+    </net>
+    <net code="35" name="NC_U1_26">
+      <node ref="U1" pin="26" />
+    </net>
+    <net code="36" name="NC_U1_28">
+      <node ref="U1" pin="28" />
+    </net>
+    <net code="37" name="NC_U1_29">
+      <node ref="U1" pin="29" />
+    </net>
+    <net code="38" name="NC_U1_30">
+      <node ref="U1" pin="30" />
+    </net>
+    <net code="39" name="NC_U1_31">
+      <node ref="U1" pin="31" />
+    </net>
+    <net code="40" name="NC_U1_32">
+      <node ref="U1" pin="32" />
+    </net>
+    <net code="41" name="NC_U1_33">
+      <node ref="U1" pin="33" />
+    </net>
+    <net code="42" name="NC_U1_34">
+      <node ref="U1" pin="34" />
+    </net>
+    <net code="43" name="NC_U1_35">
+      <node ref="U1" pin="35" />
+    </net>
+    <net code="44" name="NC_U1_36">
+      <node ref="U1" pin="36" />
+    </net>
+    <net code="45" name="NC_U1_37">
+      <node ref="U1" pin="37" />
+    </net>
+    <net code="46" name="NC_U1_38">
+      <node ref="U1" pin="38" />
+    </net>
+    <net code="47" name="NC_U1_39">
+      <node ref="U1" pin="39" />
+    </net>
+  </nets>
+</export>

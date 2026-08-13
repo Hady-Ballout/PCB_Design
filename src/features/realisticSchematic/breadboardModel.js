@@ -3,6 +3,7 @@
 // stays unit-testable. Placement is a greedy, deterministic single pass over
 // `circuit.components` in array order.
 
+import { FIXED_PIN_NAMES } from '../../core/componentKinds.js';
 import { DEFAULT_COLUMNS, FULL_SIZE_COLUMNS, MCU_SLOT_GAP, MCU_SLOT_HEIGHT, PERIPHERAL_SLOT_HEIGHT, STRIP_ROWS, boardSize, isRailStrip, slotRect, tieGroupKey } from './breadboardGeometry.js';
 import { checkPhysicalModel } from './physicalChecks.js';
 
@@ -42,20 +43,21 @@ export const MCU_PINS = {
   arduino_uno: ['5V', '3V3', 'GND', 'VIN', 'D0', 'D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10', 'D11', 'D12', 'D13', 'A0', 'A1', 'A2', 'A3', 'A4', 'A5'],
   raspberry_pi: ['5V', '3V3', 'GND', 'GPIO2', 'GPIO3', 'GPIO4', 'GPIO17', 'GPIO18', 'GPIO27', 'GPIO22', 'GPIO8', 'GPIO9', 'GPIO10', 'GPIO11'],
   esp32: ['3V3', 'GND', 'VIN', 'EN', 'GPIO2', 'GPIO4', 'GPIO5', 'GPIO13', 'GPIO18', 'GPIO19', 'GPIO21', 'GPIO22'],
+  // The bare S3 module's canonical order IS the engine's fixedPins contract
+  // (datasheet pins 1-41), so reference it rather than duplicating 41 names.
+  esp32_s3_wroom: FIXED_PIN_NAMES.esp32_s3_wroom,
 };
 
 // Parts that cannot plug into a breadboard — MCU boards (Arduino Uno,
-// Raspberry Pi, ESP32 DevKit) and wired peripherals (servo, DC motor, relay
-// breakout) — sit in off-board slots below it with jumper wires up to the
-// bottom strip/rails. The map value is each part's slot height; MCU boards
-// get the tall slot, peripherals a compact one. A real ESP32 DevKit is
-// ~0.9-1.0" wide and 15+ columns long, so it cannot straddle the trench like
-// a DIP the way the smaller packages below do — it gets the MCU-height slot
-// instead.
+// Raspberry Pi) and wired peripherals (servo, DC motor, relay breakout) —
+// sit in off-board slots below it with jumper wires up to the bottom
+// strip/rails. The map value is each part's slot height; MCU boards get the
+// tall slot, peripherals a compact one. Header-pinned ESP32 boards (`esp32`
+// DevKitC and the esp32_s3_wroom carrier) are absent: they straddle the
+// trench like the real boards do (see ESP32_DEVKIT_LEGS / ESP32_S3_LEGS).
 const OFFBOARD_SLOT_HEIGHTS = {
   arduino_uno: MCU_SLOT_HEIGHT,
   raspberry_pi: MCU_SLOT_HEIGHT,
-  esp32: MCU_SLOT_HEIGHT,
   servo: PERIPHERAL_SLOT_HEIGHT,
   dc_motor: PERIPHERAL_SLOT_HEIGHT,
   relay_module: PERIPHERAL_SLOT_HEIGHT,
@@ -70,7 +72,31 @@ const OFFBOARD_SLOT_HEIGHTS = {
   mouse_sensor: PERIPHERAL_SLOT_HEIGHT,
   current_sensor: PERIPHERAL_SLOT_HEIGHT,
 };
-const OFFBOARD_MCU_KINDS = new Set(['arduino_uno', 'raspberry_pi', 'esp32']);
+const OFFBOARD_MCU_KINDS = new Set(['arduino_uno', 'raspberry_pi']);
+
+// ESP32-S3-WROOM-1 on a DevKitC-style carrier, plugged into the breadboard
+// across the trench like an oversized DIP: 21 columns, canonical (datasheet
+// CCW) pins 1-21 left-to-right along the bottom row (the module's left-side
+// pads then the first bottom-edge pads), continuing up the right side and
+// back right-to-left along the top row (pins 22-40), with the thermal EPAD
+// (pin 41) broken out at the top-left header position. The top row's
+// rightmost column carries no pin — that end of the carrier is the USB end.
+export const ESP32_S3_LEGS = {
+  bottom: Array.from({ length: 21 }, (_, offset) => offset),
+  top: [40, ...Array.from({ length: 19 }, (_, offset) => 39 - offset), null],
+};
+
+// Classic ESP32 DevKitC plugged in across the trench like the real 15x2-pin
+// board (module/antenna end left, USB end right). The 12-pin `esp32`
+// abstraction maps its canonical pins [3V3, GND, VIN, EN, GPIO2, GPIO4,
+// GPIO5, GPIO13, GPIO18, GPIO19, GPIO21, GPIO22] onto DevKitC-like
+// positions — 3V3/EN at the module end, GND/VIN at the USB end, the GPIOs
+// walking in from the USB end of the top row. The null columns are the real
+// board's unmodelled pins: drawn, column-reserving, electrically inert.
+export const ESP32_DEVKIT_LEGS = {
+  bottom: [0, 3, null, null, null, null, null, null, null, null, null, null, null, 1, 2],
+  top: [null, null, null, null, null, null, null, 11, 10, 9, 8, 7, 6, 5, 4],
+};
 
 // Kind-keyed placement tables shared by the greedy pass and placeAnchored so
 // the two dispatch sites can never drift apart. `requirePins` guards kinds
@@ -116,6 +142,13 @@ const STRADDLE_PACKAGES = {
     body: 'dip',
     requirePins: 16,
   },
+  // ESP32-S3-WROOM-1 on its DevKitC-style carrier, straddling the trench with
+  // the module's full 41-pin contract split across the two header rows.
+  esp32_s3_wroom: { width: 21, legs: ESP32_S3_LEGS, body: 'esp32_s3_wroom', requirePins: 41 },
+  // Classic ESP32 DevKitC, same straddle treatment at the real board's
+  // 15-column length. A wrong pin count falls back to a generic module with
+  // an integrity error, like the S3.
+  esp32: { width: 15, legs: ESP32_DEVKIT_LEGS, body: 'esp32', requirePins: 12 },
 };
 
 const straddleFor = (component) => {

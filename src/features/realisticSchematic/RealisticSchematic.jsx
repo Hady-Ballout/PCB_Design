@@ -43,6 +43,7 @@ const DEFAULT_VALUE_BY_KIND = {
   voltage_source: '5V', signal_source: 'SINE(0 1 1k)', regulator: '5V', solar_panel: '6V',
   buck_converter: 'LM2596-5.0',
   arduino_uno: 'Uno R3', raspberry_pi: 'Pi 5', esp32: 'DevKit V1',
+  esp32_s3_wroom: 'ESP32-S3-WROOM-1-N8',
 };
 
 // Build a fresh circuit component for `kind` with a unique SPICE-safe ref and

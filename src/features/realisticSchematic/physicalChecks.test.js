@@ -57,6 +57,31 @@ describe('rigid geometry', () => {
     expect(issues).toEqual([]);
   });
 
+  it('tolerates column gaps inside a declared straddle footprint (ESP32 DevKitC)', () => {
+    // A straddle package that models a subset of the real board's pins claims
+    // non-contiguous columns; the unmodelled legs fill the gaps. Declared
+    // meta.columnStart/columnEnd switches the check to a bounds test.
+    const issues = checkPhysicalModel({
+      parts: [{ ref: 'U6', kind: 'esp32', body: 'esp32', strip: 'top',
+        pinNets: ['3V3', 'EN', 'GND', 'GPIO2'],
+        meta: { columnStart: 5, columnEnd: 19 },
+        holes: [hole('bottom', 0, 5), hole('bottom', 0, 6), hole('bottom', 0, 18), hole('top', 4, 19)] }],
+      jumpers: [], batteries: [], nets: [], rails: {},
+    });
+    expect(issues).toEqual([]);
+  });
+
+  it('flags a straddle part claiming a hole outside its declared footprint', () => {
+    const issues = checkPhysicalModel({
+      parts: [{ ref: 'U7', kind: 'esp32', body: 'esp32', strip: 'top',
+        pinNets: ['3V3', 'EN', 'GND'],
+        meta: { columnStart: 5, columnEnd: 19 },
+        holes: [hole('bottom', 0, 5), hole('bottom', 0, 6), hole('bottom', 0, 22)] }],
+      jumpers: [], batteries: [], nets: [], rails: {},
+    });
+    expect(issues.some((line) => line.startsWith('GEOMETRY:') && line.includes('U7') && line.includes('outside its column 5-19 footprint'))).toBe(true);
+  });
+
   it('is silent for an off-board module even with rail pins and a gap (meta.slot exempts it)', () => {
     const issues = checkPhysicalModel({
       parts: [{ ref: 'U5', kind: 'module', body: 'flying', strip: 'bottom', meta: { slot: 'esp32' },

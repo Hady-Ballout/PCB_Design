@@ -78,11 +78,12 @@ describe('realistic part rendering', () => {
     expect(markup.indexOf('rsPartPi)')).toBeLessThan(markup.indexOf('rs-mcu-wires'));
   });
 
-  it('renders an off-board ESP32 DevKit as a generic slot module, not a trench straddle', () => {
-    // Task 19: a real DevKit is ~0.9-1.0" wide and 15+ columns long, so it now
-    // places off-board (like the Uno/Pi) and renders through the shared
-    // OffboardModuleBody instead of the deleted straddle-only Esp32Body.
-    const { markup } = renderModel({
+  it('renders the ESP32 DevKit straddling the trench as a DevKitC-style board', () => {
+    // A real DevKitC plugs in across the trench at its full 15-column
+    // length, and draws through the bespoke Esp32DevkitBody: black PCB,
+    // WROOM-32 module + shield can, CP2102, EN/BOOT buttons — not the
+    // generic blue OffboardModuleBody.
+    const { model, markup } = renderModel({
       title: 'ESP32 LED',
       components: [
         {
@@ -96,10 +97,23 @@ describe('realistic part rendering', () => {
         { ref: 'R2', kind: 'resistor', value: '10k', nodes: ['VCC3', '0'] },
       ],
     });
+    const part = model.parts.find((candidate) => candidate.kind === 'esp32');
+    expect(part.body).toBe('esp32');
+    // On the breadboard straddling the trench, not in an off-board slot.
+    expect(part.meta.slot).toBeUndefined();
+    expect(part.meta.columnEnd - part.meta.columnStart).toBe(14);
     expect(markup).toContain('DevKit V1');
-    expect(markup).toContain('rsPcbBlue');
     expect(markup).toContain('GPIO2');
     expect(markup).toContain('U1');
+    // Physical-appearance landmarks shared with the S3 artwork: black PCBs,
+    // WROOM shield can with the etched Espressif markings, EN/BOOT buttons.
+    expect(markup).not.toContain('url(#rsPcbBlue)');
+    expect(markup).toContain('url(#rsEspPcb)');
+    expect(markup).toContain('rsBrushedShield');
+    expect(markup).toContain('ESPRESSIF');
+    expect(markup).toContain('ESP32-WROOM-32');
+    expect(markup).toContain('CP2102');
+    expect(markup).toContain('BOOT');
   });
 
   it('still renders every classic part body alongside an MCU', () => {
@@ -346,6 +360,44 @@ describe('realistic part rendering', () => {
     expect(markup).not.toContain('url(#rsGlow)');
   });
 
+  it('renders the ESP32-S3-WROOM-1 straddling the trench as a DevKit-style board', () => {
+    const { model, markup } = renderModel({
+      title: 'S3 module',
+      components: [
+        {
+          ref: 'U1',
+          kind: 'esp32_s3_wroom',
+          value: 'ESP32-S3-WROOM-1-N8',
+          nodes: ['0', 'VCC33', ...Array.from({ length: 38 }, (_, i) => `NC_U1_${i + 3}`), '0'],
+        },
+        { ref: 'V1', kind: 'voltage_source', value: '3.3V', nodes: ['VCC33', '0'] },
+      ],
+    });
+    const part = model.parts.find((candidate) => candidate.kind === 'esp32_s3_wroom');
+    expect(part.body).toBe('esp32_s3_wroom');
+    // On the breadboard, not in an off-board slot.
+    expect(part.meta.slot).toBeUndefined();
+    expect(part.meta.columnEnd - part.meta.columnStart).toBe(20);
+    // Pins straddle the trench per ESP32_S3_LEGS: pin 1 (GND) bottom-left on
+    // row f, EPAD (pin 41) top-left on row e, pins walking CCW like a DIP.
+    expect(part.holes[0]).toMatchObject({ strip: 'bottom', column: part.meta.columnStart, row: 0 });
+    expect(part.holes[20]).toMatchObject({ strip: 'bottom', column: part.meta.columnStart + 20 });
+    expect(part.holes[21]).toMatchObject({ strip: 'top', column: part.meta.columnStart + 19, row: 4 });
+    expect(part.holes[40]).toMatchObject({ strip: 'top', column: part.meta.columnStart, row: 4 });
+    // Physical-appearance landmarks: black PCBs, shield can, etched wordmark
+    // and model, EPAD broken out, BOOT/RST buttons, header gold.
+    expect(markup).toContain('rsEspPcb');
+    expect(markup).toContain('rsBrushedShield');
+    expect(markup).toContain('ESPRESSIF');
+    expect(markup).toContain('ESP32-S3-WROOM-1');
+    expect(markup).toContain('EPAD');
+    expect(markup).toContain('BOOT');
+    expect(markup).toContain('rsGoldPad');
+    // Datasheet pin names printed beside the header pins.
+    ['>GND</text>', '>3V3</text>', '>EN</text>', '>IO0</text>', '>TXD0</text>'].forEach((label) =>
+      expect(markup).toContain(label));
+  });
+
   it('anchors peripheral pads on their body terminals but keeps MCU pads collinear', () => {
     const slot = { x: 0, y: 0, width: 448, height: 120 };
     // Peripherals: pads sit on the body (servo top-edge connector at y=58,
@@ -355,8 +407,9 @@ describe('realistic part rendering', () => {
     expect(mcuPadPoint(slot, 2, 'relay_module').y).toBe(40); // IN on the top edge
     expect(mcuPadPoint(slot, 3, 'relay_module').x).toBeGreaterThan(mcuPadPoint(slot, 2, 'relay_module').x); // COM on the screw side
     // MCU boards are untouched: every pad stays on the collinear y=18 row their
-    // board rect is drawn around.
-    ['arduino_uno', 'raspberry_pi', 'esp32'].forEach((kind) => {
+    // board rect is drawn around. (The ESP32 DevKit straddles the breadboard
+    // trench now, so it no longer routes through mcuPadPoint.)
+    ['arduino_uno', 'raspberry_pi'].forEach((kind) => {
       expect(mcuPadPoint(slot, 0, kind).y).toBe(18);
       expect(mcuPadPoint(slot, 5, kind).y).toBe(18);
     });

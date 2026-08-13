@@ -56,7 +56,21 @@ function checkRigidGeometry(model, issues) {
       issues.push(`GEOMETRY: ${part.ref} has ${railHoles.length} pin(s) on a power rail (${railHoles.map(holeName).join(', ')}) while its body sits in the terminal strips — a rigid package cannot reach the board edge; those pins need jumpers instead.`);
     }
     const columns = [...new Set(holes.filter((h) => !isRail(h)).map((h) => h.column))].sort((a, b) => a - b);
-    if (columns.length && columns[columns.length - 1] - columns[0] + 1 !== columns.length) {
+    if (!columns.length) return;
+    // A straddle package declares its rigid footprint via meta.columnStart /
+    // columnEnd. Its claimed columns may legitimately have gaps — the ESP32
+    // DevKitC models 12 of the real board's 30 pins, and the unmodelled legs
+    // fill the skipped columns — but every claimed hole must sit inside the
+    // declared span.
+    const { columnStart, columnEnd } = part.meta ?? {};
+    if (columnStart != null && columnEnd != null) {
+      const outside = columns.filter((column) => column < columnStart || column > columnEnd);
+      if (outside.length) {
+        issues.push(`GEOMETRY: ${part.ref} claims holes outside its column ${columnStart}-${columnEnd} footprint (${outside.join(', ')}) — a rigid package cannot reach past its own body.`);
+      }
+      return;
+    }
+    if (columns[columns.length - 1] - columns[0] + 1 !== columns.length) {
       issues.push(`GEOMETRY: ${part.ref}'s pins occupy non-contiguous columns (${columns.join(', ')}) — a rigid package has consecutive legs.`);
     }
   });

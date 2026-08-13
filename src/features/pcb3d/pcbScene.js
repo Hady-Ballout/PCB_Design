@@ -246,6 +246,28 @@ const componentMesh = (component, mats, toX, toZ) => {
       leg.position.set(point.x, BOARD_TOP + 0.95, point.z);
       holder.add(leg);
     }
+  } else if (body === 'rf_module') {
+    // Bare castellated radio module (ESP32-S3-WROOM-1): a thin module PCB
+    // sitting flush on the host board, a metal shield can over the RF
+    // section, and the antenna end of the slab left bare. No leads, headers
+    // or connectors — the castellations solder directly to the host pads.
+    const swap = (((component.rotation % 360) + 360) % 360) % 180 !== 0;
+    const slab = new THREE.Mesh(
+      new THREE.BoxGeometry(component.width, 1, component.height),
+      mats.moduleBoard,
+    );
+    slab.position.set(x, BOARD_TOP + 0.5, z);
+    holder.add(slab);
+    // The can covers local +y; local -y (the top of the footprint, above the
+    // antennaY silk line) stays bare — that is the printed antenna zone.
+    const canOffset = rotateOffset({ x: 0, y: 3.6 }, component.rotation);
+    const can = new THREE.Mesh(
+      new THREE.BoxGeometry(swap ? 17.5 : 16, 2.6, swap ? 16 : 17.5),
+      mats.silver,
+    );
+    can.name = 'shield-can';
+    can.position.set(x + canOffset.x, BOARD_TOP + 1 + 1.3, z + canOffset.y);
+    holder.add(can);
   } else if (body === 'module') {
     const sub = new THREE.Mesh(new THREE.BoxGeometry(component.width, 1.4, component.height), mats.moduleBoard);
     sub.position.set(x, BOARD_TOP + 3.5, z);

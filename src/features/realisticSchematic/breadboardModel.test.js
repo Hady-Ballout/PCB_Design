@@ -557,21 +557,31 @@ describe('circuitToBreadboard', () => {
     expect(model.rails.railBottomPlus).toBe('VCC3');
   });
 
-  it('places the ESP32 DevKit off-board in an MCU slot, not straddling the trench', () => {
-    // A real ESP32 DevKit is ~0.9-1.0" wide and 15+ columns long — the old
-    // 6-column e/f straddle was unbuildable (TC3/TC7). It now goes through
-    // placeOffboard like the Uno/Pi.
+  it('plugs the ESP32 DevKit into the breadboard straddling the trench', () => {
+    // A real DevKitC plugs in across the trench. The old 6-column straddle
+    // was unbuildable (TC3/TC7) because the board is 15+ columns long — so
+    // the straddle now reserves the real board's full 15-column footprint
+    // (ESP32_DEVKIT_LEGS), with the unmodelled pin positions as inert nulls.
     const model = circuitToBreadboard(esp32Circuit);
     const esp = model.parts.find((part) => part.ref === 'U1');
-    expect(esp.meta.slot).toBeDefined();
+    expect(esp.meta.slot).toBeUndefined();
+    expect(esp.meta.columnEnd - esp.meta.columnStart).toBe(14);
     expect(esp.body).toBe('esp32');
-    expect(esp.strip).toBe('bottom');
+    // Pins land at their DevKitC-like positions: 3V3/EN at the module end,
+    // GND/VIN at the USB end, the GPIOs walking in from the USB end on top.
+    const col0 = esp.meta.columnStart;
+    expect(esp.holes[0]).toMatchObject({ strip: 'bottom', column: col0, row: 0 }); // 3V3
+    expect(esp.holes[3]).toMatchObject({ strip: 'bottom', column: col0 + 1 }); // EN
+    expect(esp.holes[1]).toMatchObject({ strip: 'bottom', column: col0 + 13 }); // GND
+    expect(esp.holes[2]).toMatchObject({ strip: 'bottom', column: col0 + 14 }); // VIN
+    expect(esp.holes[4]).toMatchObject({ strip: 'top', column: col0 + 14, row: 4 }); // GPIO2
+    expect(esp.holes[11]).toMatchObject({ strip: 'top', column: col0 + 7 }); // GPIO22
     // The module supply still rides the + rail like any other supply net.
     expect(model.rails.railTopPlus).toBe('VCC3');
+    assertBoardMatchesNetlist(esp32Circuit, model);
 
-    // MCU boards claim slot 0 ahead of peripherals regardless of circuit
-    // order (the deferredOffboard MCU-first stable sort) — verify the ESP32
-    // gets that same priority even when a peripheral is declared first.
+    // Alongside a peripheral, the ESP32 stays on the board and the servo
+    // takes the first off-board slot.
     const mixed = circuitToBreadboard({
       title: 'ESP32 + servo',
       nodes: ['VCC3', 'SIG', '0'],
@@ -587,8 +597,10 @@ describe('circuitToBreadboard', () => {
     });
     const espMixed = mixed.parts.find((part) => part.ref === 'U1');
     const servo = mixed.parts.find((part) => part.ref === 'U2');
-    expect([espMixed.meta.slotIndex, servo.meta.slotIndex]).toEqual([0, 1]);
-    expect(servo.meta.slot.y - espMixed.meta.slot.y).toBe(MCU_SLOT_HEIGHT + MCU_SLOT_GAP);
+    expect(espMixed.meta.slotIndex).toBeUndefined();
+    expect(espMixed.meta.columnStart).toBeDefined();
+    expect(servo.meta.slotIndex).toBe(0);
+    expect(servo.meta.slot).toMatchObject({ height: PERIPHERAL_SLOT_HEIGHT });
   });
 
   it('places a servo in a compact off-board slot', () => {

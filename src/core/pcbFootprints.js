@@ -49,6 +49,7 @@ const BODY_BY_LIBID = {
   'Package_DIP:DIP-14_W7.62mm': 'dip',
   'Package_DIP:DIP-16_W7.62mm': 'dip',
   'TerminalBlock:TerminalBlock_bornier-2_P5.08mm': 'terminal',
+  'RF_Module:ESP32-S3-WROOM-1': 'rf_module',
 };
 
 // Module-ish kinds that get the synthesized fallback's larger silk body and
@@ -61,8 +62,9 @@ const BODY_SIZES = {
   arduino_uno: { width: 46, height: 34 },
   raspberry_pi: { width: 50, height: 36 },
   esp32: { width: 44, height: 26 },
-  // Real module outline is 18 x 25.5 mm; the synthesized dual-row header's pad
-  // extent wins when it is wider, so this only sets the minimum silk body.
+  // esp32_s3_wroom normally resolves to the real RF_Module castellated record
+  // below; this entry only shapes the synthesized fallback a malformed part
+  // (wrong node count) degrades to. Real outline is 18 x 25.5 mm.
   esp32_s3_wroom: { width: 18, height: 25.5 },
   generic: { width: 10, height: 8 },
 };
@@ -140,6 +142,11 @@ const KIND_TO_FOOTPRINT = {
   dc_motor: { libId: 'TerminalBlock:TerminalBlock_bornier-2_P5.08mm', padOrder: ['1', '2'] },
   vibration_motor: { libId: 'TerminalBlock:TerminalBlock_bornier-2_P5.08mm', padOrder: ['1', '2'] },
   buzzer: { libId: 'TerminalBlock:TerminalBlock_bornier-2_P5.08mm', padOrder: ['1', '2'] },
+
+  // Bare castellated module — the hand-authored SMD record; fixedPins in
+  // componentKinds.js is already in datasheet pin order 1-41, so the pad
+  // order is the identity (node i -> pad i+1, EPAD = pad 41).
+  esp32_s3_wroom: { libId: 'RF_Module:ESP32-S3-WROOM-1', padOrder: identity(41) },
 
   // N-pin breakout-style connectors: header pin N carries node N.
   // 2.54mm header stand-ins: a real JST-PH is 2.0mm and a bornier-3 is

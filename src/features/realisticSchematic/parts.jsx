@@ -3,8 +3,8 @@
 // positions up onto a photo-style body.
 import { useMemo } from 'react';
 import { FIXED_PIN_NAMES } from '../../core/componentKinds.js';
-import { HOLE_PITCH, MCU_PIN_SPACING, MCU_SLOT_HEIGHT, TRENCH_CENTER_Y, holeCenter } from './breadboardGeometry.js';
-import { MCU_PINS } from './breadboardModel.js';
+import { HOLE_PITCH, MCU_PIN_SPACING, TRENCH_CENTER_Y, holeCenter } from './breadboardGeometry.js';
+import { ESP32_DEVKIT_LEGS, ESP32_S3_LEGS, MCU_PINS } from './breadboardModel.js';
 import { BAND_COLOR_HEX, capStyle, ledColor, resistorColorBands } from './partVisuals.js';
 import { pinLabelsFor } from './selectionModel.js';
 
@@ -1290,6 +1290,233 @@ function OffboardModuleBody({ part }) {
   );
 }
 
+// Bare ESP32-WROOM-style radio module, shared by the S3 straddle body and the
+// classic DevKit slot body: matte black module PCB with the meander PCB
+// antenna at the left end (separated by the dashed keep-out line), castellated
+// solder joints along the long edges, and a brushed shield can etched with the
+// Espressif swirl, wordmark, model name and a data-matrix code.
+function WroomModule({ x0, x1, top, bottom, model }) {
+  const midY = (top + bottom) / 2;
+  const feedX = x0 + 25; // rightmost antenna rung; can starts 6px right of it
+  const canL = feedX + 6;
+  const canR = x1 - 4;
+  const canCx = (canL + canR) / 2;
+  // Meander antenna: horizontal feed from the can, then vertical rungs joined
+  // alternately along the module's top and bottom edges.
+  let antennaPath = `M ${canL + 1} ${midY} H ${feedX}`;
+  for (let rung = 0; rung < 5; rung += 1) {
+    const rungX = feedX - rung * 5;
+    antennaPath += ` V ${rung % 2 === 0 ? top + 4 : bottom - 4} H ${rungX - 5}`;
+  }
+  // Etched QR / data-matrix on the can (decorative, deterministic pattern).
+  const qrX = canR - 13;
+  const qrY = bottom - 14;
+  const qrCells = [];
+  for (let row = 0; row < 4; row += 1) {
+    for (let col = 0; col < 4; col += 1) {
+      if ((row * 3 + col * 5 + row * col) % 4 < 2) qrCells.push([row, col]);
+    }
+  }
+  const castellations = Math.max(0, Math.floor((canR - canL - 4) / 8));
+  return (
+    <g>
+      <rect x={x0} y={top} width={x1 - x0} height={bottom - top} rx={2} fill="url(#rsEspPcb)" stroke="#3a4046" strokeWidth="0.7" />
+      <path d={antennaPath} fill="none" stroke="#d9b64c" strokeWidth="2.2" strokeLinejoin="miter" />
+      <line x1={canL - 2} y1={top + 1.5} x2={canL - 2} y2={bottom - 1.5} stroke="rgba(255,255,255,0.25)" strokeWidth="0.7" strokeDasharray="2.5 1.8" />
+      {/* castellation solder joints along the module's long edges */}
+      {Array.from({ length: castellations }, (_, i) => (
+        <g key={`c${i}`}>
+          <circle cx={canL + 5 + i * 8} cy={top} r={1.1} fill="url(#rsGoldPad)" />
+          <circle cx={canL + 5 + i * 8} cy={bottom} r={1.1} fill="url(#rsGoldPad)" />
+        </g>
+      ))}
+      {/* shield can with etched wordmark, model name and QR */}
+      <rect x={canL} y={top + 3} width={canR - canL} height={bottom - top - 6} rx={2.5} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.7" />
+      <line x1={canL + 2.5} y1={top + 5} x2={canR - 2.5} y2={top + 5} stroke="rgba(255,255,255,0.55)" strokeWidth="0.5" />
+      <g stroke="#3c4640" fill="none" strokeLinecap="round">
+        <path d={`M ${canCx - 24} ${midY - 6} a 3.4 3.4 0 0 1 4.2 -4.2`} strokeWidth="1" />
+        <path d={`M ${canCx - 26} ${midY - 4} a 6.5 6.5 0 0 1 8.2 -8.2`} strokeWidth="1" />
+      </g>
+      <circle cx={canCx - 23.2} cy={midY - 6.5} r={0.9} fill="#3c4640" />
+      <Silk x={canCx + 3} y={midY - 6} text="ESPRESSIF" size={4} weight={700} fill="#3c4640" />
+      <Silk x={canCx} y={midY + 2.5} text={model} size={4.2} weight={800} fill="#3c4640" />
+      <rect x={qrX} y={qrY} width={10} height={10} rx={1} fill="#2a3036" />
+      {qrCells.map(([row, col]) => (
+        <rect key={`q${row}-${col}`} x={qrX + 1.1 + col * 2} y={qrY + 1.1 + row * 2} width={1.6} height={1.6} fill="#9aa3ab" />
+      ))}
+    </g>
+  );
+}
+
+// ESP32-S3-WROOM-1 on its DevKitC-style carrier, plugged into the breadboard
+// straddling the trench (ESP32_S3_LEGS is the pin->column contract). Drawn
+// like the physical dev board: long black PCB with two gold header rows, the
+// WROOM module (meander PCB antenna overhanging the left edge + brushed shield
+// can with etched markings) at the antenna end, RGB LED, BOOT/RST buttons and
+// a USB-C connector at the other, and every header pin's datasheet name
+// printed vertically beside it like the real silkscreen.
+function Esp32S3WroomBody({ part }) {
+  const { columnStart, columnEnd } = part.meta;
+  if (columnStart == null || columnEnd == null) return null;
+  const names = FIXED_PIN_NAMES[part.kind] ?? [];
+  const topRowY = holeCenter({ strip: 'top', column: columnStart, row: 4 }).y;
+  const bottomRowY = holeCenter({ strip: 'bottom', column: columnStart, row: 0 }).y;
+  const colX = (column) => holeCenter({ strip: 'top', column, row: 4 }).x;
+  const x0 = colX(columnStart);
+  const x1 = colX(columnEnd);
+  const bx0 = x0 - 12;
+  const bx1 = x1 + 12;
+  const by0 = topRowY - 14;
+  const by1 = bottomRowY + 14;
+  // WROOM module at the left end, its antenna overhanging the carrier edge.
+  const mx0 = bx0 - 24;
+  const mx1 = bx0 + 88;
+  const moduleTop = topRowY + 3;
+  const moduleBottom = bottomRowY - 3;
+  const moduleMidY = (moduleTop + moduleBottom) / 2;
+  const pinLabel = { ...LABEL_STYLE, fontSize: 2.9, fill: '#cfd6dc' };
+  const columns = Array.from({ length: columnEnd - columnStart + 1 }, (_, offset) => offset);
+  return (
+    <g>
+      {/* carrier PCB spanning the trench, header pins over rows e/f */}
+      <rect x={bx0} y={by0} width={bx1 - bx0} height={by1 - by0} rx={6} fill="url(#rsEspPcb)" stroke="#0a0c0e" strokeWidth="0.9" />
+      <rect x={bx0 + 1.5} y={by0 + 1.5} width={bx1 - bx0 - 3} height={by1 - by0 - 3} rx={5} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="0.7" />
+      <MountHole cx={bx1 - 6} cy={by0 + 5.5} r={2.4} />
+      <MountHole cx={bx1 - 6} cy={by1 - 5.5} r={2.4} />
+
+      {/* header pins + silkscreen pin names (rotated, like the real board) */}
+      {columns.map((offset) => {
+        const column = columnStart + offset;
+        const x = colX(column);
+        const topIndex = ESP32_S3_LEGS.top[offset];
+        const bottomIndex = ESP32_S3_LEGS.bottom[offset];
+        return (
+          <g key={offset}>
+            {bottomIndex != null && (
+              <g>
+                <GoldPad x={x} y={bottomRowY} s={4.4} />
+                <text x={x - 1.5} y={bottomRowY + 5} textAnchor="start" transform={`rotate(90 ${x - 1.5} ${bottomRowY + 5})`} style={pinLabel}>
+                  {names[bottomIndex] ?? bottomIndex + 1}
+                </text>
+              </g>
+            )}
+            {topIndex != null && (
+              <g>
+                <GoldPad x={x} y={topRowY} s={4.4} />
+                <text x={x - 1.5} y={by0 + 2.5} textAnchor="start" transform={`rotate(90 ${x - 1.5} ${by0 + 2.5})`} style={pinLabel}>
+                  {names[topIndex] ?? topIndex + 1}
+                </text>
+              </g>
+            )}
+          </g>
+        );
+      })}
+      {/* pin-1 marker under the first bottom-row pin */}
+      <circle cx={x0 - 5.5} cy={bottomRowY + 6} r={1.2} fill="#f0f0ea" />
+
+      {/* WROOM module, its antenna zone overhanging the carrier edge */}
+      <WroomModule x0={mx0} x1={mx1} top={moduleTop} bottom={moduleBottom} model="ESP32-S3-WROOM-1" />
+
+      {/* carrier-side hardware: silk wordmark, RGB LED, BOOT/RST, USB-C */}
+      <Silk x={mx1 + 14} y={moduleMidY - 6} text="ESP32-S3" size={5.5} weight={700} fill="#dbe3e8" anchor="start" />
+      <Silk x={mx1 + 14} y={moduleMidY + 3} text={`${part.ref}${part.value ? ` · ${part.value}` : ''}`} size={3.4} fill="#9fb0ba" anchor="start" />
+      <SmdLed cx={mx1 + 18} cy={moduleMidY + 12} color="#cfd6da" w={5} h={4} />
+      <Silk x={mx1 + 24} y={moduleMidY + 13.5} text="RGB" size={2.8} fill="#9fb0ba" anchor="start" />
+      <TactButton x={bx1 - 66} y={moduleMidY - 12} s={7} />
+      <Silk x={bx1 - 69} y={moduleMidY - 7} text="BOOT" size={2.8} fill="#9fb0ba" anchor="end" />
+      <TactButton x={bx1 - 66} y={moduleMidY + 5} s={7} />
+      <Silk x={bx1 - 69} y={moduleMidY + 10} text="RST" size={2.8} fill="#9fb0ba" anchor="end" />
+      <rect x={bx1 - 4} y={moduleMidY - 9} width={22} height={18} rx={3.5} fill="url(#rsBrushedShield)" stroke="#7c848b" strokeWidth="0.6" />
+      <rect x={bx1 + 4} y={moduleMidY - 5} width={12} height={10} rx={2.5} fill="#20262b" />
+    </g>
+  );
+}
+
+// Classic ESP32 DevKitC plugged into the breadboard straddling the trench
+// like the real 15x2-pin board (ESP32_DEVKIT_LEGS is the pin->column
+// contract). Drawn like the physical dev board: matte black PCB, the
+// ESP32-WROOM-32 module (meander antenna overhanging the left edge + shield
+// can) at one end, CP2102 USB bridge, AMS1117 LDO and power LED mid-board,
+// EN/BOOT buttons beside the micro-USB at the other end. Every column gets a
+// gold header pin like the real board; only the 12 modelled pins get names.
+function Esp32DevkitBody({ part }) {
+  const { columnStart, columnEnd } = part.meta;
+  if (columnStart == null || columnEnd == null) return null;
+  const names = MCU_PINS[part.kind] ?? [];
+  const topRowY = holeCenter({ strip: 'top', column: columnStart, row: 4 }).y;
+  const bottomRowY = holeCenter({ strip: 'bottom', column: columnStart, row: 0 }).y;
+  const colX = (column) => holeCenter({ strip: 'top', column, row: 4 }).x;
+  const x0 = colX(columnStart);
+  const x1 = colX(columnEnd);
+  const bx0 = x0 - 12;
+  const bx1 = x1 + 12;
+  const by0 = topRowY - 14;
+  const by1 = bottomRowY + 14;
+  // WROOM-32 module at the left end, its antenna overhanging the board edge.
+  const mx0 = bx0 - 24;
+  const mx1 = bx0 + 88;
+  const moduleTop = topRowY + 3;
+  const moduleBottom = bottomRowY - 3;
+  const moduleMidY = (moduleTop + moduleBottom) / 2;
+  const pinLabel = { ...LABEL_STYLE, fontSize: 2.9, fill: '#cfd6dc' };
+  const columns = Array.from({ length: columnEnd - columnStart + 1 }, (_, offset) => offset);
+  return (
+    <g>
+      {/* DevKitC PCB spanning the trench, header pins over rows e/f */}
+      <rect x={bx0} y={by0} width={bx1 - bx0} height={by1 - by0} rx={6} fill="url(#rsEspPcb)" stroke="#0a0c0e" strokeWidth="0.9" />
+      <rect x={bx0 + 1.5} y={by0 + 1.5} width={bx1 - bx0 - 3} height={by1 - by0 - 3} rx={5} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="0.7" />
+      <MountHole cx={bx1 - 6} cy={by0 + 5.5} r={2.4} />
+      <MountHole cx={bx1 - 6} cy={by1 - 5.5} r={2.4} />
+
+      {/* header pins on every column (the real board's full 15x2 header) +
+          silkscreen names on the modelled ones, rotated like the real silk */}
+      {columns.map((offset) => {
+        const column = columnStart + offset;
+        const x = colX(column);
+        const topIndex = ESP32_DEVKIT_LEGS.top[offset];
+        const bottomIndex = ESP32_DEVKIT_LEGS.bottom[offset];
+        return (
+          <g key={offset}>
+            <GoldPad x={x} y={bottomRowY} s={4.4} />
+            <GoldPad x={x} y={topRowY} s={4.4} />
+            {bottomIndex != null && (
+              <text x={x - 1.5} y={bottomRowY + 5} textAnchor="start" transform={`rotate(90 ${x - 1.5} ${bottomRowY + 5})`} style={pinLabel}>
+                {names[bottomIndex] ?? bottomIndex + 1}
+              </text>
+            )}
+            {topIndex != null && (
+              <text x={x - 1.5} y={by0 + 2.5} textAnchor="start" transform={`rotate(90 ${x - 1.5} ${by0 + 2.5})`} style={pinLabel}>
+                {names[topIndex] ?? topIndex + 1}
+              </text>
+            )}
+          </g>
+        );
+      })}
+      {/* pin-1 marker under the 3V3 corner pin */}
+      <circle cx={x0 - 5.5} cy={bottomRowY + 6} r={1.2} fill="#f0f0ea" />
+
+      <WroomModule x0={mx0} x1={mx1} top={moduleTop} bottom={moduleBottom} model="ESP32-WROOM-32" />
+
+      {/* carrier-side hardware: wordmark, CP2102, AMS1117, PWR LED, EN/BOOT,
+          micro-USB overhanging the right edge */}
+      <Silk x={mx1 + 10} y={moduleMidY - 7} text="ESP32" size={5.5} weight={800} fill="#dbe3e8" anchor="start" />
+      <Silk x={mx1 + 10} y={moduleMidY} text="DEVKITC V4" size={3} fill="#9fb0ba" anchor="start" />
+      <Silk x={mx1 + 10} y={moduleMidY + 7} text={`${part.ref}${part.value ? ` · ${part.value}` : ''}`} size={3.2} fill="#9fb0ba" anchor="start" />
+      <Chip x={mx1 + 10} y={moduleMidY + 11} w={20} h={13} label="CP2102" />
+      <rect x={mx1 + 36} y={moduleMidY + 7.5} width={12} height={3} rx={0.6} fill="url(#rsPartTab)" />
+      <rect x={mx1 + 36} y={moduleMidY + 10.5} width={12} height={8} rx={0.6} fill="url(#rsPartDip)" stroke="#000" strokeWidth="0.4" />
+      <Silk x={mx1 + 42} y={moduleMidY + 22.5} text="AMS1117" size={2.5} fill="#9fb0ba" />
+      <SmdLed cx={mx1 + 58} cy={moduleMidY + 13} color="#e0453a" w={5} h={3.4} />
+      <Silk x={mx1 + 63} y={moduleMidY + 14.5} text="PWR" size={2.8} fill="#9fb0ba" anchor="start" />
+      <TactButton x={bx1 - 40} y={moduleMidY - 12} s={7} />
+      <Silk x={bx1 - 43} y={moduleMidY - 7} text="EN" size={2.8} fill="#9fb0ba" anchor="end" />
+      <TactButton x={bx1 - 40} y={moduleMidY + 5} s={7} />
+      <Silk x={bx1 - 43} y={moduleMidY + 10} text="BOOT" size={2.8} fill="#9fb0ba" anchor="end" />
+      <MetalConnector x={bx1 - 4} y={moduleMidY - 9} w={24} h={18} notch />
+    </g>
+  );
+}
+
 // RC522 breakout: the generic slot PCB, plus a white card hovering over the
 // antenna (with its UID) while the sim's tap-card stimulus is active.
 function RfidReaderBody({ part, sim }) {
@@ -2123,6 +2350,12 @@ export function PartDefs() {
         <stop offset="0.5" stopColor="#141619" />
         <stop offset="1" stopColor="#0b0d0f" />
       </linearGradient>
+      {/* matte black module PCB (ESP32-S3-WROOM-1) */}
+      <linearGradient id="rsEspPcb" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stopColor="#262b31" />
+        <stop offset="0.5" stopColor="#191d22" />
+        <stop offset="1" stopColor="#0e1114" />
+      </linearGradient>
       <linearGradient id="rsBrushedShield" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0" stopColor="#e4e9ee" />
         <stop offset="0.5" stopColor="#b7bfc7" />
@@ -2194,7 +2427,9 @@ export function RealisticPart({ part, sim }) {
   if (part.body === 'led_strip') return <LedStripBody part={part} sim={sim} />;
   if (part.body === 'rfid_reader') return <RfidReaderBody part={part} sim={sim} />;
   if (part.body === 'mouse_sensor') return <MouseSensorBody part={part} sim={sim} />;
-  if (part.body === 'stepper_driver' || part.body === 'current_sensor' || part.body === 'esp32') return <OffboardModuleBody part={part} />;
+  if (part.body === 'esp32_s3_wroom') return <Esp32S3WroomBody part={part} />;
+  if (part.body === 'esp32') return <Esp32DevkitBody part={part} />;
+  if (part.body === 'stepper_driver' || part.body === 'current_sensor') return <OffboardModuleBody part={part} />;
   const points = part.holes.map((hole) => (hole ? holeCenter(hole) : null)).filter(Boolean);
   if (points.length === 0) return null;
   if (part.body === 'dip') return <DipBody part={part} />;
@@ -2278,7 +2513,17 @@ const THUMBNAIL_SPECS = {
     part: { kind: 'seven_segment', body: 'seven_segment', strip: 'top', ref: '', value: '', holes: DUMMY_THUMB_HOLES, pinNets: [], meta: { columnStart: 3, columnEnd: 7 } },
     viewBox: '167 130 80 62',
   },
-  esp32: slotThumb('esp32', MCU_SLOT_HEIGHT, '0 8 300 106'),
+  // Straddling DevKitC: drawn from package meta like the DIPs; the viewBox
+  // includes the WROOM antenna and micro-USB overhangs.
+  esp32: {
+    part: { kind: 'esp32', body: 'esp32', strip: 'top', ref: '', value: '', holes: [], pinNets: [], meta: { columnStart: 3, columnEnd: 17 } },
+    viewBox: '138 120 272 82',
+  },
+  // Straddling DevKitC-style carrier: drawn from package meta like the DIPs.
+  esp32_s3_wroom: {
+    part: { kind: 'esp32_s3_wroom', body: 'esp32_s3_wroom', strip: 'top', ref: '', value: '', holes: [], pinNets: [], meta: { columnStart: 3, columnEnd: 23 } },
+    viewBox: '138 120 356 82',
+  },
   potentiometer: { part: thumbPart('potentiometer', 'module', [3, 4, 5], '10k'), viewBox: MODULE3_VIEWBOX },
   switch_spdt: { part: thumbPart('switch_spdt', 'module', [3, 4, 5]), viewBox: MODULE3_VIEWBOX },
   rgb_led: { part: thumbPart('rgb_led', 'module', [3, 4, 5, 6]), viewBox: MODULE4_VIEWBOX },
