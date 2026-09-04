@@ -1,7 +1,7 @@
 import { randomBytes, scryptSync, timingSafeEqual, createHmac } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
 import { query } from './db.js';
-import { sendVerificationEmail } from './brevo.js';
+import { sendVerificationEmail } from './mailer.js';
 import type { AuthResult, JwtPayload } from '../types.js';
 
 // ── Password hashing (scrypt, no extra deps) ──
@@ -91,7 +91,15 @@ export async function handleSignup(body: Record<string, unknown>): Promise<AuthR
   try {
     await sendVerificationEmail(email, verifyToken);
   } catch (err) {
+    // Without the email the account can never be verified, so telling the
+    // user "check your email" would be a lie. Roll the row back so a retry
+    // after the mailer is fixed does not hit "Email already registered".
     console.error('Failed to send verification email:', (err as Error).message);
+    await query('DELETE FROM users WHERE email = $1', [email]);
+    return {
+      status: 503,
+      body: { error: 'Could not send the verification email. Please try again later or contact support.' },
+    };
   }
 
   return { status: 201, body: { message: 'Account created. Check your email to verify.' } };

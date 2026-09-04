@@ -5,6 +5,7 @@ import { runNgspiceSimulation } from './simulation/simulator.js';
 import { compileSketch } from './compile/compiler.js';
 import { initDb } from './auth/db.js';
 import { handleSignup, handleLogin, handleVerifyEmail, handleMe, verifyJwt } from './auth/auth.js';
+import { isEmailConfigured } from './auth/mailer.js';
 import { handleBillingStatus, handleCreateCheckout, handleCreatePortal, handleStripeWebhook } from './billing/billing.js';
 import { QuotaError, checkAndConsumeQuota } from './billing/quota.js';
 import { DailyTokenLimitError, dailyLimitMessage, enforceDailyTokenLimit, getDailyTokenStatus, recordDailyTokens } from './billing/dailyTokens.js';
@@ -152,8 +153,10 @@ const server = createServer(async (request: IncomingMessage, response: ServerRes
   }
 
   if (request.url === '/api/health') {
-    // Circuit generation was removed; this reports only that the API is up.
-    sendJson(response, 200, { ok: true });
+    // Circuit generation was removed; this reports that the API is up and
+    // whether signup can actually deliver verification emails, so a missing
+    // SMTP/Brevo configuration on a fresh deployment is visible from the browser.
+    sendJson(response, 200, { ok: true, email: isEmailConfigured() ? 'configured' : 'missing' });
     return;
   }
 

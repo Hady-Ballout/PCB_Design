@@ -123,6 +123,12 @@ export function query(text: string, params: unknown[]): Promise<QueryResult> | Q
     return localResult([]);
   }
 
+  if (normalized === 'DELETE FROM users WHERE email = $1') {
+    const email = String(params[0] || '').toLowerCase();
+    localUsers = localUsers.filter((user) => user.email !== email);
+    return localResult([]);
+  }
+
   if (normalized === 'SELECT id, email, password_hash, verified FROM users WHERE email = $1') {
     const email = String(params[0] || '').toLowerCase();
     return localResult(localUsers

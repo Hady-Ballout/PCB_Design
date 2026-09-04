@@ -33,7 +33,8 @@ the frontend expects `VITE_API_URL` (see below) or same-origin `/api`.
 | `MAX_BODY_BYTES` | max request body size before a `413` is returned (default `4 MiB`) |
 | `DATABASE_URL` | Postgres/Neon connection string; **omit for local dev** to use the in-memory user store seeded with a local admin (see `docs/BACKEND.md`) |
 | `PG_CA_CERT`, `PG_SSL_NO_VERIFY` | Postgres TLS: certificate verification is **on** by default; point `PG_CA_CERT` at a CA bundle, or set `PG_SSL_NO_VERIFY=1` to disable verification (local/self-signed only) |
-| `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` | signup verification email |
+| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` (+ optional `SMTP_PORT`, `SMTP_SECURE`, `EMAIL_FROM`, `EMAIL_FROM_NAME`) | signup verification email over any SMTP relay (`server/auth/mailer.ts`). Gmail: `smtp.gmail.com`, port 587, your address, an App Password. Preferred transport; needs no provider approval |
+| `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` | fallback transport via the Brevo API, used only when `SMTP_HOST` is unset. Either way, if the send fails signup rolls the account back and returns **503** rather than telling the user to check their inbox; `GET /api/health` reports `email: "configured" \| "missing"` |
 | `VITE_API_URL` | frontend's API base when not same-origin/proxied |
 | `STRIPE_SECRET_KEY` | Stripe API key (`sk_test_...` / `sk_live_...`); **unset = billing disabled** (routes 503, quotas skipped) |
 | `STRIPE_WEBHOOK_SECRET` | signing secret (`whsec_...`) of the webhook endpoint / `stripe listen` session |
@@ -152,6 +153,28 @@ failing opaquely; the rest of the app (including non-firmware simulation) is una
 - So the frontend (Firebase Hosting, static) and API (Docker container, wherever it's run)
   are deployed as two separate artifacts — the frontend's `VITE_API_URL` must point at
   wherever the API container ends up.
+
+### Independent deployment (festo-ai)
+
+A second, fully separate production stack owned by the founder account, set up
+2026-09-03 so deploys never wait on the `pcb-pilot` / impedo.ai owner:
+
+- **Frontend:** Firebase Hosting site `festo-ai` in project `festo-ai-ed851`
+  (Spark/free) at https://festo-ai.web.app. Config is `firebase.dev.json` (kept
+  separate from `firebase.json`, which the impedo.ai GitHub workflow still uses).
+- **Backend:** Render free web service `festo-ai` built from the `Dockerfile` on
+  `main`, at https://festo-ai.onrender.com. Env: `JWT_SECRET`, `CORS_ORIGIN` and
+  `APP_URL` (both `https://festo-ai.web.app`), plus an email transport —
+  `SMTP_HOST=smtp.gmail.com`, `SMTP_USER=<gmail address>`, `SMTP_PASS=<Google
+  App Password>` (Brevo phone verification did not deliver SMS to a Lebanese
+  number, so Gmail SMTP is the working choice). Without a transport signup
+  cannot deliver verification emails and returns 503. Auto-deploys on push to
+  `main`.
+  Free instances sleep after 15 min idle and keep users in memory (no
+  `DATABASE_URL`), so accounts reset on every restart.
+- **Deploy the frontend:** `npm run deploy:festo` — builds with `--mode festo`
+  (reads `VITE_API_URL` from `.env.festo`) and deploys `dist/` to the site.
+  Requires `firebase login` once on the machine.
 
 ## Stray files worth knowing about
 
