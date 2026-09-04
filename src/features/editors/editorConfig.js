@@ -3,9 +3,11 @@
 // retired from the launchbar; their render code and the SPICE data/simulation
 // pipeline stay in App.jsx (dead but restorable). pcb3d is the three.js board
 // viewer.
+// Listed in workflow order: the top bar renders them left to right with
+// arrows between, so the order is the product's mental model.
 export const EDITOR_VIEW_LABELS = {
-  code: 'Code',
   realisticSchematic: 'Breadboard',
+  code: 'Code',
   pcb3d: '3D PCB',
 };
 

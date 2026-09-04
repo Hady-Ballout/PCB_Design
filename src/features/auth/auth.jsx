@@ -2,6 +2,8 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import { createTimeline, stagger } from 'animejs';
 import { API_BASE } from '../../core/config.js';
 import { BreadboardPreview } from '../realisticSchematic/BreadboardPreview.jsx';
+import { placeholderAt } from '../landing/typingPlaceholder.js';
+import { stashPendingPrompt } from '../landing/pendingPrompt.js';
 
 const prefersReducedMotion = () =>
   typeof window !== 'undefined'
@@ -173,8 +175,47 @@ const HOME_CASES = [
   },
 ];
 
+// Example builds the hero prompt types out for itself, in the order they
+// cycle. Each one is a prompt the generator actually handles.
+const HERO_EXAMPLES = [
+  'Blink an LED every 2 seconds with a 555 timer',
+  'Arduino thermometer that shows °C on an OLED display',
+  'Ultrasonic parking alarm that beeps faster as you get closer',
+  'Night light that turns an LED on when it gets dark',
+];
+
+// Self-typing placeholder for the hero prompt. Reduced-motion users get the
+// first example as a static placeholder instead of the animation.
+function useTypingPlaceholder(examples) {
+  const [text, setText] = useState(() => (prefersReducedMotion() ? examples[0] ?? '' : ''));
+  useEffect(() => {
+    if (prefersReducedMotion()) return undefined;
+    const start = Date.now();
+    const timer = setInterval(() => setText(placeholderAt(examples, Date.now() - start)), 30);
+    return () => clearInterval(timer);
+  }, [examples]);
+  return text;
+}
+
+const twoDigits = (index) => String(index + 1).padStart(2, '0');
+
 export function HomePage() {
+  const { user } = useAuth();
   const pageRef = useRef(null);
+  const [draft, setDraft] = useState('');
+  const placeholder = useTypingPlaceholder(HERO_EXAMPLES);
+
+  // The prompt survives the sign-up wall: stash it, send the visitor to
+  // sign-up (or straight into the workspace when already signed in), and the
+  // workspace drains it into the chat draft on mount.
+  const submitPrompt = (event) => {
+    event?.preventDefault();
+    stashPendingPrompt(draft);
+    window.location.hash = user ? 'app' : 'signup';
+  };
+  const onPromptKeyDown = (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) submitPrompt(event);
+  };
 
   // Entrance choreography: hero copy pops in first, then the pipeline steps
   // cascade. Skipped entirely for reduced-motion users.
@@ -183,15 +224,9 @@ export function HomePage() {
     const q = (selector) => pageRef.current.querySelectorAll(selector);
     const tl = createTimeline({ defaults: { ease: 'outCubic', duration: 550 } });
     tl.add(q('.home-hero .home-eyebrow'), { translateY: [18, 0], opacity: [0, 1] })
-      .add(q('.home-title'), {
-        translateY: [26, 0],
-        opacity: [0, 1],
-        rotate: ['-6deg', '-1.5deg'],
-        duration: 700,
-        ease: 'outBack',
-      }, '-=350')
+      .add(q('.home-title'), { translateY: [26, 0], opacity: [0, 1], duration: 650 }, '-=350')
       .add(q('.home-subtitle'), { translateY: [20, 0], opacity: [0, 1] }, '-=450')
-      .add(q('.home-actions'), { translateY: [16, 0], opacity: [0, 1], duration: 500 }, '-=400')
+      .add(q('.home-prompt'), { translateY: [16, 0], opacity: [0, 1], duration: 500 }, '-=400')
       .add(q('.pipeline-step, .pipeline-arrow'), {
         translateY: [24, 0],
         opacity: [0, 1],
@@ -222,40 +257,60 @@ export function HomePage() {
   return (
     <main className="home-page" ref={pageRef}>
       <PageBackdrop />
+      <header className="home-header">
+        <a href="#home" className="brand-sticker">Impedo</a>
+        <nav className="home-header-actions" aria-label="Account">
+          <a href="#login" className="home-text-link">Log in</a>
+          <a href="#signup" className="btn btn-primary">Start building free</a>
+        </nav>
+      </header>
+
       <div className="home-hero">
         <p className="home-eyebrow">Prompt → Schematic → Simulation → Board</p>
-        <h1 className="home-title">Impedo</h1>
+        <h1 className="home-title">From a sentence to a circuit you can build.</h1>
         <p className="home-subtitle">
           Describe a circuit in plain English. Get a validated schematic,
           SPICE simulation, and KiCad-ready netlist — in seconds.
         </p>
-        <div className="home-actions">
-          <a href="#login" className="btn btn-primary">Log in</a>
-          <a href="#signup" className="btn btn-outline">Create account</a>
-        </div>
+        <form className="home-prompt" onSubmit={submitPrompt}>
+          <label className="sr-only" htmlFor="home-prompt-input">Describe what you want to build</label>
+          <textarea
+            id="home-prompt-input"
+            className="home-prompt-input"
+            rows={3}
+            value={draft}
+            placeholder={placeholder}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={onPromptKeyDown}
+          />
+          <div className="home-prompt-actions">
+            <span className="home-prompt-hint">Enter to build · Shift+Enter for a new line</span>
+            <button type="submit" className="btn btn-primary">Build this →</button>
+          </div>
+        </form>
       </div>
 
       <div className="home-pipeline">
         <div className="pipeline-step">
-          <span className="pipeline-number">1</span>
+          <span className="pipeline-number">01</span>
           <h3>Describe</h3>
           <p>Type a prompt like &ldquo;low-pass RC filter at 1kHz&rdquo;</p>
         </div>
         <div className="pipeline-arrow">&rarr;</div>
         <div className="pipeline-step">
-          <span className="pipeline-number">2</span>
+          <span className="pipeline-number">02</span>
           <h3>Generate</h3>
           <p>AI builds a validated circuit model with real component values</p>
         </div>
         <div className="pipeline-arrow">&rarr;</div>
         <div className="pipeline-step">
-          <span className="pipeline-number">3</span>
+          <span className="pipeline-number">03</span>
           <h3>Simulate</h3>
           <p>Ngspice runs a real SPICE simulation and returns waveforms</p>
         </div>
         <div className="pipeline-arrow">&rarr;</div>
         <div className="pipeline-step">
-          <span className="pipeline-number">4</span>
+          <span className="pipeline-number">04</span>
           <h3>Export</h3>
           <p>Download KiCad netlist, SPICE deck, and circuit JSON</p>
         </div>
@@ -271,13 +326,13 @@ export function HomePage() {
           </p>
         </div>
 
-        {HOME_CASES.map(({ tag, accent, title, body, prompt, circuit, alt }) => (
+        {HOME_CASES.map(({ tag, accent, title, body, prompt, circuit, alt }, index) => (
           <article className={`case-card case-accent-${accent}`} key={title}>
             <div className="case-visual">
               <BreadboardPreview circuit={circuit} className="case-art" ariaLabel={alt} />
             </div>
             <div className="case-body">
-              <span className="case-tag">{tag}</span>
+              <span className="case-tag">{twoDigits(index)} · {tag}</span>
               <h3>{title}</h3>
               <p>{body}</p>
               <p className="case-prompt">{prompt}</p>

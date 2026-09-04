@@ -30,6 +30,8 @@ import { ImportCircuitDialog } from '../features/importCircuit/ImportCircuitDial
 import { buildImportedResult, createImportedChat } from '../features/importCircuit/importCircuit.js';
 import { EDITOR_SPLIT_STORAGE_KEY, EDITOR_VIEW_LABELS, loadEditorSplit } from '../features/editors/editorConfig.js';
 import { firmwareTargetForCircuit } from '../features/editors/firmwareInfo.js';
+import { designStatus } from '../features/editors/designStatus.js';
+import { takePendingPrompt } from '../features/landing/pendingPrompt.js';
 import { WaveformChart } from '../features/waveform/WaveformChart.jsx';
 import { CircuitDiagram } from '../features/schematic/CircuitDiagram.jsx';
 import { KiCanvasEmbed } from '../features/kicanvas/KiCanvasEmbed.jsx';
@@ -112,6 +114,7 @@ function App() {
   const [isSimulating, setIsSimulating] = useState(false);
   const [theme, setTheme] = useState(loadTheme);
   const [userBarOpen, setUserBarOpen] = useState(false);
+  const [runSlot, setRunSlot] = useState(null); // top-bar host for the breadboard's Run/Stop
   // Bumped after each AI call so the daily-usage ring re-fetches its status.
   const [usageRefreshKey, setUsageRefreshKey] = useState(0);
   const refreshUsage = () => setUsageRefreshKey((key) => key + 1);
@@ -170,6 +173,13 @@ function App() {
     }));
   };
   const setPrompt = (value) => setChatField('draft', value);
+
+  // A prompt typed on the landing page before signing in lands in the draft.
+  useEffect(() => {
+    if (!user) return;
+    const pending = takePendingPrompt();
+    if (pending) setPrompt(pending);
+  }, [user]);
   const setComposerMode = (value) => setChatField('draftMode', COMPOSER_MODES.includes(value) ? value : 'implement');
   const setEditableSpice = (value) => setChatField('editableSpice', value);
   const setEditableCircuitJson = (value) => setChatField('editableCircuitJson', value);
@@ -1590,6 +1600,7 @@ function App() {
           firmware={editableCode || result?.code || ''}
           onCompileFirmware={compileFirmware}
           windowControls={renderWindowControls('realisticSchematic', 'realistic-window-controls')}
+          runControlHost={runSlot}
         />
       )}
     </div>
@@ -1795,35 +1806,71 @@ function App() {
     );
   }
 
+  const status = designStatus({
+    hasCircuit: Boolean(result?.circuit),
+    issues: circuitQualityIssues(result),
+    pcbLayout,
+  });
+
   return (
     <main className="app-shell">
-      <div className={`user-bar app-user-bar ${userBarOpen ? 'is-open' : ''}`}>
-        <button
-          type="button"
-          className="user-bar-toggle"
-          onClick={() => setUserBarOpen((open) => !open)}
-          aria-expanded={userBarOpen}
-          aria-label={userBarOpen ? 'Close account menu' : 'Open account menu'}
-          title="Account"
-        >
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-            <circle cx="12" cy="8" r="4" fill="currentColor" />
-            <path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" fill="currentColor" />
-          </svg>
-        </button>
-        <div className="user-bar-items" aria-hidden={!userBarOpen}>
-          <ThemeToggle theme={theme} onToggle={toggleTheme} />
-          <UsageMeter refreshKey={usageRefreshKey} />
-          <button
-            type="button"
-            onClick={() => { window.location.hash = 'connect'; setPage('connect'); }}
-          >
-            Connect to Claude
-          </button>
-          <span>{user.email}</span>
-          <button type="button" onClick={logout}>Log out</button>
+      <header className="app-topbar">
+        <a href="#home" className="brand-sticker">Impedo</a>
+        <nav className="view-segments" aria-label="Editor windows">
+          {Object.entries(EDITOR_VIEW_LABELS).map(([view, label], index) => (
+            <React.Fragment key={view}>
+              {index > 0 && <span className="segment-arrow" aria-hidden="true">→</span>}
+              <button
+                type="button"
+                className={`${openEditorViews.includes(view) ? 'open' : ''} ${activeEditorView === view ? 'active' : ''}`}
+                aria-pressed={activeEditorView === view}
+                onClick={() => openEditorView(view)}
+              >
+                {label}
+              </button>
+            </React.Fragment>
+          ))}
+        </nav>
+        <div className="topbar-right">
+          {status && (
+            <span
+              className={`design-status tone-${status.tone}`}
+              role="status"
+              title="Validation, topology rules and board layout, in one verdict"
+            >
+              {status.label}
+            </span>
+          )}
+          <div className="topbar-run-slot" ref={setRunSlot} />
+          <div className={`user-bar app-user-bar ${userBarOpen ? 'is-open' : ''}`}>
+            <button
+              type="button"
+              className="user-bar-toggle"
+              onClick={() => setUserBarOpen((open) => !open)}
+              aria-expanded={userBarOpen}
+              aria-label={userBarOpen ? 'Close account menu' : 'Open account menu'}
+              title="Account"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <circle cx="12" cy="8" r="4" fill="currentColor" />
+                <path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" fill="currentColor" />
+              </svg>
+            </button>
+            <div className="user-bar-items" aria-hidden={!userBarOpen}>
+              <ThemeToggle theme={theme} onToggle={toggleTheme} />
+              <UsageMeter refreshKey={usageRefreshKey} />
+              <button
+                type="button"
+                onClick={() => { window.location.hash = 'connect'; setPage('connect'); }}
+              >
+                Connect to Claude
+              </button>
+              <span>{user.email}</span>
+              <button type="button" onClick={logout}>Log out</button>
+            </div>
+          </div>
         </div>
-      </div>
+      </header>
       <ImportCircuitDialog
         open={importOpen}
         onClose={() => setImportOpen(false)}
@@ -1856,26 +1903,11 @@ function App() {
         />
 
         <section className="main-panel editor-workbench">
-          <nav className="editor-launchbar" aria-label="Editor windows">
-            {Object.entries(EDITOR_VIEW_LABELS).map(([view, label]) => {
-              const isOpen = openEditorViews.includes(view);
-              return (
-                <button
-                  className={`${isOpen ? 'open' : ''} ${activeEditorView === view ? 'active' : ''}`}
-                  key={view}
-                  onClick={() => openEditorView(view)}
-                  type="button"
-                >
-                  {isOpen ? label : `+ ${label}`}
-                </button>
-              );
-            })}
-          </nav>
 
           {openEditorViews.length === 0 ? (
             <section className="workbench-empty">
               <h3>All editor windows are closed</h3>
-              <p>Open Code or Breadboard from the bar above.</p>
+              <p>Pick Breadboard, Code or 3D PCB in the top bar.</p>
             </section>
           ) : (
             renderEditorLayout()

@@ -4,6 +4,7 @@
 // anchored under the cursor), two-finger trackpad to pan. Clicking a part or
 // wire highlights its electrical neighborhood (dim-others); hover previews it.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { DEFAULT_PIN_COUNT_BY_KIND, SPICE_PREFIX_BY_KIND } from '../../core/componentKinds.js';
 import { downloadText } from '../../core/download.js';
 import { formatSI } from '../../core/sim/simObservables.js';
@@ -73,7 +74,7 @@ const midpoint = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
 
 const netDisplayName = (net) => (net === GROUND_NET ? 'GND' : net);
 
-export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayoutChange, issues, firmware, onCompileFirmware, windowControls }) {
+export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayoutChange, issues, firmware, onCompileFirmware, windowControls, runControlHost }) {
   const model = useMemo(
     () => circuitToBreadboard(circuit, reconcileOverrides(overrides, circuit) ?? {}),
     [circuit, overrides],
@@ -643,18 +644,25 @@ export function RealisticSchematic({ circuit, overrides, onCircuitChange, onLayo
         ? (simFrame.speed >= 0.95 ? '1.0×' : `${simFrame.speed.toFixed(1)}× (slow)`)
         : 'live';
 
+  // The Run/Stop control renders in the toolbar by default; when the shell
+  // hands over a host element (the top bar's run slot) it portals there
+  // instead, so the simulation state stays owned here.
+  const runButton = (
+    <button
+      type="button"
+      className={`realistic-run ${running ? 'running' : ''}`}
+      onClick={toggleRun}
+      disabled={compiling}
+      title={running ? 'Stop the live simulation' : 'Simulate this circuit live on the board'}
+    >
+      {compiling ? '⏳ Compiling…' : running ? '■ Stop' : '▶ Run'}
+    </button>
+  );
+
   return (
     <div className="realistic-schematic">
       <div className="realistic-toolbar">
-        <button
-          type="button"
-          className={`realistic-run ${running ? 'running' : ''}`}
-          onClick={toggleRun}
-          disabled={compiling}
-          title={running ? 'Stop the live simulation' : 'Simulate this circuit live on the board'}
-        >
-          {compiling ? '⏳ Compiling…' : running ? '■ Stop' : '▶ Run'}
-        </button>
+        {runControlHost ? createPortal(runButton, runControlHost) : runButton}
         {simStatusText && (
           <span className={`realistic-sim-status ${simFrame.converged ? '' : 'warn'}`}>{simStatusText}</span>
         )}
