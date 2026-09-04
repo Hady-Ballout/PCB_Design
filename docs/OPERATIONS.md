@@ -33,8 +33,9 @@ the frontend expects `VITE_API_URL` (see below) or same-origin `/api`.
 | `MAX_BODY_BYTES` | max request body size before a `413` is returned (default `4 MiB`) |
 | `DATABASE_URL` | Postgres/Neon connection string; **omit for local dev** to use the in-memory user store seeded with a local admin (see `docs/BACKEND.md`) |
 | `PG_CA_CERT`, `PG_SSL_NO_VERIFY` | Postgres TLS: certificate verification is **on** by default; point `PG_CA_CERT` at a CA bundle, or set `PG_SSL_NO_VERIFY=1` to disable verification (local/self-signed only) |
-| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` (+ optional `SMTP_PORT`, `SMTP_SECURE`, `EMAIL_FROM`, `EMAIL_FROM_NAME`) | signup verification email over any SMTP relay (`server/auth/mailer.ts`). Gmail: `smtp.gmail.com`, port 587, your address, an App Password. Preferred transport; needs no provider approval |
-| `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` | fallback transport via the Brevo API, used only when `SMTP_HOST` is unset. Either way, if the send fails signup rolls the account back and returns **503** rather than telling the user to check their inbox; `GET /api/health` reports `email: "configured" \| "missing"` |
+| `MAILJET_API_KEY`, `MAILJET_SECRET_KEY`, `MAILJET_SENDER_EMAIL` (+ optional `EMAIL_FROM_NAME`) | signup verification email via the Mailjet Send API (`server/auth/mailer.ts`). Sender must be a validated sender address in the Mailjet account. Preferred transport: HTTPS, free tier, no domain needed |
+| `BREVO_API_KEY`, `BREVO_SENDER_EMAIL`, `BREVO_SENDER_NAME` | second transport, the Brevo transactional API, used when Mailjet is unset |
+| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` (+ optional `SMTP_PORT`, `SMTP_SECURE`, `EMAIL_FROM`, `EMAIL_FROM_NAME`) | third transport, any SMTP relay (Gmail App Password etc.). **Render free instances block outbound SMTP ports** (changelog 2025-09-26), so this only works locally or on a paid instance. Whichever transport runs, if the send fails signup rolls the account back and returns **503** rather than telling the user to check their inbox; `GET /api/health` reports `email: "configured" \| "missing"` |
 | `VITE_API_URL` | frontend's API base when not same-origin/proxied |
 | `STRIPE_SECRET_KEY` | Stripe API key (`sk_test_...` / `sk_live_...`); **unset = billing disabled** (routes 503, quotas skipped) |
 | `STRIPE_WEBHOOK_SECRET` | signing secret (`whsec_...`) of the webhook endpoint / `stripe listen` session |
@@ -165,11 +166,12 @@ A second, fully separate production stack owned by the founder account, set up
 - **Backend:** Render free web service `festo-ai` built from the `Dockerfile` on
   `main`, at https://festo-ai.onrender.com. Env: `JWT_SECRET`, `CORS_ORIGIN` and
   `APP_URL` (both `https://festo-ai.web.app`), plus an email transport —
-  `SMTP_HOST=smtp.gmail.com`, `SMTP_USER=<gmail address>`, `SMTP_PASS=<Google
-  App Password>` (Brevo phone verification did not deliver SMS to a Lebanese
-  number, so Gmail SMTP is the working choice). Without a transport signup
-  cannot deliver verification emails and returns 503. Auto-deploys on push to
-  `main`.
+  `MAILJET_API_KEY`, `MAILJET_SECRET_KEY`, `MAILJET_SENDER_EMAIL`. History:
+  Brevo's phone verification never delivered SMS to a Lebanese number, and
+  Gmail SMTP authenticated fine but Render's free tier blocks outbound SMTP
+  ports, so Mailjet's HTTPS API is the working choice. Without a transport
+  signup cannot deliver verification emails and returns 503. Auto-deploys on
+  push to `main`.
   Free instances sleep after 15 min idle and keep users in memory (no
   `DATABASE_URL`), so accounts reset on every restart.
 - **Deploy the frontend:** `npm run deploy:festo` — builds with `--mode festo`

@@ -1,13 +1,16 @@
 import nodemailer from 'nodemailer';
 import { parseAllowedOrigins } from '../cors.js';
 
-// Verification-email delivery. Two transports, chosen by environment:
+// Verification-email delivery. Three transports, chosen by environment, in
+// this priority order:
 //
-//   1. Generic SMTP (SMTP_HOST + SMTP_USER + SMTP_PASS) — works with Gmail
-//      (App Password), Resend, Brevo's SMTP relay, SES, etc. Preferred when
-//      present because it needs no provider-specific account approval.
-//   2. Brevo transactional API (BREVO_API_KEY) — the original path, kept as a
-//      fallback for deployments that already have it.
+//   1. Mailjet Send API (MAILJET_API_KEY + MAILJET_SECRET_KEY +
+//      MAILJET_SENDER_EMAIL) — HTTPS, free tier, verified sender address only,
+//      no domain or phone check needed.
+//   2. Brevo transactional API (BREVO_API_KEY) — HTTPS, the original path.
+//   3. Generic SMTP (SMTP_HOST + SMTP_USER + SMTP_PASS) — Gmail App Password,
+//      Resend, SES, etc. Last because hosts such as Render's free tier block
+//      outbound SMTP ports entirely, so an HTTP API must win when both exist.
 //
 // Signup treats a throw here as "the account cannot be verified" and rolls
 // the user back, so failures must surface as exceptions, never be swallowed.
@@ -19,8 +22,12 @@ function smtpConfigured(): boolean {
   return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
 }
 
+function mailjetConfigured(): boolean {
+  return Boolean(process.env.MAILJET_API_KEY && process.env.MAILJET_SECRET_KEY && process.env.MAILJET_SENDER_EMAIL);
+}
+
 export function isEmailConfigured(): boolean {
-  return smtpConfigured() || Boolean(process.env.BREVO_API_KEY);
+  return mailjetConfigured() || Boolean(process.env.BREVO_API_KEY) || smtpConfigured();
 }
 
 // Canonical frontend URL for the verify link. Prefer APP_URL — the same
@@ -77,6 +84,35 @@ async function sendViaSmtp(to: string, html: string): Promise<void> {
   });
 }
 
+async function sendViaMailjet(to: string, html: string): Promise<void> {
+  const apiKey = process.env.MAILJET_API_KEY as string;
+  const secretKey = process.env.MAILJET_SECRET_KEY as string;
+  const senderEmail = process.env.MAILJET_SENDER_EMAIL as string;
+  const senderName = process.env.EMAIL_FROM_NAME || DEFAULT_FROM_NAME;
+
+  const response = await fetch('https://api.mailjet.com/v3.1/send', {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${apiKey}:${secretKey}`).toString('base64')}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({
+      Messages: [{
+        From: { Email: senderEmail, Name: senderName },
+        To: [{ Email: to }],
+        Subject: SUBJECT,
+        HTMLPart: html,
+      }],
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Mailjet error ${response.status}: ${err}`);
+  }
+}
+
 async function sendViaBrevo(to: string, html: string): Promise<void> {
   const apiKey = process.env.BREVO_API_KEY as string;
   const senderEmail = process.env.BREVO_SENDER_EMAIL || 'noreply@pcbpilot.com';
@@ -105,7 +141,11 @@ async function sendViaBrevo(to: string, html: string): Promise<void> {
 
 export async function sendVerificationEmail(to: string, token: string): Promise<void> {
   const html = verificationHtml(token);
-  if (smtpConfigured()) return sendViaSmtp(to, html);
+  if (mailjetConfigured()) return sendViaMailjet(to, html);
   if (process.env.BREVO_API_KEY) return sendViaBrevo(to, html);
-  throw new Error('No email transport configured: set SMTP_HOST/SMTP_USER/SMTP_PASS or BREVO_API_KEY.');
+  if (smtpConfigured()) return sendViaSmtp(to, html);
+  throw new Error(
+    'No email transport configured: set MAILJET_API_KEY/MAILJET_SECRET_KEY/MAILJET_SENDER_EMAIL, '
+    + 'BREVO_API_KEY, or SMTP_HOST/SMTP_USER/SMTP_PASS.',
+  );
 }
